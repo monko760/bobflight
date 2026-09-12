@@ -45,7 +45,7 @@ export interface AxisFaceDef {
 
 export const AXIS_FACES: readonly AxisFaceDef[] = (["+x","-x","+y","-y","+z","-z"] as const).map((key,index)=>({
   key,index,bit:1<<index,label:`${key.toUpperCase()} face`,shortLabel:key.toUpperCase(),
-  description:`Rotate until raw ${key.slice(1).toUpperCase()} is near ${key[0]}1 g and the other two raw axes are near zero. Do not assume the board's nose or mounting direction.`,
+  description:`Rotate until raw ${key.slice(1).toUpperCase()} has a dominant ${key[0]} reading. Keep the selected axis vertical; raw offsets may prevent exactly 1 g or zero on the other axes. Do not assume the board's nose or mounting direction.`,
 }));
 
 export function isFaceCaptured(calFacesBitmask: number, faceIndex: number): boolean {

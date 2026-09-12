@@ -70,7 +70,10 @@ void sc_feed(sensor_calibration_t *c,const float gyro[3],const float raw_acc[3],
     if(c->mode==SC_GYRO)sc_correct_accel(c,raw_acc,acc);
     else memcpy(acc,raw_acc,sizeof(acc));
     float norm=acc[0]*acc[0]+acc[1]*acc[1]+acc[2]*acc[2];
-    if(norm<0.81f || norm>1.21f) {
+    /* Gyro calibration still requires corrected gravity near 1 g. Raw accel
+     * staging instead uses a bounded acquisition envelope below: requiring
+     * an already-correct raw norm prevents measuring a legitimate offset. */
+    if(c->mode==SC_GYRO && (norm<0.81f || norm>1.21f)) {
         window_reset(c);c->reason="invalid-gravity-expected-0.9-to-1.1g";return;
     }
     for(unsigned i=0;i<3;i++)if(fabsf(gyro[i])>5.f) {
@@ -79,8 +82,12 @@ void sc_feed(sensor_calibration_t *c,const float gyro[3],const float raw_acc[3],
     if(c->mode==SC_ACCEL_COLLECT) {
         unsigned axis=(unsigned)c->face/2u;
         float sign=(c->face&1)?-1.f:1.f;
-        if(sign*acc[axis]<0.85f || fabsf(acc[(axis+1u)%3u])>0.15f || fabsf(acc[(axis+2u)%3u])>0.15f) {
-            window_reset(c);c->reason="wrong-face-or-not-square";return;
+        /* Raw samples are NOT treated as valid corrected gravity. Allow a
+         * limited unknown bias while requiring a dominant, correctly signed
+         * face. All six poses must later pass the joint solution checks. */
+        if(norm<0.36f || norm>2.25f || sign*acc[axis]<0.6f || sign*acc[axis]>1.4f ||
+           fabsf(acc[(axis+1u)%3u])>0.4f || fabsf(acc[(axis+2u)%3u])>0.4f) {
+            window_reset(c);c->reason="raw-face-outside-capture-envelope";return;
         }
     }
     if(c->samples==0)c->window_started=now;
@@ -114,18 +121,39 @@ bool sc_apply_accel(sensor_calibration_t *c) {
     for(unsigned i=0;i<3;i++) {
         float plus=c->face_mean[2u*i][i],minus=c->face_mean[2u*i+1u][i];
         bias[i]=(plus+minus)*0.5f;scale[i]=2.f/(plus-minus);
-        if(!isfinite(bias[i]) || !isfinite(scale[i]) || fabsf(bias[i])>0.1f || scale[i]<0.9f || scale[i]>1.1f) {
+        if(!isfinite(bias[i]) || !isfinite(scale[i]) || fabsf(bias[i])>0.3f || scale[i]<0.9f || scale[i]>1.1f) {
             c->reason="implausible-coefficients-check-sensor";return false;
         }
     }
-    for(unsigned face=0;face<6;face++)for(unsigned axis=0;axis<3;axis++) {
-        float expected=axis==face/2u?((face&1u)?-1.f:1.f):0.f;
-        float corrected=(c->face_mean[face][axis]-bias[axis])*scale[axis];
-        if(!isfinite(corrected) || fabsf(corrected-expected)>0.1f) {
-            c->reason="pose-residual-too-large-recapture";return false;
+    /* Deliberate bench-only bias budget, not a sensor datasheet tolerance.
+     * A vector bound prevents stacking the per-axis allowance on all axes. */
+    float bias_norm2=0.f;
+    for(unsigned axis=0;axis<3;axis++)bias_norm2+=bias[axis]*bias[axis];
+    if(bias_norm2>0.09f) {c->reason="offset-too-large-check-hardware";return false;}
+    /* Three independent opposite-face midpoints must describe the same
+     * 3-D bias. Bad poses or changing offsets cannot be normalized away. */
+    for(unsigned pair=0;pair<3;pair++)for(unsigned axis=0;axis<3;axis++) {
+        float midpoint=(c->face_mean[2u*pair][axis]+c->face_mean[2u*pair+1u][axis])*0.5f;
+        if(!isfinite(midpoint) || fabsf(midpoint-bias[axis])>0.05f) {
+            c->reason="opposite-face-centers-disagree-recapture";return false;
+        }
+    }
+    for(unsigned face=0;face<6;face++) {
+        float corrected_norm2=0.f;
+        for(unsigned axis=0;axis<3;axis++) {
+            float expected=axis==face/2u?((face&1u)?-1.f:1.f):0.f;
+            float corrected=(c->face_mean[face][axis]-bias[axis])*scale[axis];
+            if(!isfinite(corrected) || fabsf(corrected-expected)>0.1f) {
+                c->reason="pose-residual-too-large-recapture";return false;
+            }
+            corrected_norm2+=corrected*corrected;
+        }
+        if(corrected_norm2<0.81f || corrected_norm2>1.21f) {
+            c->reason="corrected-gravity-invalid-recapture";return false;
         }
     }
     memcpy(c->accel_bias,bias,sizeof(bias));memcpy(c->accel_scale,scale,sizeof(scale));
-    c->accel_valid=true;c->mode=SC_COMPLETE;c->reason="accel-calibrated-ram-only";
+    c->accel_valid=true;c->mode=SC_COMPLETE;
+    c->reason=bias_norm2>0.01f?"accel-calibrated-large-offset-check-hardware-ram-only":"accel-calibrated-ram-only";
     return true;
 }

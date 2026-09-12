@@ -32,9 +32,9 @@ recalibration within the same boot.
    healthy readings and configuration diagnostics. Gyro bias normally calibrates
    at startup; the button starts a new explicit stationary window.
 2. For acceleration, start a six-face session. For each signed raw axis (+X,
-   -X, +Y, -Y, +Z, -Z), orient the board until that raw axis is near the selected
-   +1 or -1 g and the other two are near zero, then capture without moving it.
-   Raw means uncalibrated values after the existing board-axis rotation; it
+   -X, +Y, -Y, +Z, -Z), orient the selected axis physically vertical and check that its raw reading
+   has the selected sign and dominates the other axes, then capture without
+   moving it. Unknown offsets can move the readings away from exactly ±1 g/zero. Raw means uncalibrated values after the existing board-axis rotation; it
    does not mean a guessed nose/wing/upside-down mounting direction.
 3. Only after all six faces pass, Apply installs the diagonal bias/scale
    solution atomically. Verify corrected acceleration near 1 g in multiple
@@ -43,23 +43,53 @@ recalibration within the same boot.
 
 Gyro windows require at least 1000 distinct millisecond samples and at least
 1000 elapsed milliseconds. Face windows require 500 samples and 500 ms.
-Movement, gaps over 20 ms, incorrect pose or gravity outside 0.9–1.1 g resets
-collection. Gyro rates must be within ±5 dps; standard deviations must be at
-most 0.2 dps for gyro and 0.02 g for acceleration. Selected face must be dominant
-(>0.85 g in its signed direction) and orthogonal raw axes within ±0.15 g.
-Collection times out after 30 seconds; a six-face session expires at 5 minutes.
+Movement, gaps over 20 ms and invalid pose reset collection. Gyro rates must
+be within ±5 dps; standard deviations must be at most 0.2 dps for gyro and
+0.02 g for acceleration. Collection times out after 30 seconds; a six-face
+session expires at 5 minutes. These timing/movement guards are unchanged.
 
-The diagonal solve is `bias=(positive+negative)/2`,
-`scale=2/(positive-negative)`, corrected value `(raw-bias)*scale`.
-All coefficients are checked before applying: absolute bias ≤0.1 g, scale
-0.9–1.1, finite values and each corrected face component within 0.1 g of its
-ideal signed-axis pose. This is not a full cross-axis/misalignment matrix fit.
+### Raw acquisition versus corrected validation
 
-If acceleration repeatedly measures about 0.82 g **while held stationary**,
-calibration will not paper over it. Inspect raw values and register readback,
-verify the sensor identity/configuration and repeat measurements. A low value
-while moving is not by itself proof of a hardware defect. No acceptance gate
-has been widened to make the previous low-gravity report pass.
+Gyro calibration still requires **corrected** gravity within 0.9–1.1 g. Before
+an accelerometer solution exists, raw gravity can lie outside that interval
+because of an offset. Requiring the same near-1-g norm for raw six-face capture
+was a circular prerequisite in PR10, corrected by this update.
+
+Only accelerometer staging uses the broader raw envelope: norm 0.6–1.5 g,
+selected signed component 0.6–1.4 g, orthogonal components within ±0.4 g. This
+allows modest unknown offsets on all three axes, while excluding wrong signs,
+freefall, saturation and grossly wrong poses. Capture is **not** approval of
+the sensor, and these are not relaxed flight/gyro-validity gates.
+
+Apply still requires every face. The diagonal solve is
+`bias=(positive+negative)/2`, `scale=2/(positive-negative)`, corrected value
+`(raw-bias)*scale`. It never normalizes individual samples to unit length.
+Validation is joint and atomic:
+
+- Finite coefficients; scale remains 0.9–1.1. Absolute bias is ≤0.3 g per
+  axis **and** the full bias vector length must be ≤0.3 g. This is an explicit
+  experimental bench budget, not a claim about MPU6000 datasheet tolerance.
+- All three opposite-face pair midpoints must agree with the same 3-D bias
+  within 0.05 g per component. Changing offsets/inconsistent poses are refused.
+- Every corrected face component must remain within 0.1 g of its ideal signed
+  pose, and each corrected norm must be within 0.9–1.1 g. This is not a full
+  cross-axis/misalignment fit. All checks precede any coefficient write.
+
+An accepted offset vector above 0.1 g produces a large-offset/hardware-check
+reason. Such a correction is for diagnosis, not flight qualification; inspect
+hardware and check additional stationary orientations/repeatability. Existing
+applied coefficients survive failed Apply/cancel. If gyro calibration was
+blocked initially, explicitly re-run it after a successful accelerometer Apply.
+
+Robert reported approximately 0.815 g upright and 1.2 g inverted. These are
+magnitudes from approximate observations, not a verified signed calibration
+pair. A synthetic +0.8/-1.2 g pair corresponds to a -0.2 g bias with unit
+sensitivity and is covered by the new end-to-end capture/solve test. A uniformly
+low ±0.82 g signal still fails Apply's unchanged scale bounds: the solver does
+not quietly enlarge the scale allowance. A raw stationary 0.82 g reading alone
+is neither proof of a defective sensor nor sufficient evidence to apply any
+correction. Register configuration, sign, full six-face geometry and physical
+repeatability must be checked; this patch does not establish the hardware cause.
 
 ## Protocol and UI freshness
 
@@ -103,8 +133,8 @@ changed by this feature.
 
 ## Validation boundary
 
-Host tests cover engine mathematics, stationary/motion/noise gates, rejected
-0.82 g, nonfinite data, duplicate timestamps, timeouts/wrap, failed/cancelled
+Host tests cover engine mathematics, stationary/motion/noise gates, uncalibrated-gyro rejection of
+0.82 g and uniform-low-sensitivity Apply rejection, nonfinite data, duplicate timestamps, timeouts/wrap, failed/cancelled
 staging, register mismatch/data-ready behavior and manual-session expiration.
 CLI tests cover exact face argument mapping and armed/motor/USB/health/config/
 stale refusal. Configurator tests cover framing, allowlisting, strict parsing,
