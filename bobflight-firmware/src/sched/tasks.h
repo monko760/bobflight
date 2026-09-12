@@ -24,6 +24,8 @@ void bg_rx_poll(void);
 void bg_cli_poll(void);
 void bg_failsafe_tick(void);
 bool bench_motor_test(unsigned motor);
+/** Test queued/running, or nonzero output not yet replaced by a stop frame. */
+bool bench_motor_active(void);
 /** Spin motors 1..4 in order (RR, FR, RL, FL), 1s each, props-off bench use. */
 bool bench_motor_seq_start(void);
 

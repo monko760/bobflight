@@ -21,12 +21,15 @@ static uint64_t last_sample;
 static float sample_dt=0.001f;
 static bool sample_ok,arm_low_seen;
 static unsigned bench_motor;
+/* Remain busy until a cascade has actually submitted the stop frame. */
+static bool bench_output_pending;
+bool bench_motor_active(void){return bench_motor != 0u || bench_output_pending;}
 static uint32_t bench_started;
 static unsigned bench_seq_step; /* 0 = single test; 1..4 = running sequence */
 bool bench_motor_test(unsigned motor){
     if(motor==0){bench_motor=0;bench_seq_step=0;return true;}
     if(motor>4 || arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
-    bench_motor=motor;bench_started=hal_millis();return true;
+    bench_seq_step=0;bench_motor=motor;bench_started=hal_millis();return true;
 }
 
 bool bench_motor_seq_start(void){
@@ -99,7 +102,7 @@ void loop_mixer_dshot(void)
         mixer_update(&g_pid, throttle, g_motors);
     }
     if(bench_motor) {
-        if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected()) {bench_motor=0;bench_seq_step=0;}
+        if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy()) {bench_motor=0;bench_seq_step=0;}
         else {
             const uint32_t bench_dt=(uint32_t)(hal_millis()-bench_started);
             if(bench_dt<1000u) g_motors[bench_motor-1]=0.08f;
@@ -110,6 +113,9 @@ void loop_mixer_dshot(void)
         }
     }
     dshot_write(g_motors);
+    bench_output_pending=false;
+    for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)
+        if(g_motors[i]>0.f)bench_output_pending=true;
 }
 
 void bg_rx_poll(void)
