@@ -5,6 +5,11 @@
  * Host unit checks for DShot300 packet CRC + CCR bit-timing expand.
  */
 #include "drivers/dshot.h"
+/* --- stubs for symbols dshot.c now references --- */
+#include "flight/arming.h"
+arm_state_t arming_state(void) { return ARM_DISARMED; }
+bool hal_tim_dma_set_bit_rate(uint32_t hz) { return hz==300000u || hz==600000u; }
+
 
 #include <stdio.h>
 #include <string.h>

@@ -47,6 +47,8 @@ static void cmd_help(void)
         "  calibrate_gyro - stationary gyro calibration\r\n"
         "  receiver_uart <1|2|3|4|6|7> - receiver port until reboot\r\n"
         "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n"
+        "  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n"
+        "  dshot [300|600] - show or switch DShot bit rate\r\n"
         "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
         "  disarm   - disarm\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
@@ -234,6 +236,20 @@ static void handle_line(char *line)
         unsigned motor=99;char extra;
         if(sscanf(line+11,"%u %c",&motor,&extra)==1 && bench_motor_test(motor))cli_write_str("motor test accepted (one second maximum)\r\n");
         else cli_write_str("motor test refused\r\n");
+    } else if(strcmp(line,"motor_seq")==0){
+        if(bench_motor_seq_start())cli_write_str("sequence running: RR FR RL FL, 1s each - watch spin direction\r\n");
+        else cli_write_str("motor_seq refused (disarmed, USB CDC and healthy DShot required)\r\n");
+    } else if(strcmp(line,"dshot")==0){
+        char buf[48];
+        snprintf(buf,sizeof(buf),"dshot: %u kbps\r\n",dshot_speed_kbps());
+        cli_write_str(buf);
+    } else if(strncmp(line,"dshot ",6)==0){
+        unsigned kbps=0;char extra;
+        if(sscanf(line+6,"%u %c",&kbps,&extra)==1 && dshot_set_speed_kbps(kbps)){
+            char buf[48];
+            snprintf(buf,sizeof(buf),"dshot: switched to %u kbps\r\n",dshot_speed_kbps());
+            cli_write_str(buf);
+        }else cli_write_str("dshot speed refused (300 or 600, disarmed only)\r\n");
     } else if (strcmp(line, "reboot") == 0) {
         cli_write_str("reboot...\r\n");
         g_reboot_req = true;
