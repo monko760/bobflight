@@ -116,6 +116,9 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_pid_elapsed_test src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c)
+  target_link_libraries(bobflight_pid_elapsed_test m)
+  add_test(NAME pid_elapsed COMMAND bobflight_pid_elapsed_test)
   add_executable(bobflight_cycle_clock_test tests/host_cycle_clock.c)
   add_test(NAME cycle_clock COMMAND bobflight_cycle_clock_test)
   add_executable(bobflight_f7_clock_test src/hal/stm32f7/hal_clock.c tests/host_f7_clock.c)

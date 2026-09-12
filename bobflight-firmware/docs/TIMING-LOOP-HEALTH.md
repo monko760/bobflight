@@ -121,10 +121,11 @@ not an independent final-patch signoff or a complete repository license audit.
 All new code/tests are original Apache-2.0; no third-party source, new dependencies
 or GPL implementations were imported. Existing dependencies remain unchanged.
 
-One additional confirmed architecture gap remains deferred: `loop_pid()` passes
+The subsequent [PID elapsed-time correction](PID-ELAPSED-TIME.md) addresses this
+confirmed architecture gap: previously `loop_pid()` passed
 its latest gyro sample interval to PID even if PID divider is greater than one.
-That is not the elapsed interval between PID executions. Current divider 1 is
-unchanged; do not raise the divider for flight until PID timing is addressed.
+That was not the elapsed interval between PID executions. Current divider 1 is
+unchanged; the correction does not qualify higher dividers for flight.
 Angle-only routing and RAM-only persistence also remain separate milestones.
 
 ## Bench acceptance after merge

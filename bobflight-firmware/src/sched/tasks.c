@@ -19,6 +19,9 @@
 #include <math.h>
 static uint64_t last_sample;
 static float sample_dt=0.001f;
+/* PID uses its own invocation clock, never the latest gyro sample interval. */
+static uint64_t last_pid_us;
+static bool have_pid_time;
 static bool sample_ok,arm_low_seen;
 static unsigned bench_motor;
 /* Remain busy until a cascade has actually submitted the stop frame. */
@@ -67,6 +70,12 @@ void loop_filter(void)
 
 void loop_pid(void)
 {
+    const uint64_t pid_now=hal_micros();
+    const bool pid_first=!have_pid_time;
+    const uint64_t pid_elapsed=pid_first?0:pid_now-last_pid_us;
+    /* Match pid_set_dt's strict <20ms domain; never reuse stale dt on error. */
+    const bool pid_time_ok=pid_first || (pid_now>last_pid_us && pid_elapsed<20000u);
+    last_pid_us=pid_now;have_pid_time=true;
     const float *rc = rx_channels();
     float sticks[4] = {0.f, 0.f, 0.f, 0.f};
     if (rc) {
@@ -78,7 +87,7 @@ void loop_pid(void)
     /* Failsafe owns RX-loss disarm timing (staged); cascade keeps flying
      * level commands from failsafe_command_override() while the window runs. */
     const bool fs_flying = failsafe_command_override(sticks);
-    if(!sample_ok || !dshot_is_healthy()) {arming_disarm();arm_low_seen=false;}
+    if(!sample_ok || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
     else if(fs_flying) {arm_low_seen=false;}
     else if(rc[4]<0.f) {arming_disarm();arm_low_seen=true;}
     else if(rc[4]>0.5f && arm_low_seen && arming_state()!=ARM_ARMED) {
@@ -87,9 +96,15 @@ void loop_pid(void)
         if(gyro_calibrated() && attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f && arming_try_arm())arm_low_seen=false;
     }
     attitude_setpoint(sticks,g_setpoint);
-    pid_set_dt(sample_dt);
-    if(arming_state()!=ARM_ARMED || sticks[3]<0.05f){pid_init();g_pid=(pid_axis_out_t){0};}
-    else pid_update(g_gyro_filt,g_setpoint,&g_pid);
+    if(arming_state()!=ARM_ARMED || sticks[3]<0.05f){
+        pid_init();g_pid=(pid_axis_out_t){0};have_pid_time=false;
+    } else if(pid_first){
+        /* Prime after startup/disarm/low throttle; no invented first interval. */
+        pid_init();g_pid=(pid_axis_out_t){0};
+    } else {
+        pid_set_dt((float)pid_elapsed*0.000001f);
+        pid_update(g_gyro_filt,g_setpoint,&g_pid);
+    }
 }
 
 void loop_mixer_dshot(void)
