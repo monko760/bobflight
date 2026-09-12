@@ -334,8 +334,12 @@ export function SensorsPage() {
             provides at most one face. Choose its sign from the live raw readings, not a mounting assumption. One position does NOT calibrate all six faces.
           </li>
           <li>
-            <strong>Gravity ~0.82g Blocked Warning:</strong> If raw acceleration readback is near
-            ~0.82 g while held completely still, capture is blocked. Repeat the measurement and inspect configuration/raw data; do not force it to 1 g or relax the acceptance limits.
+            <strong>Raw Capture Is Not Corrected Gravity:</strong> A raw reading near 0.8 g
+            on one face and 1.2 g on its opposite can be an offset. The updated firmware
+            can stage bounded raw measurements, but Apply requires all six stationary
+            faces to agree on one offset/scale solution. Gyro calibration still needs
+            corrected gravity near 1 g; calibrate the accelerometer first if necessary.
+            A large accepted offset needs hardware investigation, not flight testing.
           </li>
           <li>
             <strong>RAM-ONLY Storage:</strong> Calibration coefficients are stored in RAM ONLY and
