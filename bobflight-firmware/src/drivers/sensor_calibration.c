@@ -153,10 +153,10 @@ bool sc_apply_accel(sensor_calibration_t *c) {
      * 3-D bias. Bad poses or changing offsets cannot be normalized away. */
     for(unsigned pair=0;pair<3;pair++)for(unsigned axis=0;axis<3;axis++) {
         float midpoint=(c->face_mean[2u*pair][axis]+c->face_mean[2u*pair+1u][axis])*0.5f;
-        if(!isfinite(midpoint) || fabsf(midpoint-bias[axis])>0.05f) {
+        if(!isfinite(midpoint) || fabsf(midpoint-bias[axis])>SC_PAIR_CENTER_MAX_G) {
             snprintf(c->apply_detail,sizeof(c->apply_detail),
-                "Pair +%c/-%c, axis %c: midpoint=%+.5f g, candidate bias=%+.5f g, difference=%+.5f g, limit=0.05000 g. Compare both pairs; this does not identify which individual pose is wrong.",
-                "XYZ"[pair],"XYZ"[pair],"XYZ"[axis],(double)midpoint,(double)bias[axis],(double)(midpoint-bias[axis]));
+                "Pair +%c/-%c, axis %c: midpoint=%+.5f g, candidate bias=%+.5f g, difference=%+.5f g, limit=%.5f g. Compare both pairs; this does not identify which individual pose is wrong.",
+                "XYZ"[pair],"XYZ"[pair],"XYZ"[axis],(double)midpoint,(double)bias[axis],(double)(midpoint-bias[axis]),(double)SC_PAIR_CENTER_MAX_G);
             c->reason="opposite-face-centers-disagree-recapture";return false;
         }
     }
@@ -165,10 +165,10 @@ bool sc_apply_accel(sensor_calibration_t *c) {
         for(unsigned axis=0;axis<3;axis++) {
             float expected=axis==face/2u?((face&1u)?-1.f:1.f):0.f;
             float corrected=(c->face_mean[face][axis]-bias[axis])*scale[axis];
-            if(!isfinite(corrected) || fabsf(corrected-expected)>0.1f) {
+            if(!isfinite(corrected) || fabsf(corrected-expected)>SC_POSE_RESIDUAL_MAX_G) {
                 snprintf(c->apply_detail,sizeof(c->apply_detail),
-                    "Face %c%c, axis %c: corrected=%+.5f g, expected=%+.5f g, difference=%+.5f g, limit=0.10000 g.",
-                    (face&1u)?'-':'+',"XYZ"[face/2u],"XYZ"[axis],(double)corrected,(double)expected,(double)(corrected-expected));
+                    "Face %c%c, axis %c: corrected=%+.5f g, expected=%+.5f g, difference=%+.5f g, limit=%.5f g.",
+                    (face&1u)?'-':'+',"XYZ"[face/2u],"XYZ"[axis],(double)corrected,(double)expected,(double)(corrected-expected),(double)SC_POSE_RESIDUAL_MAX_G);
                 c->reason="pose-residual-too-large-recapture";return false;
             }
             corrected_norm2+=corrected*corrected;
@@ -179,8 +179,10 @@ bool sc_apply_accel(sensor_calibration_t *c) {
         }
     }
     memcpy(c->accel_bias,bias,sizeof(bias));memcpy(c->accel_scale,scale,sizeof(scale));
-    snprintf(c->apply_detail,sizeof(c->apply_detail),"All six faces passed; coefficients applied in RAM, not persistent storage.");
+    snprintf(c->apply_detail,sizeof(c->apply_detail),BOBFLIGHT_ACCEL_BENCH_RELAXED?
+        "Experimental BENCH-ONLY correction applied in RAM; NOT flight-qualified. Pair limit 0.10 g, pose limit 0.15 g; large offsets still require hardware investigation.":
+        "All six faces passed; coefficients applied in RAM, not persistent storage.");
     c->accel_valid=true;c->mode=SC_COMPLETE;
-    c->reason=bias_norm2>0.01f?"accel-calibrated-large-offset-check-hardware-ram-only":"accel-calibrated-ram-only";
+    c->reason=BOBFLIGHT_ACCEL_BENCH_RELAXED?"accel-bench-relaxed-not-flight-qualified-ram-only":bias_norm2>0.01f?"accel-calibrated-large-offset-check-hardware-ram-only":"accel-calibrated-ram-only";
     return true;
 }

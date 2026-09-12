@@ -5,6 +5,7 @@
 #ifndef BOBFLIGHT_SENSOR_CLI_H
 #define BOBFLIGHT_SENSOR_CLI_H
 #include <math.h>
+#include "drivers/calibration_policy.h"
 static void cmd_sensors(bool details)
 {
     char buf[1100];
@@ -33,6 +34,7 @@ static void cmd_sensors(bool details)
         gyro_manual_calibration_active()?"yes":"no",d->config_ok?"yes":"no");
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
     cli_write_str(buf);
+    cli_write_str(BOBFLIGHT_ACCEL_BENCH_RELAXED?"cal_bench_relaxed: yes\r\n":"cal_bench_relaxed: no\r\n");
     n=snprintf(buf,sizeof(buf),"cal_apply_detail: %s\r\n",c.apply_detail?c.apply_detail:"");
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
     cli_write_str(buf);

@@ -1,5 +1,6 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 #include "drivers/gyro.h"
+#include "drivers/calibration_policy.h"
 #include "flight/arming.h"
 #include "board/board.h"
 #include "hal/hal.h"
@@ -47,12 +48,12 @@ int main(void){float d[3];b.gyro_spi_bus=4;b.gyro_cs_pin=HAL_PIN_PACK(4,4);
   val(0x3B,(int)(raw[1]*4096.f));val(0x3D,(int)(-raw[0]*4096.f));val(0x3F,(int)(raw[2]*4096.f));
   for(unsigned i=0;i<501;i++){now++;CHECK(gyro_sample(d));gyro_calibration_touch();gyro_calibration_tick();}
  }
- CHECK(gyro_apply_accel_calibration());CHECK(gyro_flight_ready());
+ CHECK(gyro_apply_accel_calibration());CHECK(gyro_flight_ready()==!BOBFLIGHT_ACCEL_BENCH_RELAXED);
  gyro_calibration_info_t info;gyro_calibration_info(&info);
- CHECK(info.accel_valid&&info.candidate_valid&&info.faces==63&&strstr(info.apply_detail,"All six faces passed"));
- now+=101;CHECK(!gyro_flight_ready());now++;CHECK(gyro_sample(d));CHECK(gyro_flight_ready());
+ CHECK(info.accel_valid&&info.candidate_valid&&info.faces==63&&strstr(info.apply_detail,BOBFLIGHT_ACCEL_BENCH_RELAXED?"NOT flight-qualified":"All six faces passed"));
+ now+=101;CHECK(!gyro_flight_ready());now++;CHECK(gyro_sample(d));CHECK(gyro_flight_ready()==!BOBFLIGHT_ACCEL_BENCH_RELAXED);
  val(0x3F,6000);now++;CHECK(gyro_sample(d));CHECK(!gyro_flight_ready());
- val(0x3F,3277);now++;CHECK(gyro_sample(d));CHECK(gyro_flight_ready());
+ val(0x3F,3277);now++;CHECK(gyro_sample(d));CHECK(gyro_flight_ready()==!BOBFLIGHT_ACCEL_BENCH_RELAXED);
  CHECK(gyro_diagnostics()->config_ok);
  uint32_t seq=gyro_diagnostics()->sample_seq;
  regs[0x3a]=0;now++;CHECK(gyro_sample(d));CHECK(gyro_diagnostics()->sample_seq==seq);

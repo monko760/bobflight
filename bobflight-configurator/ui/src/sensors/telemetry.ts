@@ -31,6 +31,7 @@ export interface SensorSnapshot {
   mpu_gyro_config?: string;
   mpu_accel_config?: string;
   sensor_chip?: string;
+  cal_bench_relaxed?: boolean;
   cal_apply_detail?: string;
   cal_diagnostics_version?: number;
   cal_raw_faces?: Array<[number,number,number] | null>;
@@ -100,6 +101,10 @@ export function parseKeyValueSnapshot(rawText:string):SensorSnapshot|null {
     cal_state:kv.cal_state,cal_face:Number(kv.cal_face),cal_reason:kv.cal_reason,calibration_storage:kv.calibration_storage,rawText};
   for(const key of ["gyro_bias","accel_bias","accel_scale"] as const)if(kv[key]!==undefined){
     const v=parseThreeFloats(kv[key]);if(v.some(n=>!Number.isFinite(n)))return null;snapshot[key]=v;
+  }
+  if(kv.cal_bench_relaxed!==undefined){
+    if(kv.cal_bench_relaxed!=="yes" && kv.cal_bench_relaxed!=="no")return null;
+    snapshot.cal_bench_relaxed=kv.cal_bench_relaxed==="yes";
   }
   if(kv.cal_apply_detail!==undefined){if(kv.cal_apply_detail.length>255)return null;snapshot.cal_apply_detail=kv.cal_apply_detail;}
   if(kv.cal_diagnostics_version!==undefined) {

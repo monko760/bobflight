@@ -40,6 +40,7 @@ void gyro_cancel_manual_calibration(void){cancelled++;}
 static bool command(const char *s){output[0]=0;return cmd_sensor_command(s);}
 int main(void){
  CHECK(command("sensors"));CHECK(strstr(output,"sensors_end: 1\r\n"));CHECK(strstr(output,"sensor_age_ms: 0\r\n"));CHECK(strstr(output,"cal_manual: no"));
+ CHECK(strstr(output,"cal_bench_relaxed: no"));
  CHECK(command("calibration"));CHECK(strstr(output,"calibration_end: 1\r\n"));CHECK(strstr(output,"mpu_accel_config: 0x10"));CHECK(strstr(output,"ram-only"));
  CHECK(strstr(output,"cal_diagnostics_version: 1")&&strstr(output,"cal_raw_face_0: uncaptured"));
  report=true;CHECK(command("calibration"));
