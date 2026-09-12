@@ -20,6 +20,11 @@
 
 #include <stdint.h>
 
+/* Normal builds keep sticky fault stages, but skip blocking success patterns. */
+#ifndef BOBFLIGHT_BOOT_LED_DIAGNOSTICS
+#define BOBFLIGHT_BOOT_LED_DIAGNOSTICS 0
+#endif
+
 #define BOOT_CRUMB_PRE_MAIN  0u
 #define BOOT_CRUMB_MAIN      1u
 #define BOOT_CRUMB_PRE_BOARD 2u
@@ -35,7 +40,9 @@ extern volatile uint8_t g_boot_crumb;
 /** Set sticky crumb (MCU only). */
 void boot_crumb_set(uint8_t stage);
 
-/** Crude PA2 short pulse via GPIOA MMIO — no HAL / no board_mmio_permitted. */
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
+/** Crude PA2 short pulse via GPIOA MMIO — diagnostic build only. */
 void boot_pa2_crude_short_pulse(void);
+#endif
 
 #endif /* BOBFLIGHT_BOOT_CRUMB_H */

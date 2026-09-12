@@ -51,6 +51,17 @@ static void boot_busywait_ms(uint32_t ms)
 }
 #endif
 
+/* Set up the normal main-loop heartbeat without adding any startup waits. */
+static void boot_led_init(void)
+{
+    const hal_pin_t led = BOARD_GENERATED_LED0_PIN;
+    if (board_mmio_permitted() && hal_pin_valid(led)) {
+        hal_gpio_init(led, HAL_GPIO_OUT);
+        hal_gpio_write(led, true);
+    }
+}
+
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
 static void boot_led_pulses(hal_pin_t led, unsigned count, uint32_t on_ms, uint32_t off_ms)
 {
     unsigned i;
@@ -142,9 +153,13 @@ static void boot_led_crumb(void)
     hal_gpio_write(led, true); /* leave on between crumbs */
 }
 
+#endif /* BOBFLIGHT_BOOT_LED_DIAGNOSTICS */
+
 bool app_init(void)
 {
     /*
+     * Optional success-pattern legend (BOBFLIGHT_BOOT_LED_DIAGNOSTICS=1).
+     * Sticky stages and fault reporting remain active when it is OFF.
      * Boot LED legend (PA2 / led0, busywait — no SysTick):
      *   Reset: 3 slow (~250 ms half) in Reset_Handler
      *   main entry: 1 short crude PA2 (before app_init; no HAL)
@@ -168,8 +183,11 @@ bool app_init(void)
 #ifndef BOBFLIGHT_HOST
     boot_crumb_set(BOOT_CRUMB_POST_BOARD);
 #endif
-    /* Post-board: HAL LED crumb OK (MMIO permitted after IR). */
+    /* Preserve main-loop LED output setup even when success blinks are off. */
+    boot_led_init();
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
     boot_led_crumb();
+#endif
 
 #ifndef BOBFLIGHT_HOST
     boot_crumb_set(BOOT_CRUMB_PRE_CLOCK);
@@ -189,8 +207,10 @@ bool app_init(void)
 #ifndef BOBFLIGHT_HOST
     boot_crumb_set(BOOT_CRUMB_POST_CLOCK);
 #endif
-    /* 2b USB-clock LED encode (cannot hang on SysTick) — then USB ASAP */
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
+    /* Optional clock-path display; normal boots go straight to USB settle. */
     boot_led_heartbeat();
+#endif
 
 #ifndef BOBFLIGHT_HOST
     /* Brief settle so PLLQ/48 MHz is stable before OTG after DFU leave. */
@@ -217,8 +237,9 @@ bool app_init(void)
 #ifndef BOBFLIGHT_HOST
     boot_crumb_set(BOOT_CRUMB_POST_USB);
 #endif
-    /* Always chirp after USB attempt so field can see init returned. */
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
     boot_led_usb_chirp();
+#endif
 #if defined(BOBFLIGHT_USB_ONLY)
     /* USB-only diagnostic: stop before motors, gyro, RX, and persistence. */
     cli_init();
