@@ -10,6 +10,7 @@
 import {
   SETTINGS_KEYS,
   MockMotorBench,
+  mockSensorReply,
   cloneDefaultSettings,
   type SettingsKey,
 } from "@bobflight/protocol";
@@ -222,6 +223,8 @@ export class MockBobFlightHost implements BobFlightHost {
   }
 
   private handle(cmd: CliCommand): string {
+    const sensorReply = mockSensorReply(cmd, this.armed);
+    if (sensorReply !== null) return sensorReply;
     const benchReply = this.bench.handle(cmd, this.armed);
     if (benchReply !== null) return benchReply;
     switch (cmd) {

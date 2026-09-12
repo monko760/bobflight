@@ -30,7 +30,7 @@ static float bench_throttle = 0.08f;
 bool bench_motor_pulse(unsigned motor, unsigned percent){
     if(motor<1u || motor>4u || percent>BENCH_PULSE_MAX_PERCENT)return false;
     if(percent==0u){bench_motor=0;bench_seq_step=0;return true;}
-    if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
+    if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy() || gyro_manual_calibration_active())return false;
     bench_seq_step=0;bench_motor=motor;bench_throttle=(float)percent/100.f;
     bench_started=hal_millis();return true;
 }
@@ -40,7 +40,7 @@ bool bench_motor_test(unsigned motor){
 }
 
 bool bench_motor_seq_start(void){
-    if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
+    if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy() || gyro_manual_calibration_active())return false;
     bench_seq_step=1;bench_motor=1;bench_throttle=0.08f;bench_started=hal_millis();return true;
 }
 
@@ -52,6 +52,7 @@ static pid_axis_out_t g_pid;
 
 void loop_gyro(void)
 {
+    gyro_calibration_tick();
     uint64_t now=hal_micros();
     sample_dt=last_sample?(float)(now-last_sample)*0.000001f:0.001f; last_sample=now;
     sample_ok=gyro_sample(g_gyro_raw);
@@ -109,7 +110,7 @@ void loop_mixer_dshot(void)
         mixer_update(&g_pid, throttle, g_motors);
     }
     if(bench_motor) {
-        if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy()) {bench_motor=0;bench_seq_step=0;}
+        if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy() || gyro_manual_calibration_active()) {bench_motor=0;bench_seq_step=0;}
         else {
             const uint32_t bench_dt=(uint32_t)(hal_millis()-bench_started);
             if(bench_dt<1000u) g_motors[bench_motor-1]=bench_throttle;

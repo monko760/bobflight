@@ -28,7 +28,10 @@ import type {
 export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "help",
   "version",
-  "status",
+  "status", "sensors", "calibration", "calibration_cancel", "calibrate_gyro",
+  "calibrate_accel start", "calibrate_accel apply", "calibrate_accel cancel",
+  "calibrate_accel +x", "calibrate_accel -x", "calibrate_accel +y",
+  "calibrate_accel -y", "calibrate_accel +z", "calibrate_accel -z",
   "arm",
   "disarm",
   "reboot",

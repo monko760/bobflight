@@ -72,15 +72,17 @@ export class ResponseCollector {
   private readonly resolve: (text: string) => void;
   private readonly reject: (err: Error) => void;
   private readonly idleMs: number;
+  private readonly endMarker?: string;
 
   constructor(
     resolve: (text: string) => void,
     reject: (err: Error) => void,
-    opts: { idleMs?: number; timeoutMs?: number } = {}
+    opts: { idleMs?: number; timeoutMs?: number; endMarker?: string } = {}
   ) {
     this.resolve = resolve;
     this.reject = reject;
     this.idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
+    this.endMarker = opts.endMarker;
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.hardTimer = setTimeout(() => {
       this.finish(true);
@@ -91,6 +93,13 @@ export class ResponseCollector {
     if (this.settled) return;
     this.chunks.push(text);
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.endMarker) {
+      // Only sensor queries use explicit framing. Never return partial snapshots
+      // merely because USB packets pause; leave all legacy/motor framing alone.
+      const lines = this.chunks.join("").split(/\r\n|\n|\r/).slice(0, -1);
+      if (lines.includes(this.endMarker) || lines.some(line => /^unknown(?: — try help| command)?$/.test(line.trim()))) this.finish(false);
+      return;
+    }
     this.idleTimer = setTimeout(() => this.finish(false), this.idleMs);
   }
 
@@ -100,8 +109,8 @@ export class ResponseCollector {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.hardTimer) clearTimeout(this.hardTimer);
     const text = this.chunks.join("");
-    if (fromTimeout && text.length === 0) {
-      this.reject(new Error("CLI command timed out with empty response"));
+    if (fromTimeout && (text.length === 0 || this.endMarker)) {
+      this.reject(new Error(this.endMarker ? "Incomplete sensor response: terminator missing" : "CLI command timed out with empty response"));
       return;
     }
     this.resolve(text);

@@ -35,6 +35,13 @@ export type CliCommand =
   | "arm"
   | "disarm"
   | "reboot"
+  | "sensors"
+  | "calibration"
+  | "calibration_cancel"
+  | "calibrate_accel start"
+  | "calibrate_accel apply"
+  | "calibrate_accel cancel"
+  | `calibrate_accel ${"+x" | "-x" | "+y" | "-y" | "+z" | "-z"}`
   | "calibrate_gyro"
   | "motor_seq"
   | "dshot"

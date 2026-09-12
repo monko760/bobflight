@@ -9,10 +9,41 @@
 #define BOBFLIGHT_GYRO_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct {
+    uint32_t sample_seq, sample_ms;
+    bool config_ok;
+    uint8_t gyro_config, accel_config;
+    const char *chip;
+    float raw_acc_g[3];
+} gyro_diagnostics_t;
+
+typedef struct {
+    const char *state, *reason;
+    unsigned samples, required, faces;
+    int face;
+    bool accel_valid;
+    float gyro_bias[3], accel_bias[3], accel_scale[3];
+} gyro_calibration_info_t;
+
+const gyro_diagnostics_t *gyro_diagnostics(void);
+void gyro_calibration_info(gyro_calibration_info_t *info);
+/* Parent CLI enforces disarmed, no motor output, fresh supported sensor and USB.
+ * These are nonblocking sessions; coefficients live in RAM until reboot. */
+bool gyro_start_manual_calibration(void);
+bool gyro_start_accel_calibration(void);
+bool gyro_capture_accel_face(unsigned face);
+bool gyro_apply_accel_calibration(void);
+void gyro_cancel_manual_calibration(void);
+bool gyro_manual_calibration_active(void);
+void gyro_calibration_tick(void);
+/** Sensor-query lease: manual sessions expire after two seconds without UI. */
+void gyro_calibration_touch(void);
 
 void gyro_init(void);
 void gyro_begin_calibration(void);

@@ -42,7 +42,10 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "arm",
   "disarm",
   "reboot",
-  "calibrate_gyro",
+  "calibrate_gyro", "sensors", "calibration", "calibration_cancel",
+  "calibrate_accel start", "calibrate_accel apply", "calibrate_accel cancel",
+  "calibrate_accel +x", "calibrate_accel -x", "calibrate_accel +y",
+  "calibrate_accel -y", "calibrate_accel +z", "calibrate_accel -z",
   "motor_seq",
   "dshot",
   "dshot 300",
@@ -286,9 +289,13 @@ export class BobFlightCliClient {
         },
         (err) => {
           this.collector = null;
+          // A truncated framed snapshot can leave late USB bytes in flight.
+          // Reconnect rather than risk attributing them to a later command.
+          if ((line === "sensors" || line === "calibration") && /terminator missing/.test(err.message)) void this.disconnect();
           reject(err);
         },
-        { idleMs, timeoutMs }
+        { idleMs, timeoutMs,
+          endMarker: line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
 
