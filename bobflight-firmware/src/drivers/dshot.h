@@ -34,7 +34,8 @@ void dshot_init(void);
 void motor_safe_idle(void);
 
 /* Bit-rate selection: DSHOT_KBPS_300 (default, bring-up) or DSHOT_KBPS_600.
- * Switching is refused while armed; live switch re-times the timers. */
+ * Switching is refused while armed or bench output is active/pending.
+ * Stop bench tests and wait for motors to stop before changing rate. */
 #define DSHOT_KBPS_300 300u
 #define DSHOT_KBPS_600 600u
 bool dshot_set_speed_kbps(unsigned kbps);

@@ -184,7 +184,12 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mpu6000_test src/drivers/gyro.c tests/host_mpu6000.c)
   target_compile_definitions(bobflight_mpu6000_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_mpu6000_test m)
-  foreach(check rates_math arming_edges failsafe dshot_frame dshot_speed crsf_parse gyro_inject cascade_inject attitude mpu6000)
+  add_executable(bobflight_bench_safety_test
+    src/sched/tasks.c src/flight/pid.c src/flight/mixer.c
+    src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c)
+  target_compile_definitions(bobflight_bench_safety_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_bench_safety_test m)
+  foreach(check rates_math arming_edges failsafe dshot_frame dshot_speed crsf_parse gyro_inject cascade_inject attitude mpu6000 bench_safety)
     add_test(NAME ${check} COMMAND bobflight_${check}_test)
   endforeach()
 

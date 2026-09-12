@@ -249,7 +249,7 @@ static void handle_line(char *line)
             char buf[48];
             snprintf(buf,sizeof(buf),"dshot: switched to %u kbps\r\n",dshot_speed_kbps());
             cli_write_str(buf);
-        }else cli_write_str("dshot speed refused (300 or 600, disarmed only)\r\n");
+        }else cli_write_str("dshot speed refused (300 or 600, disarmed, bench stopped only)\r\n");
     } else if (strcmp(line, "reboot") == 0) {
         cli_write_str("reboot...\r\n");
         g_reboot_req = true;

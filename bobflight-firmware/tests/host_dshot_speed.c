@@ -16,6 +16,9 @@
 
 /* --- stubs for board / HAL / drivers --- */
 static float g_rc[16];
+static bool bench_active;
+static unsigned rate_calls;
+bool bench_motor_active(void) { return bench_active; }
 
 const float *rx_channels(void)
 {
@@ -49,6 +52,7 @@ bool board_mmio_permitted(void)
 
 bool hal_tim_dma_set_bit_rate(uint32_t hz)
 {
+    rate_calls++;
     return hz == 300000u || hz == 600000u;
 }
 
@@ -108,6 +112,14 @@ int main(void)
     if (dshot_speed_kbps() != DSHOT_KBPS_300) {
         return fail("state must be unchanged after refusal");
     }
+
+    /* Bench lock must refuse before touching the HAL or changing state. */
+    bench_active = true;
+    unsigned before = rate_calls;
+    if (dshot_set_speed_kbps(600u) || dshot_set_speed_kbps(300u) ||
+        rate_calls != before || dshot_speed_kbps() != 300u)
+        return fail("bench-active switch touched hardware or state");
+    bench_active = false;
 
     /* 4. No re-timing while armed. */
     arming_set_gyro_healthy(true);

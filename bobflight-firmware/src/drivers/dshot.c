@@ -21,6 +21,7 @@
 #include <string.h>
 #include <math.h>
 #include "flight/arming.h"
+#include "sched/tasks.h"
 static bool g_output_ok;
 static unsigned g_kbps = DSHOT_KBPS_300;
 
@@ -135,8 +136,8 @@ bool dshot_set_speed_kbps(unsigned kbps)
     if (kbps != DSHOT_KBPS_300 && kbps != DSHOT_KBPS_600) {
         return false;
     }
-    if (arming_state() == ARM_ARMED) {
-        return false; /* no re-timing mid-flight */
+    if (arming_state() == ARM_ARMED || bench_motor_active()) {
+        return false; /* no re-timing in flight or during a bench pulse/sequence */
     }
     if (!hal_tim_dma_set_bit_rate(1000u * kbps)) {
         return false;
