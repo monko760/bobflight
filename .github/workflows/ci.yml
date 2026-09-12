@@ -68,6 +68,8 @@ jobs:
         run: npm --prefix protocol run smoke:settings
       - name: Motor protocol tests
         run: npm --prefix protocol run test:motors
+      - name: Receiver protocol and UI parser tests
+        run: npm --prefix ui run test:receiver
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
       - name: Sensor protocol tests

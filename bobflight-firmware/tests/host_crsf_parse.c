@@ -16,6 +16,7 @@
 #include "drivers/rx_internal.h"
 
 const board_t *board_get(void) { return NULL; }
+uint32_t hal_millis(void) { return 0; }
 bool board_pins_live(void) { return false; }
 hal_uart_t *hal_uart_open_cfg(const hal_uart_cfg_t *cfg)
 {

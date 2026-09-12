@@ -9,6 +9,7 @@
 #include "board/board.h"
 
 #include <string.h>
+#include <math.h>
 
 static float g_channels[RX_CHANNEL_COUNT];
 static bool g_fresh;
@@ -44,11 +45,23 @@ bool rx_frame_fresh(void)
     return g_fresh && (uint32_t)(hal_millis()-g_last_frame)<=250u;
 }
 
+uint32_t rx_frame_age_ms(void)
+{
+    return g_fresh ? (uint32_t)(hal_millis()-g_last_frame) : UINT32_MAX;
+}
+
 /* Shared with crsf stub for writing channels */
 void rx_stub_set_channels(const float *ch, unsigned n, bool fresh)
 {
     if (!ch) {
         return;
+    }
+    /* Partial or invalid controls must never reset the receiver-loss timer. */
+    if (fresh) {
+        if (n != RX_CHANNEL_COUNT) return;
+        for (unsigned i=0;i<n;i++) {
+            if (!isfinite(ch[i]) || ch[i] < (i==3 ? 0.f : -1.f) || ch[i]>1.f) return;
+        }
     }
     if (n > RX_CHANNEL_COUNT) {
         n = RX_CHANNEL_COUNT;

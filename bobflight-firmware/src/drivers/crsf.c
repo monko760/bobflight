@@ -26,6 +26,17 @@
 static hal_uart_t *g_uart;
 static uint8_t g_rxbuf[CRSF_MAX_FRAME * 2u];
 static unsigned g_rxlen;
+static bool g_taer;
+static uint32_t g_crc_errors, g_stream_resets, g_last_poll, g_last_bytes;
+static bool g_polled;
+uint32_t crsf_crc_errors(void) { return g_crc_errors; }
+uint32_t crsf_stream_resets(void) { return g_stream_resets; }
+const char *crsf_map(void) { return g_taer ? "TAER" : "AETR"; }
+bool crsf_set_map(const char *map) {
+    if (!map || (strcmp(map,"AETR") && strcmp(map,"TAER"))) return false;
+    g_taer = !strcmp(map,"TAER");
+    return true;
+}
 
 /* CRC8, poly 0xD5 (x^8+x^7+x^6+x^4+x^2+1) — public CRSF spec. */
 uint8_t crsf_crc8(const uint8_t *data, size_t len)
@@ -144,6 +155,7 @@ static void crsf_consume_frames(void)
         expect_crc = crsf_crc8(type_ptr, (size_t)len - 1u);
         got_crc = g_rxbuf[frame_bytes - 1u];
         if (expect_crc != got_crc) {
+            g_crc_errors++;
             memmove(g_rxbuf, g_rxbuf + 1, g_rxlen - 1u);
             g_rxlen--;
             continue;
@@ -170,6 +182,8 @@ static bool crsf_init(void)
     const board_t *b = board_get();
     g_uart = NULL;
     g_rxlen = 0;
+    g_crc_errors = g_stream_resets = 0;
+    g_polled = false;
     if (!b || !board_pins_live() || b->rx_uart == 0) {
         return true;
     }
@@ -192,6 +206,7 @@ static void crsf_poll(void)
     uint8_t scratch[64];
     size_t n = 0;
     float mid[4] = {0.f, 0.f, 0.f, 0.f};
+    uint32_t now = hal_millis();
 
     if (!g_uart) {
         /* Dummy / unbound — never mark fresh. */
@@ -199,11 +214,24 @@ static void crsf_poll(void)
         return;
     }
 
+    /* After a scheduler stall, bytes buffered before the stall must not
+     * revive the link. Drain at most one 512-byte UART ring, then await new data. */
+    if (g_polled && (uint32_t)(now-g_last_poll)>10u) {
+        for (unsigned i=0;i<8;i++) if (!hal_uart_read(g_uart,scratch,sizeof(scratch))) break;
+        g_rxlen=0; g_stream_resets++; g_last_poll=now;
+        return;
+    }
+    g_polled=true; g_last_poll=now;
+    if (g_rxlen && (uint32_t)(now-g_last_bytes)>10u) {
+        g_rxlen=0; g_stream_resets++;
+    }
+
     n = hal_uart_read(g_uart, scratch, sizeof(scratch));
     if (n == 0) {
         /* Bound but silent — do not invent fresh; leave last decode. */
         return;
     }
+    g_last_bytes=now;
 
     if (g_rxlen + (unsigned)n > sizeof(g_rxbuf)) {
         g_rxlen = 0; /* overflow: resync */
@@ -228,8 +256,8 @@ bool crsf_uart_bound(void)
 
 void crsf_to_controls(const float raw[16],float controls[16]) {
     memcpy(controls,raw,16*sizeof(float));
-    controls[0]=raw[0];controls[1]=raw[1];controls[2]=raw[3];
-    controls[3]=(raw[2]+1.f)*0.5f;
+    controls[0]=raw[g_taer?1:0];controls[1]=raw[g_taer?2:1];controls[2]=raw[3];
+    controls[3]=(raw[g_taer?0:2]+1.f)*0.5f;
     if(controls[3]<0.f)controls[3]=0.f;
     if(controls[3]>1.f)controls[3]=1.f;
 }

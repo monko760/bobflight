@@ -61,6 +61,15 @@ void failsafe_init(void)
     g_land_thr = FAILSAFE_DEFAULT_LAND_THROTTLE;
 }
 
+void failsafe_reset_rx_link(void)
+{
+    g_never_seen = true;
+    g_last_rx_ms = 0;
+    g_stage_ms = 0;
+    g_held_thr = 0.f;
+    g_stage = FAILSAFE_STAGE_IDLE;
+}
+
 void failsafe_note_rx_frame(uint32_t now_ms)
 {
     g_never_seen = false;

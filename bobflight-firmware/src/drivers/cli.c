@@ -6,6 +6,7 @@
 #include "drivers/gyro.h"
 #include "drivers/dshot.h"
 #include "drivers/rx.h"
+#include "drivers/crsf.h"
 #include "drivers/persist.h"
 #include "drivers/power.h"
 #include "flight/arming.h"
@@ -56,6 +57,8 @@ static void cmd_help(void)
         "  calibrate_accel <start|+x|-x|+y|-y|+z|-z|apply|cancel> - six-face calibration\r\n"
         "  calibration_cancel - cancel, retaining applied coefficients\r\n"
         "  receiver_uart <1|2|3|4|6|7> - receiver port until reboot\r\n"
+        "  receiver - CRSF diagnostics and 16 mapped controls\r\n"
+        "  receiver_map <AETR|TAER> - input order until reboot\r\n"
         "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n"
         "  motor_pulse <1..4> <0..35> - one-second adjustable props-off pulse\r\n"
         "  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n"
@@ -134,6 +137,27 @@ static void cmd_status(void)
              (double)angles[0],(double)angles[1],b?b->rx_uart:0,rx_frame_fresh()?"yes":"no",(unsigned long)rx_frame_count(),
              (double)rc[0],(double)rc[1],(double)rc[2],(double)rc[3],(double)rc[4],(double)rc[5],(double)rc[6],(double)rc[7],
              dshot_is_healthy()?"DShot300 ready":"unavailable");
+    cli_write_str(buf);
+}
+
+static void cmd_receiver(void)
+{
+    const board_t *b=board_get();
+    const float *ch=rx_channels();
+    uint32_t age=rx_frame_age_ms();
+    char buf[768];
+    const char *link=!rx_uart_bound()?"unbound":age==UINT32_MAX?"waiting":rx_frame_fresh()?"live":"lost";
+    snprintf(buf,sizeof(buf),
+        "receiver_api: 1\r\nprotocol: CRSF\r\nuart: %u\r\nmap: %s\r\nlink: %s\r\n"
+        "age_ms: %ld\r\nframes: %lu\r\ncrc_errors: %lu\r\nstream_resets: %lu\r\n"
+        "armed: %u\r\nbench_active: %u\r\nfailsafe: %u\r\n"
+        "channels: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\r\n"
+        "persistence: ram\r\nreceiver_end: 1\r\n",
+        b?b->rx_uart:0,crsf_map(),link,age==UINT32_MAX?-1L:(long)(age>2147483647u?2147483647u:age),
+        (unsigned long)rx_frame_count(),(unsigned long)crsf_crc_errors(),(unsigned long)crsf_stream_resets(),
+        arming_state()==ARM_ARMED,bench_motor_active(),failsafe_active(),
+        (double)ch[0],(double)ch[1],(double)ch[2],(double)ch[3],(double)ch[4],(double)ch[5],(double)ch[6],(double)ch[7],
+        (double)ch[8],(double)ch[9],(double)ch[10],(double)ch[11],(double)ch[12],(double)ch[13],(double)ch[14],(double)ch[15]);
     cli_write_str(buf);
 }
 
@@ -228,6 +252,12 @@ static void handle_line(char *line)
         cmd_version();
     } else if (strcmp(line, "status") == 0) {
         cmd_status();
+    } else if (strcmp(line, "receiver") == 0) {
+        cmd_receiver();
+    } else if (strncmp(line,"receiver_map ",13)==0) {
+        if (arming_state()!=ARM_ARMED && !bench_motor_active() && crsf_set_map(line+13)) {
+            failsafe_reset_rx_link(); rx_init(); cmd_receiver();
+        } else cli_write_str("receiver map refused: AETR/TAER, disarmed and motors stopped required\r\n");
     } else if (strcmp(line, "power") == 0) {
         cmd_power();
     } else if (strncmp(line, "power_config ",13)==0) {
@@ -269,8 +299,8 @@ static void handle_line(char *line)
         /* sensor handler performed a bounded read or nonblocking action */
     } else if(strncmp(line,"receiver_uart ",14)==0){
         unsigned uart=0;char extra;
-        if(arming_state()!=ARM_ARMED && sscanf(line+14,"%u %c",&uart,&extra)==1 && board_select_rx_uart(uart)){
-            failsafe_init();rx_init();cli_write_str("receiver UART changed (until reboot)\r\n");
+        if(arming_state()!=ARM_ARMED && !bench_motor_active() && sscanf(line+14,"%u %c",&uart,&extra)==1 && board_select_rx_uart(uart)){
+            failsafe_reset_rx_link();rx_init();cli_write_str("receiver UART changed (until reboot)\r\n");
         }else cli_write_str("receiver UART refused\r\n");
     } else if(strncmp(line,"motor_pulse ",12)==0){
         unsigned motor,percent;

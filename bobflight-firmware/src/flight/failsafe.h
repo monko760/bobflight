@@ -39,6 +39,8 @@ typedef enum {
 } failsafe_stage_t;
 
 void failsafe_init(void);
+/* Invalidate the old RX link after a disarmed UART/mapping change; retain policy. */
+void failsafe_reset_rx_link(void);
 void failsafe_tick(uint32_t now_ms);
 void failsafe_note_rx_frame(uint32_t now_ms);
 bool failsafe_active(void);
