@@ -16,6 +16,9 @@ static uint32_t g_ms;
 static uint64_t g_us;
 
 void hal_clock_init(uint32_t hse_mhz) { (void)hse_mhz; }
+uint32_t hal_core_clock_hz(void){return 0;}
+bool hal_time_high_resolution(void){return false;}
+const char *hal_time_source(void){return "simulated";}
 void hal_time_init(void) { g_ms = 0; g_us = 0; }
 uint32_t hal_millis(void) { return g_ms; }
 uint64_t hal_micros(void) { return g_us; }

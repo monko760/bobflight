@@ -116,6 +116,15 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_cycle_clock_test tests/host_cycle_clock.c)
+  add_test(NAME cycle_clock COMMAND bobflight_cycle_clock_test)
+  add_executable(bobflight_f7_clock_test src/hal/stm32f7/hal_clock.c tests/host_f7_clock.c)
+  target_compile_options(bobflight_f7_clock_test PRIVATE -include ${CMAKE_SOURCE_DIR}/tests/clock_hw_mock.h)
+  add_test(NAME f7_clock_register_mock COMMAND bobflight_f7_clock_test)
+  add_executable(bobflight_scheduler_timing_test src/sched/scheduler.c tests/host_scheduler_timing.c)
+  add_test(NAME scheduler_timing COMMAND bobflight_scheduler_timing_test)
+  add_executable(bobflight_timing_cli_test tests/host_timing_cli.c)
+  add_test(NAME timing_cli COMMAND bobflight_timing_cli_test)
   add_test(NAME boot_led_modes COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_boot_led_modes.py ${CMAKE_C_COMPILER})
   add_executable(bobflight_receiver_test src/drivers/rx.c src/drivers/crsf.c tests/host_receiver.c)

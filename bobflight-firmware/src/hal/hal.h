@@ -38,6 +38,10 @@ const char *hal_clock_usb_src(void);
 void hal_time_init(void);
 uint32_t hal_millis(void);
 uint64_t hal_micros(void);
+/** Clock metadata, not a hardware frequency measurement. Zero Hz = unknown/host. */
+uint32_t hal_core_clock_hz(void);
+bool hal_time_high_resolution(void);
+const char *hal_time_source(void);
 void hal_delay_ms(uint32_t ms);
 void hal_power_adc_init(hal_pin_t voltage, hal_pin_t current);
 bool hal_power_adc_poll(uint16_t *voltage, uint16_t *current);

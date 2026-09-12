@@ -224,6 +224,7 @@ export class MockBobFlightHost implements BobFlightHost {
 
   private receiver = new MockReceiver();
   private handle(cmd: CliCommand): string {
+    if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;
     if(cmd==="reboot") this.receiver.reset();
