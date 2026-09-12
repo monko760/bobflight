@@ -7,6 +7,9 @@ typedef enum {SC_IDLE,SC_GYRO,SC_ACCEL_WAIT,SC_ACCEL_COLLECT,SC_COMPLETE,SC_ERRO
 typedef struct {
     float gyro_bias[3],accel_bias[3],accel_scale[3];
     bool gyro_valid,accel_valid;
+    bool candidate_valid;
+    float candidate_bias[3],candidate_scale[3];
+    char apply_detail[256];
     sc_mode_t mode;
     const char *reason;
     unsigned samples,faces;

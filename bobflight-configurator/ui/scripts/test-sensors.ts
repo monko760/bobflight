@@ -73,6 +73,28 @@ async function main(){
   assert.ok(AXIS_FACES.every(f=>!/(nose up|belly up|upright|wing down)/i.test(f.description)));
   assert.equal(formatVector([1,2,3]),'1.00, 2.00, 3.00');assert.equal(computeFps([1,501,1001],1000,1500),2);
  });
+ await test('gyro session can be cancelled without freshness or confirmations, never silently replaced',()=>{
+  const s={...parseKeyValueSnapshot(fixture)!,cal_state:'gyro',cal_manual:true};
+  const ctx={connected:true,snapshot:s,fresh:true,propsOff:true,stationary:true};
+  assert.equal(checkActionGates('gyro_cal',ctx).allowed,false);
+  assert.equal(checkActionGates('accel_start',ctx).allowed,false);
+  assert.equal(checkActionGates('accel_cancel',{...ctx,fresh:false,propsOff:false,stationary:false}).allowed,true);
+  assert.equal(checkActionGates('gyro_cal',{...ctx,snapshot:{...s,cal_manual:false}}).allowed,false);
+  assert.equal(checkActionGates('accel_start',{...ctx,snapshot:{...s,cal_manual:false}}).allowed,true);
+ });
+ await test('optional numerical Apply report: finite candidates, complete face table, bounded detail and old firmware',()=>{
+  const report=fixture.replace('cal_faces: 0','cal_faces: 63').replace('sensors_end: 1',[
+   'cal_apply_detail: Pair +X/-X, axis Y: midpoint=+0.1 g, limit=0.05 g',
+   'cal_diagnostics_version: 1',...AXIS_FACES.map(f=>`cal_raw_face_${f.index}: 0 0 1`),
+   'cal_candidate_valid: yes','cal_candidate_bias: 0 0 -0.2','cal_candidate_scale: 1 1 1','calibration_end: 1'].join('\n'));
+  const r=parseKeyValueSnapshot(report)!;assert.ok(r);assert.equal(r.cal_raw_faces?.length,6);
+  assert.deepEqual(r.cal_candidate_bias,[0,0,-.2]);assert.match(r.cal_apply_detail!,/axis Y/);
+  assert.equal(parseKeyValueSnapshot(fixture)?.cal_raw_faces,undefined);
+  for(const [a,b] of [['cal_raw_face_0: 0 0 1','cal_raw_face_0: NaN 0 1'],['cal_candidate_valid: yes','cal_candidate_valid: maybe'],['cal_candidate_scale: 1 1 1','cal_candidate_scale: Infinity 1 1'],['cal_diagnostics_version: 1','cal_diagnostics_version: 2'],['cal_raw_face_0: 0 0 1','cal_raw_face_0: uncaptured']])assert.equal(parseKeyValueSnapshot(report.replace(a,b)),null);
+  assert.equal(parseKeyValueSnapshot(report.replace('cal_raw_face_0: 0 0 1\n','')),null);
+  assert.equal(parseKeyValueSnapshot(report.replace('cal_apply_detail: Pair +X/-X, axis Y: midpoint=+0.1 g, limit=0.05 g','cal_apply_detail: '+ 'x'.repeat(256))),null);
+  assert.ok(parseKeyValueSnapshot(report.replace('cal_raw_face_0: 0 0 1','cal_raw_face_0: unavailable')));
+ });
  await test('single in-flight read; action waits for current read; no poll queue',async()=>{
   const lane=new SensorRequestLane();let release!:(s:string)=>void,reads=0,actions=0;
   const read=lane.read(()=>{reads++;return new Promise<string>(r=>release=r);});await Promise.resolve();

@@ -5,7 +5,13 @@
 #include "drivers/sensor_calibration.h"
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
 
+static void report_reset(sensor_calibration_t *c) {
+    c->candidate_valid=false;c->apply_detail[0]=0;
+    memset(c->candidate_bias,0,sizeof(c->candidate_bias));
+    memset(c->candidate_scale,0,sizeof(c->candidate_scale));
+}
 static void window_reset(sensor_calibration_t *c) {
     c->samples=0;
     memset(c->mean,0,sizeof(c->mean));memset(c->m2,0,sizeof(c->m2));
@@ -15,10 +21,12 @@ void sc_init(sensor_calibration_t *c) {
     for(unsigned i=0;i<3;i++)c->accel_scale[i]=1.f;
 }
 void sc_cancel(sensor_calibration_t *c,const char *reason) {
+    report_reset(c);
     c->mode=SC_IDLE;c->reason=reason;c->faces=0;c->face=-1;
     c->have_last=false;window_reset(c); /* applied coefficients are untouched */
 }
 static void begin(sensor_calibration_t *c,sc_mode_t mode,uint32_t now) {
+    report_reset(c);
     c->mode=mode;c->phase_started=c->session_started=now;c->have_last=false;
     c->faces=0;c->face=-1;window_reset(c);
 }
@@ -32,6 +40,7 @@ void sc_begin_accel(sensor_calibration_t *c,uint32_t now) {
 bool sc_capture_face(sensor_calibration_t *c,unsigned face,uint32_t now) {
     sc_tick(c,now);
     if(c->mode!=SC_ACCEL_WAIT || face>=6)return false;
+    report_reset(c);
     c->mode=SC_ACCEL_COLLECT;c->face=(int)face;c->faces&=~(1u<<face);
     c->phase_started=now;c->have_last=false;window_reset(c);
     c->reason="hold-selected-signed-axis-up";return true;
@@ -66,15 +75,14 @@ void sc_feed(sensor_calibration_t *c,const float gyro[3],const float raw_acc[3],
     if(c->have_last && now==c->last_ms)return; /* repeated reads cannot speed up calibration */
     if(c->have_last && (uint32_t)(now-c->last_ms)>20u)window_reset(c);
     c->have_last=true;c->last_ms=now;
-    float acc[3];
-    if(c->mode==SC_GYRO)sc_correct_accel(c,raw_acc,acc);
-    else memcpy(acc,raw_acc,sizeof(acc));
+    /* Gyro bias is a stationary angular-rate measurement, not proof of
+     * accelerometer scale/offset accuracy. Use raw accel only as a bounded
+     * motion/plausibility signal. Its variance is still checked below.
+     * Flight readiness separately requires a valid accel solution/gravity. */
+    float acc[3];memcpy(acc,raw_acc,sizeof(acc));
     float norm=acc[0]*acc[0]+acc[1]*acc[1]+acc[2]*acc[2];
-    /* Gyro calibration still requires corrected gravity near 1 g. Raw accel
-     * staging instead uses a bounded acquisition envelope below: requiring
-     * an already-correct raw norm prevents measuring a legitimate offset. */
-    if(c->mode==SC_GYRO && (norm<0.81f || norm>1.21f)) {
-        window_reset(c);c->reason="invalid-gravity-expected-0.9-to-1.1g";return;
+    if(c->mode==SC_GYRO && (norm<0.36f || norm>2.25f)) {
+        window_reset(c);c->reason="gyro-raw-accel-outside-0.6-to-1.5g";return;
     }
     for(unsigned i=0;i<3;i++)if(fabsf(gyro[i])>5.f) {
         window_reset(c);c->reason="moving";return;
@@ -116,12 +124,20 @@ void sc_feed(sensor_calibration_t *c,const float gyro[3],const float raw_acc[3],
     }
 }
 bool sc_apply_accel(sensor_calibration_t *c) {
+    report_reset(c);
     if(c->mode!=SC_ACCEL_WAIT || c->faces!=63u) {c->reason="six-faces-required";return false;}
-    float bias[3],scale[3];
+    float bias[3],scale[3];c->candidate_valid=true;
     for(unsigned i=0;i<3;i++) {
         float plus=c->face_mean[2u*i][i],minus=c->face_mean[2u*i+1u][i];
-        bias[i]=(plus+minus)*0.5f;scale[i]=2.f/(plus-minus);
+        bias[i]=(plus+minus)*0.5f;scale[i]=plus==minus?NAN:2.f/(plus-minus);
+        c->candidate_bias[i]=bias[i];c->candidate_scale[i]=scale[i];
+        if(!isfinite(bias[i]) || !isfinite(scale[i]))c->candidate_valid=false;
+    }
+    for(unsigned i=0;i<3;i++) {
         if(!isfinite(bias[i]) || !isfinite(scale[i]) || fabsf(bias[i])>0.3f || scale[i]<0.9f || scale[i]>1.1f) {
+            snprintf(c->apply_detail,sizeof(c->apply_detail),
+                "Axis %c: candidate bias=%+.5f g (axis bound +/-0.3 g), scale=%.5f (0.9..1.1); nonfinite values are rejected.",
+                "XYZ"[i],(double)bias[i],(double)scale[i]);
             c->reason="implausible-coefficients-check-sensor";return false;
         }
     }
@@ -129,12 +145,18 @@ bool sc_apply_accel(sensor_calibration_t *c) {
      * A vector bound prevents stacking the per-axis allowance on all axes. */
     float bias_norm2=0.f;
     for(unsigned axis=0;axis<3;axis++)bias_norm2+=bias[axis]*bias[axis];
-    if(bias_norm2>0.09f) {c->reason="offset-too-large-check-hardware";return false;}
+    if(bias_norm2>0.09f) {
+        snprintf(c->apply_detail,sizeof(c->apply_detail),"Candidate bias vector length=%.5f g; limit=0.30000 g.",(double)sqrtf(bias_norm2));
+        c->reason="offset-too-large-check-hardware";return false;
+    }
     /* Three independent opposite-face midpoints must describe the same
      * 3-D bias. Bad poses or changing offsets cannot be normalized away. */
     for(unsigned pair=0;pair<3;pair++)for(unsigned axis=0;axis<3;axis++) {
         float midpoint=(c->face_mean[2u*pair][axis]+c->face_mean[2u*pair+1u][axis])*0.5f;
         if(!isfinite(midpoint) || fabsf(midpoint-bias[axis])>0.05f) {
+            snprintf(c->apply_detail,sizeof(c->apply_detail),
+                "Pair +%c/-%c, axis %c: midpoint=%+.5f g, candidate bias=%+.5f g, difference=%+.5f g, limit=0.05000 g. Compare both pairs; this does not identify which individual pose is wrong.",
+                "XYZ"[pair],"XYZ"[pair],"XYZ"[axis],(double)midpoint,(double)bias[axis],(double)(midpoint-bias[axis]));
             c->reason="opposite-face-centers-disagree-recapture";return false;
         }
     }
@@ -144,15 +166,20 @@ bool sc_apply_accel(sensor_calibration_t *c) {
             float expected=axis==face/2u?((face&1u)?-1.f:1.f):0.f;
             float corrected=(c->face_mean[face][axis]-bias[axis])*scale[axis];
             if(!isfinite(corrected) || fabsf(corrected-expected)>0.1f) {
+                snprintf(c->apply_detail,sizeof(c->apply_detail),
+                    "Face %c%c, axis %c: corrected=%+.5f g, expected=%+.5f g, difference=%+.5f g, limit=0.10000 g.",
+                    (face&1u)?'-':'+',"XYZ"[face/2u],"XYZ"[axis],(double)corrected,(double)expected,(double)(corrected-expected));
                 c->reason="pose-residual-too-large-recapture";return false;
             }
             corrected_norm2+=corrected*corrected;
         }
         if(corrected_norm2<0.81f || corrected_norm2>1.21f) {
+            snprintf(c->apply_detail,sizeof(c->apply_detail),"Face %c%c: corrected norm=%.5f g; required 0.9..1.1 g.",(face&1u)?'-':'+',"XYZ"[face/2u],(double)sqrtf(corrected_norm2));
             c->reason="corrected-gravity-invalid-recapture";return false;
         }
     }
     memcpy(c->accel_bias,bias,sizeof(bias));memcpy(c->accel_scale,scale,sizeof(scale));
+    snprintf(c->apply_detail,sizeof(c->apply_detail),"All six faces passed; coefficients applied in RAM, not persistent storage.");
     c->accel_valid=true;c->mode=SC_COMPLETE;
     c->reason=bias_norm2>0.01f?"accel-calibrated-large-offset-check-hardware-ram-only":"accel-calibrated-ram-only";
     return true;

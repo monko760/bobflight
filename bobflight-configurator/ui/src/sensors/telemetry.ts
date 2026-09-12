@@ -31,6 +31,12 @@ export interface SensorSnapshot {
   mpu_gyro_config?: string;
   mpu_accel_config?: string;
   sensor_chip?: string;
+  cal_apply_detail?: string;
+  cal_diagnostics_version?: number;
+  cal_raw_faces?: Array<[number,number,number] | null>;
+  cal_candidate_valid?: boolean;
+  cal_candidate_bias?: [number,number,number];
+  cal_candidate_scale?: [number,number,number];
   rawText?: string;
 }
 
@@ -95,6 +101,24 @@ export function parseKeyValueSnapshot(rawText:string):SensorSnapshot|null {
   for(const key of ["gyro_bias","accel_bias","accel_scale"] as const)if(kv[key]!==undefined){
     const v=parseThreeFloats(kv[key]);if(v.some(n=>!Number.isFinite(n)))return null;snapshot[key]=v;
   }
+  if(kv.cal_apply_detail!==undefined){if(kv.cal_apply_detail.length>255)return null;snapshot.cal_apply_detail=kv.cal_apply_detail;}
+  if(kv.cal_diagnostics_version!==undefined) {
+    if(kv.cal_diagnostics_version!=="1" || kv.calibration_end!=="1" || !["yes","no"].includes(kv.cal_candidate_valid))return null;
+    snapshot.cal_diagnostics_version=1;snapshot.cal_raw_faces=[];
+    for(let i=0;i<6;i++) {
+      const value=kv[`cal_raw_face_${i}`],captured=isFaceCaptured(snapshot.cal_faces,i);
+      if(!captured){if(value!=="uncaptured")return null;snapshot.cal_raw_faces.push(null);continue;}
+      if(value==="unavailable"){snapshot.cal_raw_faces.push(null);continue;}
+      const v=parseThreeFloats(value);if(v.some(n=>!Number.isFinite(n)||Math.abs(n)>10000))return null;
+      snapshot.cal_raw_faces.push(v);
+    }
+    snapshot.cal_candidate_valid=kv.cal_candidate_valid==="yes";
+    for(const key of ["cal_candidate_bias","cal_candidate_scale"] as const) {
+      if(snapshot.cal_candidate_valid) {
+        const v=parseThreeFloats(kv[key]);if(v.some(n=>!Number.isFinite(n)||Math.abs(n)>10000))return null;snapshot[key]=v;
+      } else if(kv[key]!==undefined)return null;
+    }
+  }
   snapshot.mpu_gyro_config=kv.mpu_gyro_config;snapshot.mpu_accel_config=kv.mpu_accel_config;snapshot.sensor_chip=kv.sensor_chip;
   return snapshot;
 }
@@ -150,7 +174,8 @@ export function checkActionGates(
 
     if(ctx.snapshot.sensor_config_ok!==true)reasons.push("Sensor configuration is not verified");
     if(action==="gyro_cal" || action==="accel_start") {
-      if(ctx.snapshot.cal_manual || ["accel_wait","accel_collect"].includes(ctx.snapshot.cal_state))reasons.push("Cancel or finish the active session first");
+      if(ctx.snapshot.cal_manual || ["accel_wait","accel_collect"].includes(ctx.snapshot.cal_state))reasons.push("Cancel or finish the active calibration session first");
+      else if(action==="gyro_cal" && ctx.snapshot.cal_state==="gyro")reasons.push("Gyro calibration is already running; use Cancel gyro calibration to stop it");
     } else if(!ctx.snapshot.cal_manual || ctx.snapshot.cal_state!=="accel_wait")reasons.push("Start a six-face session and wait for the current capture");
 
     if (action === "accel_apply") {

@@ -6,6 +6,7 @@ import {
   checkActionGates,
   countCapturedFaces,
   formatFloat,
+  formatVector,
   isFaceCaptured,
 } from "../sensors/telemetry";
 
@@ -28,6 +29,10 @@ export function SensorsPage() {
   } = useSensorTelemetry();
 
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [copyResult,setCopyResult]=useState("");
+  useEffect(()=>{
+    if(snapshot?.cal_apply_detail && !snapshot.accel_calibrated)setShowDiagnostics(true);
+  },[snapshot?.cal_apply_detail,snapshot?.accel_calibrated]);
 
   useEffect(() => {
     pollDetailedCalibration(showDiagnostics);
@@ -283,7 +288,8 @@ export function SensorsPage() {
       {/* Gyro Calibration Section */}
       <h3 style={{ marginTop: "24px" }}>Gyro Calibration</h3>
       <p>
-        Set the quad down and keep it completely still. Gyro calibration zeroes sensor rate offsets.
+        Set the quad down and keep it completely still. Gyro calibration measures angular-rate offsets;
+        it does not require the accelerometer to be calibrated first and does not establish flight readiness.
       </p>
       <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
         <button
@@ -293,17 +299,24 @@ export function SensorsPage() {
           {pending ? "Sending command…" : "Calibrate gyro"}
         </button>
         {calState === "gyro" && (
+          <button disabled={!accelCancelGate.allowed} onClick={()=>void command("calibration_cancel")}>
+            Cancel gyro calibration
+          </button>
+        )}
+        {calState === "gyro" && (
           <span className="muted">
             Calibrating gyro: {calSamples}/{calRequired} samples {calReason ? `(${calReason})` : ""}
           </span>
         )}
       </div>
 
-      {!gyroGate.allowed && (
+      {!gyroGate.allowed && calState!=="gyro" && (
         <p className="muted" style={{ fontSize: "0.85rem", marginTop: "4px" }}>
           Blocked: {gyroGate.reasons.join("; ")}
         </p>
       )}
+
+      {calState==="gyro" && <p className="muted">Keep still while samples accumulate, or use Cancel gyro calibration above. Cancel preserves applied coefficients but discards unfinished face captures.</p>}
 
       {/* Accelerometer 6-Face Calibration Section */}
       <h3 style={{ marginTop: "28px" }}>Accelerometer 6-Face Calibration</h3>
@@ -337,8 +350,8 @@ export function SensorsPage() {
             <strong>Raw Capture Is Not Corrected Gravity:</strong> A raw reading near 0.8 g
             on one face and 1.2 g on its opposite can be an offset. The updated firmware
             can stage bounded raw measurements, but Apply requires all six stationary
-            faces to agree on one offset/scale solution. Gyro calibration still needs
-            corrected gravity near 1 g; calibrate the accelerometer first if necessary.
+            faces to agree on one offset/scale solution. Gyro bias calibration is separate from accelerometer calibration;
+            a calibrated gyro does not mean the accelerometer or flight checks passed.
             A large accepted offset needs hardware investigation, not flight testing.
           </li>
           <li>
@@ -348,6 +361,10 @@ export function SensorsPage() {
         </ul>
       </div>
 
+      <p>Green face cards mean <strong>captured</strong>, not calibrated. Apply must validate all six measurements together.</p>
+      {snapshot?.cal_apply_detail && <p role="status" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>
+        <strong>{snapshot.accel_calibrated?"Last Apply result":"Apply diagnostics"}{fresh?"":" (stale)"}:</strong> {snapshot.cal_apply_detail}
+      </p>}
       {/* 6-Face Controls & Progress */}
       <div style={{ marginBottom: "16px" }}>
         <div
@@ -501,6 +518,24 @@ export function SensorsPage() {
               Hex Readbacks: Gyro Config <code>{snapshot.mpu_gyro_config ?? "N/A"}</code> | Accel
               Config <code>{snapshot.mpu_accel_config ?? "N/A"}</code>
             </p>
+            <h4>Captured raw faces (g) — not applied coefficients</h4>
+            {snapshot.cal_raw_faces ? <table style={{width:"100%",textAlign:"left"}}>
+              <thead><tr><th>Face</th><th>Raw X</th><th>Raw Y</th><th>Raw Z</th></tr></thead>
+              <tbody>{AXIS_FACES.map(face=>{
+                const v=snapshot.cal_raw_faces?.[face.index];
+                return <tr key={face.key}><td>{face.shortLabel}</td>{v?v.map((n,i)=><td key={i}>{formatFloat(n,5)}</td>):<td colSpan={3}>{isFaceCaptured(snapshot.cal_faces,face.index)?"Unavailable":"Not captured"}</td>}</tr>;
+              })}</tbody>
+            </table>:<p>Staged numerical diagnostics unavailable from this firmware.</p>}
+            <p>Candidate bias (g): {snapshot.cal_candidate_valid?formatVector(snapshot.cal_candidate_bias!,5):"Unavailable until a finite six-face solve"}</p>
+            <p>Candidate scale: {snapshot.cal_candidate_valid?formatVector(snapshot.cal_candidate_scale!,5):"Unavailable"}. Candidates are not necessarily accepted.</p>
+            <button disabled={!snapshot.rawText} onClick={async()=>{
+              try{await navigator.clipboard.writeText(snapshot.rawText??"");setCopyResult("Diagnostic report copied");}
+              catch{setCopyResult("Clipboard unavailable; select the report below and copy it manually");}
+            }}>Copy diagnostic report</button>
+            <span role="status"> {copyResult}</span>
+            <details><summary>Plain-text report {fresh?"":"(stale)"}</summary>
+              <textarea aria-label="Calibration diagnostic report" readOnly value={snapshot.rawText??""} rows={12} style={{width:"100%"}} />
+            </details>
           </div>
         )}
       </div>

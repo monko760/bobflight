@@ -24,7 +24,9 @@ typedef struct {
 } gyro_diagnostics_t;
 
 typedef struct {
-    const char *state, *reason;
+    const char *state, *reason, *apply_detail;
+    bool candidate_valid;
+    float candidate_bias[3],candidate_scale[3],face_mean[6][3];
     unsigned samples, required, faces;
     int face;
     bool accel_valid;
@@ -48,6 +50,8 @@ void gyro_calibration_touch(void);
 void gyro_init(void);
 void gyro_begin_calibration(void);
 bool gyro_calibrated(void);
+/** Stricter pre-arm readiness: gyro bias alone does not validate gravity. */
+bool gyro_flight_ready(void);
 const float *gyro_accel_g(void);
 const float *gyro_latest_dps(void);
 bool gyro_sample(float dps[3]);

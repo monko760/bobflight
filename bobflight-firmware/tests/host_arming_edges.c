@@ -15,6 +15,9 @@
 /* --- Drivers stubs --- */
 static bool g_gyro_live = true;
 static float g_rc[16];
+static bool cal_ready=true;
+bool gyro_flight_ready(void){return cal_ready;}
+bool rx_frame_fresh(void){return true;}
 
 bool gyro_is_healthy(void)
 {
@@ -54,6 +57,13 @@ int main(void)
     failsafe_tick(0u);
     if (failsafe_active()) return fail("frame at timestamp zero must be valid");
 
+#if defined(BOBFLIGHT_MCU)
+    /* Even with otherwise valid gyro/RX, independent gyro calibration must
+     * not bypass the stricter accelerometer/gravity pre-arm gate. */
+    g_rc[3]=0.f;cal_ready=false;
+    if(arming_try_arm())return fail("gyro bias alone must not permit MCU arming");
+    cal_ready=true;
+#endif
     /* Low throttle + healthy → arm */
     g_rc[3] = 0.0f;
     if (!arming_try_arm()) {

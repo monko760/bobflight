@@ -50,16 +50,25 @@ session expires at 5 minutes. These timing/movement guards are unchanged.
 
 ### Raw acquisition versus corrected validation
 
-Gyro calibration still requires **corrected** gravity within 0.9–1.1 g. Before
-an accelerometer solution exists, raw gravity can lie outside that interval
-because of an offset. Requiring the same near-1-g norm for raw six-face capture
-was a circular prerequisite in PR10, corrected by this update.
+Gyro zero-rate bias is now independent of an already calibrated accelerometer.
+A stationary angular-rate window can complete with a raw 0.82 g or 1.2 g norm.
+It still requires finite raw samples, a raw accel norm of 0.6–1.5 g (rejects
+freefall/rails/grossly implausible input), gyro components within ±5 dps, unchanged
+rate/accel variance limits, a full timed window and fresh hardware samples.
+Raw accel variance is used rather than variance after a possibly incorrect
+calibration. No single gyro window can prove the absence of slow constant
+rotation or constant acceleration: physically secure the stationary board.
 
-Only accelerometer staging uses the broader raw envelope: norm 0.6–1.5 g,
-selected signed component 0.6–1.4 g, orthogonal components within ±0.4 g. This
-allows modest unknown offsets on all three axes, while excluding wrong signs,
-freefall, saturation and grossly wrong poses. Capture is **not** approval of
-the sensor, and these are not relaxed flight/gyro-validity gates.
+This does **not** mark acceleration calibrated or qualify flight. The MCU
+pre-arm path now explicitly requires `gyro_flight_ready()`: completed gyro
+bias, an accepted accelerometer solution, healthy verified recent IMU data,
+and corrected gravity within 0.9–1.1 g. The bench build still unconditionally
+refuses arming. Existing RX/throttle/failsafe guards remain in force. Attitude
+preview is only a visual estimate, not a flight-readiness indicator.
+
+Accelerometer staging retains the prior raw envelope: norm 0.6–1.5 g, selected
+signed component 0.6–1.4 g, orthogonal components within ±0.4 g. Capture is
+not approval of the sensor. Accelerometer solve/Apply limits below are unchanged.
 
 Apply still requires every face. The diagonal solve is
 `bias=(positive+negative)/2`, `scale=2/(positive-negative)`, corrected value
@@ -78,8 +87,9 @@ Validation is joint and atomic:
 An accepted offset vector above 0.1 g produces a large-offset/hardware-check
 reason. Such a correction is for diagnosis, not flight qualification; inspect
 hardware and check additional stationary orientations/repeatability. Existing
-applied coefficients survive failed Apply/cancel. If gyro calibration was
-blocked initially, explicitly re-run it after a successful accelerometer Apply.
+applied coefficients survive failed Apply/cancel. Gyro bias can now be measured
+before or after an accelerometer solution; do not start another manual session
+without finishing or explicitly cancelling the active one.
 
 Robert reported approximately 0.815 g upright and 1.2 g inverted. These are
 magnitudes from approximate observations, not a verified signed calibration
@@ -90,6 +100,38 @@ not quietly enlarge the scale allowance. A raw stationary 0.82 g reading alone
 is neither proof of a defective sensor nor sufficient evidence to apply any
 correction. Register configuration, sign, full six-face geometry and physical
 repeatability must be checked; this patch does not establish the hardware cause.
+
+## Recovery and numerical Apply diagnostics
+
+The Gyro section now has a dedicated **Cancel gyro calibration** control during
+both automatic and manual gyro collection. Cancellation still uses the existing
+command and is allowed while connected even if samples are stale or the safety
+checkboxes are unchecked (unless another command is pending). It preserves
+applied coefficients but discards unfinished faces. No hidden session override,
+queued restart or weakened safety gate was added. The disabled start button
+is no longer presented as a separate "Blocked" failure during gyro collection.
+Manual request errors persist across telemetry polls until another command or
+connection/visibility reset; a successful read must not erase an Apply refusal.
+
+`cal_apply_detail` supplies a bounded human-readable report on ordinary sensor
+queries. A rejected Apply automatically opens extended diagnostics in the UI.
+`calibration` adds optional `cal_diagnostics_version: 1`, all six
+`cal_raw_face_0..5` vectors (or `uncaptured`/`unavailable`), candidate availability
+and finite candidate bias/scale vectors. These are explicitly staged/candidate
+values, not applied coefficients. Existing applied bias/scale fields are unchanged.
+Clients without these optional fields continue working and show them unavailable;
+new parsers reject incomplete/malformed declared reports. Request framing and
+serialization are unchanged. A copy-report button/plain-text fallback avoids
+relying on tiny screenshots. Detailed telemetry is larger; actual device FPS
+and USB delivery still require physical validation.
+
+Midpoint rejection names the pair, axis, midpoint, candidate bias, signed
+difference and 0.05 g threshold. It identifies an inconsistent comparison,
+**not which individual capture is incorrect**. Both the reported pair and the
+pair used to derive that bias component may contribute. Pose residual/offset/
+scale failures also report their relevant numbers. Starting a new session or
+recapturing clears the previous candidate/report to avoid mixing generations.
+Applied coefficients remain untouched until every existing Apply check passes.
 
 ## Protocol and UI freshness
 
@@ -133,8 +175,8 @@ changed by this feature.
 
 ## Validation boundary
 
-Host tests cover engine mathematics, stationary/motion/noise gates, uncalibrated-gyro rejection of
-0.82 g and uniform-low-sensitivity Apply rejection, nonfinite data, duplicate timestamps, timeouts/wrap, failed/cancelled
+Host tests cover engine mathematics, stationary/motion/noise gates, independent gyro completion at
+0.82 g and uniform-low-sensitivity accel Apply rejection, nonfinite data, duplicate timestamps, timeouts/wrap, failed/cancelled
 staging, register mismatch/data-ready behavior and manual-session expiration.
 CLI tests cover exact face argument mapping and armed/motor/USB/health/config/
 stale refusal. Configurator tests cover framing, allowlisting, strict parsing,
@@ -142,3 +184,24 @@ freshness, workflow gates, transaction serialization and generation invalidation
 Existing motor/DFU/settings suites are retained. Cross-build success and these
 models do not prove physical calibration, sensor axes, actual FPS or flight
 safety; verify the merged firmware/configurator pair on the props-off bench.
+
+## Focused recovery review and validation
+
+The background architecture review supported separating stationary gyro bias
+from accelerometer accuracy, adding an obvious cancel control, and exposing
+Apply measurements without widening solver limits. Parent inspection found
+that existing attitude preview readiness alone was not a sufficiently strict
+pre-arm substitute, so the explicit MCU accelerometer/gravity gate was added
+and tested. The reviewer assessed the architecture; this is not an independent
+full-patch audit or physical validation.
+
+Fresh validation: 19/19 host tests (including MCU-enabled pre-arm rejection,
+real MPU driver with mock SPI at raw ~0.82 g, session cancellation, six-face
+Apply, stale IMU and bad corrected-gravity refusal), 10 sensor UI/parser/lane
+regression groups, 28 motor UI groups, sensor/motor protocol tests, strict
+C11 warnings, ASan/UBSan calibration checks, configurator production build
+and Kakute F745 cross-build. Linked bench arming remains disabled. DShot,
+timer/DMA, clock, USB, scheduler and bench arming object bytes match 890061b.
+All new implementation is original Apache-2.0 code; no dependency, vendored
+source or GPL-source import was introduced. No whole-repository license audit
+or flight qualification is claimed.

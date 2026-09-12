@@ -445,6 +445,13 @@ void gyro_host_inject_dps(const float dps[3], bool healthy)
 
 void gyro_begin_calibration(void){sc_begin_gyro(&g_cal,hal_millis());}
 bool gyro_calibrated(void){return g_cal.gyro_valid && g_cal.mode!=SC_GYRO && !g_manual;}
+bool gyro_flight_ready(void) {
+    if(!gyro_calibrated() || !g_cal.accel_valid || !g_healthy || !g_diag.config_ok ||
+       !g_diag.sample_seq || (uint32_t)(hal_millis()-g_diag.sample_ms)>100u)return false;
+    float norm=0.f;
+    for(unsigned i=0;i<3;i++){if(!isfinite(g_acc[i]))return false;norm+=g_acc[i]*g_acc[i];}
+    return norm>=0.81f && norm<=1.21f;
+}
 const float *gyro_accel_g(void){return g_acc;}
 const float *gyro_latest_dps(void){return g_latest;}
 const gyro_diagnostics_t *gyro_diagnostics(void){return &g_diag;}
@@ -483,6 +490,10 @@ bool gyro_apply_accel_calibration(void) {
 void gyro_cancel_manual_calibration(void){sc_cancel(&g_cal,"cancelled");g_manual=false;}
 void gyro_calibration_info(gyro_calibration_info_t *info) {
     if(!info)return;
+    info->apply_detail=g_cal.apply_detail;info->candidate_valid=g_cal.candidate_valid;
+    memcpy(info->candidate_bias,g_cal.candidate_bias,sizeof(info->candidate_bias));
+    memcpy(info->candidate_scale,g_cal.candidate_scale,sizeof(info->candidate_scale));
+    memcpy(info->face_mean,g_cal.face_mean,sizeof(info->face_mean));
     info->state=sc_state_name(&g_cal);info->reason=g_cal.reason;
     info->samples=g_cal.samples;info->required=sc_required(&g_cal);
     info->faces=g_cal.faces;info->face=g_cal.face;info->accel_valid=g_cal.accel_valid;
