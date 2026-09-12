@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware-host:
+    name: Firmware — host build + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build
+      - name: Build
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  firmware-kakute:
+    name: Firmware — Kakute F7 HDV cross build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Configure
+        run: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/stm32f745.cmake -DBOBFLIGHT_BOARD=kakute_f7_hdv
+      - name: Build
+        run: cmake --build build -j
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bobflight-kakute-f7-hdv
+          path: |
+            bobflight-firmware/build/bobflight.elf
+            bobflight-firmware/build/bobflight.hex
+            bobflight-firmware/build/bobflight.bin
+
+  configurator:
+    name: Configurator — typecheck, smoke, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-configurator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Protocol smoke
+        run: npm --prefix protocol run smoke
+      - name: DFU flash model test
+        run: npm --prefix protocol run test:dfu
+      - name: Settings smoke
+        run: npm --prefix protocol run smoke:settings
+      - name: WebSerial smoke
+        run: npm --prefix protocol run smoke:webserial
+      - name: Flasher smoke
+        run: npm --prefix protocol run smoke:flasher
+      - name: Build
+        run: npm run build
