@@ -5,6 +5,8 @@ board_id: kakute_f7_hdv
 status: bf-derived
 family: STM32F745
 hse_mhz: 8
+vbat_pin: PC3
+current_pin: PC2
 led0_pin: PA2
 chip: MPU6000
 spi_bus: 4

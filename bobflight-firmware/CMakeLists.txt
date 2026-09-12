@@ -98,6 +98,7 @@ set(BF_COMMON_SOURCES
   src/drivers/crsf.c
   src/drivers/cli.c
   src/drivers/persist.c
+  src/drivers/power.c
   src/board/ir_load.c
 )
 
@@ -109,6 +110,10 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_power_test src/drivers/power.c tests/host_power.c)
+  target_link_libraries(bobflight_power_test m)
+  add_dependencies(bobflight_power_test bobflight_pins_gen)
+  add_test(NAME power COMMAND bobflight_power_test)
   add_executable(bobflight_host ${BF_COMMON_SOURCES} src/hal/host/hal_host.c)
   target_link_libraries(bobflight_host m)
   add_dependencies(bobflight_host bobflight_pins_gen)
@@ -237,6 +242,7 @@ else()
     src/hal/stm32f7/hal_clock.c
     src/hal/stm32f7/hal_gpio.c
     src/hal/stm32f7/hal_spi.c
+    src/hal/stm32f7/hal_adc.c
     src/hal/stm32f7/hal_uart.c
     src/hal/stm32f7/hal_tim_dma.c
     src/hal/stm32f7/hal_exti.c

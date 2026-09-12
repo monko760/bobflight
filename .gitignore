@@ -3,6 +3,8 @@
 !/.gitignore
 !/README.md
 !/BASELINE.md
+!/POWER-BATTERY.md
+!/build-power-battery.ps1
 !/.github/
 !/LICENSE
 !/bobflight-firmware/

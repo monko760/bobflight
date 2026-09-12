@@ -7,6 +7,7 @@
 #include "drivers/dshot.h"
 #include "drivers/rx.h"
 #include "drivers/persist.h"
+#include "drivers/power.h"
 #include "flight/arming.h"
 #include "flight/failsafe.h"
 #include "flight/config.h"
@@ -42,6 +43,8 @@ static void cmd_help(void)
         "  help     - this text\r\n"
         "  version  - firmware version\r\n"
         "  status   - MCU, loops, arm, gyro, board\r\n"
+        "  power - battery readings and configuration\r\n"
+        "  power_config <divider> <mV/A or 0> <offset_mV> <cells or 0> <warn_V> <critical_V> <mAh> - until reboot\r\n"
         "  get      - get <key>\r\n"
         "  set      - set <key> <value>\r\n"
         "  save     - persist config\r\n"
@@ -129,6 +132,25 @@ static void cmd_status(void)
     cli_write_str(buf);
 }
 
+static void cmd_power(void)
+{
+    power_expire(hal_millis());
+    const power_state_t *s=power_state();
+    const power_config_t *c=power_config();
+    char buf[640];
+    snprintf(buf,sizeof(buf),
+        "power_api: 1\r\nvalid: %u\r\npresent: %u\r\ncurrent_valid: %u\r\nconsumption_valid: %u\r\n"
+        "voltage: %.3f\r\namps: %.3f\r\nconsumed_mah: %.3f\r\nwarning: %s\r\n"
+        "voltage_scale: %.6g\r\ncurrent_mv_per_amp: %.6g\r\ncurrent_offset_mv: %.6g\r\n"
+        "cells: %u\r\nwarning_cell_v: %.3f\r\ncritical_cell_v: %.3f\r\ncapacity_mah: %u\r\n"
+        "raw_voltage: %u\r\nraw_current: %u\r\npersistence: ram\r\npower_end: 1\r\n",
+        s->valid,s->present,s->current_valid,s->consumption_valid,(double)s->voltage,(double)s->amps,
+        (double)s->consumed_mah,power_warning(),(double)c->voltage_scale,(double)c->current_mv_per_amp,
+        (double)c->current_offset_mv,c->cells,(double)c->warning_cell_v,(double)c->critical_cell_v,
+        c->capacity_mah,s->raw_voltage,s->raw_current);
+    cli_write_str(buf);
+}
+
 static void cmd_get(const char *key)
 {
     float v;
@@ -201,6 +223,17 @@ static void handle_line(char *line)
         cmd_version();
     } else if (strcmp(line, "status") == 0) {
         cmd_status();
+    } else if (strcmp(line, "power") == 0) {
+        cmd_power();
+    } else if (strncmp(line, "power_config ",13)==0) {
+        power_config_t c; char extra;
+        if (arming_state()==ARM_ARMED || bench_motor_active()) {
+            cli_write_str("power_config refused: stop motors and disarm\r\n");
+        } else if (sscanf(line+13,"%f %f %f %u %f %f %u %c", &c.voltage_scale,
+            &c.current_mv_per_amp,&c.current_offset_mv,&c.cells,&c.warning_cell_v,
+            &c.critical_cell_v,&c.capacity_mah,&extra)==7 && power_configure(&c)) {
+            cmd_power();
+        } else cli_write_str("power_config refused: invalid values\r\n");
     } else if (strncmp(line, "get ", 4) == 0) {
         cmd_get(line + 4);
     } else if (strncmp(line, "set ", 4) == 0) {
@@ -278,6 +311,7 @@ void cli_poll(void)
 {
     /* Keep TinyUSB / CDC alive on MCU (bg_cli_poll path). Host HAL no-op. */
     hal_usb_cdc_poll();
+    power_poll();
     uint8_t buf[32];
     size_t n = hal_usb_cdc_read(buf, sizeof(buf));
     for (size_t i = 0; i < n; i++) {

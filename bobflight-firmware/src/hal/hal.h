@@ -39,6 +39,8 @@ void hal_time_init(void);
 uint32_t hal_millis(void);
 uint64_t hal_micros(void);
 void hal_delay_ms(uint32_t ms);
+void hal_power_adc_init(hal_pin_t voltage, hal_pin_t current);
+bool hal_power_adc_poll(uint16_t *voltage, uint16_t *current);
 
 /* ---- GPIO ---- */
 typedef enum {

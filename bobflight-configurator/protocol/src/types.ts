@@ -30,6 +30,8 @@ export type CliCommand =
   | "help"
   | "version"
   | "status"
+  | "power"
+  | `power_config ${number} ${number} ${number} ${number} ${number} ${number} ${number}`
   | "arm"
   | "disarm"
   | "reboot"
