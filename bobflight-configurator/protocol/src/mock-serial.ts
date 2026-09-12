@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from "events";
+import { MockMotorBench } from "./bench-mock";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -25,6 +26,8 @@ export interface MockSerialOptions {
   gyroHealthy?: boolean;
   failsafeActive?: boolean;
   boardId?: string;
+  /** Explicit simulation only; default output-unavailable mock stays fail closed. */
+  benchReady?: boolean;
 }
 
 /**
@@ -37,6 +40,7 @@ export class MockSerial extends EventEmitter {
   isOpen = false;
 
   private lineBuf = "";
+  private bench: MockMotorBench;
   private armed = false;
   private rebootRequested = false;
   /** Numeric store mirroring bf_config_t floats. */
@@ -51,6 +55,7 @@ export class MockSerial extends EventEmitter {
     opts: MockSerialOptions = {}
   ) {
     super();
+    this.bench = new MockMotorBench(opts.benchReady ?? false);
     this.path = path;
     this.baudRate = baudRate;
     this.opts = {
@@ -66,9 +71,10 @@ export class MockSerial extends EventEmitter {
       {
         path: MOCK_PORT_PATH,
         manufacturer: "BobFlight",
-        friendlyName: "BobFlight Mock CDC",
+        friendlyName: "BobFlight Mock CDC (outputs unavailable)",
         serialNumber: "MOCK-001",
       },
+      { path: "mock://bobflight-bench", manufacturer: "BobFlight", friendlyName: "Motor bench demo — SIMULATED", serialNumber: "MOCK-BENCH" },
     ]);
   }
 
@@ -76,6 +82,8 @@ export class MockSerial extends EventEmitter {
     if (this.isOpen) return Promise.resolve();
     this.isOpen = true;
     this.lineBuf = "";
+    this.bench.reset();
+    this.armed = false;
     this.rebootRequested = false;
     // Fresh session: reset settings store to defaults (disconnect reset).
     this.settings = cloneDefaultSettingValues();
@@ -91,6 +99,7 @@ export class MockSerial extends EventEmitter {
   close(): Promise<void> {
     if (!this.isOpen) return Promise.resolve();
     this.isOpen = false;
+    this.bench.disconnect();
     this.emit("close");
     return Promise.resolve();
   }
@@ -133,10 +142,12 @@ export class MockSerial extends EventEmitter {
       line = line.slice(0, -1);
     }
     if (line.length === 0) return;
+    const benchReply = this.bench.handle(line, this.armed);
+    if (benchReply !== null) { this.emitData(benchReply); return; }
 
     if (line === "help") {
       this.emitData(
-        "BobFlight CLI\r\n" +
+        "BobFlight CLI\r\n" + this.bench.help +
           "  help     - this text\r\n" +
           "  version  - firmware version\r\n" +
           "  status   - MCU, loops, arm, gyro, board\r\n" +
@@ -160,9 +171,10 @@ export class MockSerial extends EventEmitter {
           `mcu: mock hse_mhz=8\r\n` +
           `gyro_ok: ${gyroOk}\r\n` +
           `gyro_bind: mock\r\n` +
-          `dshot_bound: 0/4\r\n` +
+          `dshot_bound: ${this.bench.ready ? "4/4" : "0/4"}\r\n` +
+          `motor_output: ${this.bench.ready ? "DShot300 ready" : "unavailable"}\r\n` +
           `rx: none unbound\r\n` +
-          `mmio: denied\r\n` +
+          `mmio: ${this.bench.ready ? "allowed (simulated)" : "denied"}\r\n` +
           `arm: ${arm}\r\n` +
           `failsafe: ${failsafe}\r\n` +
           `loop: gyro=0 Hz denom=1 cascade=0 bg=0\r\n`

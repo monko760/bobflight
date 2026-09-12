@@ -20,7 +20,8 @@
     "test:dfu": "tsc && node tests/dfu.cjs",
     "smoke:settings": "tsc && node dist/smoke/smoke-settings.js",
     "smoke:webserial": "tsc && node dist/smoke/smoke-webserial-node.js",
-    "smoke:flasher": "tsc && node dist/smoke/smoke-flasher.js"
+    "smoke:flasher": "tsc && node dist/smoke/smoke-flasher.js",
+    "test:motors": "tsc && node tests/motors.cjs"
   },
   "engines": {
     "node": ">=18"

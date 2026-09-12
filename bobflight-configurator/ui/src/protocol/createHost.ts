@@ -22,6 +22,7 @@ import {
   type WebSerialRequestPortOptions,
 } from "@bobflight/protocol";
 import type { BobFlightHost } from "./types";
+import { CommandGate } from "./commandGate";
 
 export type ProtocolMode = "mock" | "serial";
 
@@ -72,12 +73,15 @@ class ProtocolHostAdapter implements BobFlightHost {
   private client: BobFlightCliClient;
   private webSerial = new WebSerialTransportFactory();
   private lastError: string | null = null;
+  private sessionGeneration = 0;
+  private commands = new CommandGate(() => this.sessionGeneration);
   readonly mode: ProtocolMode;
 
   constructor(mode: ProtocolMode) {
     this.mode = mode;
     // Auto supports mock://, webserial:, and native serialport paths.
     this.client = new BobFlightCliClient(new AutoTransportFactory());
+    this.client.onStatus(() => { this.sessionGeneration++; });
   }
 
   /** Escape hatch for advanced callers; pages should prefer host settings APIs. */
@@ -196,7 +200,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async sendCommand(cmd: CliCommand): Promise<string> {
     try {
-      return await this.client.sendCommand(cmd);
+      return await this.commands.run(() => this.client.sendCommand(cmd), cmd === "motor_test 0");
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -205,7 +209,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async getVersion(): Promise<string> {
     try {
-      return await this.client.getVersion();
+      return await this.commands.run(() => this.client.getVersion());
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -214,7 +218,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async getStatus(): Promise<ParsedStatus> {
     try {
-      return await this.client.getStatus();
+      return await this.commands.run(() => this.client.getStatus());
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -225,7 +229,7 @@ class ProtocolHostAdapter implements BobFlightHost {
     key: SettingsKey,
   ): Promise<{ key: SettingsKey; value: string }> {
     try {
-      return await this.client.getSetting(key);
+      return await this.commands.run(() => this.client.getSetting(key));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -237,7 +241,7 @@ class ProtocolHostAdapter implements BobFlightHost {
     value: string,
   ): Promise<{ key: SettingsKey; value: string }> {
     try {
-      return await this.client.setSetting(key, value);
+      return await this.commands.run(() => this.client.setSetting(key, value));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -246,7 +250,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async saveSettings(): Promise<void> {
     try {
-      await this.client.saveSettings();
+      await this.commands.run(() => this.client.saveSettings());
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -255,7 +259,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async restoreDefaults(): Promise<Record<SettingsKey, string>> {
     try {
-      return await this.client.restoreDefaults();
+      return await this.commands.run(() => this.client.restoreDefaults());
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -264,7 +268,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async getAllSettings(): Promise<Record<SettingsKey, string>> {
     try {
-      return await this.client.getAllSettings();
+      return await this.commands.run(() => this.client.getAllSettings());
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;

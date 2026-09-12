@@ -42,6 +42,10 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "disarm",
   "reboot",
   "calibrate_gyro",
+  "motor_seq",
+  "dshot",
+  "dshot 300",
+  "dshot 600",
 ] as const;
 
 /**
@@ -246,7 +250,7 @@ export class BobFlightCliClient {
 
   /**
    * Send an exact CLI command and collect the full response until idle/timeout.
-   * Allowed names only: help|version|status|arm|disarm|reboot.
+   * Exact allowlisted commands only; motor starts are explicit, never retried.
    */
   async sendCommand(
     cmd: CliCommand,

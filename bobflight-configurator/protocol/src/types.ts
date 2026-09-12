@@ -22,7 +22,7 @@ export type ConnectionStatus =
   | "reconnecting"
   | "error";
 
-/** Exact FW CLI command names (lowercase, no args, no synonyms). */
+/** Exact FW CLI commands (lowercase; only explicitly listed arguments). */
 export type CliCommand =
   | "help"
   | "version"
@@ -31,6 +31,10 @@ export type CliCommand =
   | "disarm"
   | "reboot"
   | "calibrate_gyro"
+  | "motor_seq"
+  | "dshot"
+  | "dshot 300"
+  | "dshot 600"
   | `receiver_uart ${1 | 2 | 3 | 4 | 6 | 7}`
   | `motor_test ${0 | 1 | 2 | 3 | 4}`;
 
