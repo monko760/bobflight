@@ -11,6 +11,7 @@ export type {
   PortInfo,
   ConnectionStatus,
   CliCommand,
+  MotorPulsePercent,
   ConnectOptions,
   SendCommandOptions,
   ParsedStatus,

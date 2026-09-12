@@ -15,6 +15,7 @@
 #include "hal/hal.h"
 #include "flight/attitude.h"
 #include "sched/tasks.h"
+#include "drivers/bench_parse.h"
 #include "bobflight/version.h"
 
 #include <stdio.h>
@@ -24,6 +25,7 @@
 
 static char g_line[128];
 static unsigned g_len;
+static bool g_discard_line;
 
 static void cli_write_str(const char *s)
 {
@@ -47,6 +49,7 @@ static void cmd_help(void)
         "  calibrate_gyro - stationary gyro calibration\r\n"
         "  receiver_uart <1|2|3|4|6|7> - receiver port until reboot\r\n"
         "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n"
+        "  motor_pulse <1..4> <0..35> - one-second adjustable props-off pulse\r\n"
         "  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n"
         "  dshot [300|600] - show or switch DShot bit rate\r\n"
         "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
@@ -232,9 +235,14 @@ static void handle_line(char *line)
         if(arming_state()!=ARM_ARMED && sscanf(line+14,"%u %c",&uart,&extra)==1 && board_select_rx_uart(uart)){
             failsafe_init();rx_init();cli_write_str("receiver UART changed (until reboot)\r\n");
         }else cli_write_str("receiver UART refused\r\n");
+    } else if(strncmp(line,"motor_pulse ",12)==0){
+        unsigned motor,percent;
+        if(bench_parse_pulse(line+12,&motor,&percent) && bench_motor_pulse(motor,percent))
+            cli_write_str("motor pulse accepted (one second maximum)\r\n");
+        else cli_write_str("motor pulse refused\r\n");
     } else if(strncmp(line,"motor_test ",11)==0){
-        unsigned motor=99;char extra;
-        if(sscanf(line+11,"%u %c",&motor,&extra)==1 && bench_motor_test(motor))cli_write_str("motor test accepted (one second maximum)\r\n");
+        unsigned motor=99;
+        if(bench_parse_motor(line+11,&motor) && bench_motor_test(motor))cli_write_str("motor test accepted (one second maximum)\r\n");
         else cli_write_str("motor test refused\r\n");
     } else if(strcmp(line,"motor_seq")==0){
         if(bench_motor_seq_start())cli_write_str("sequence running: RR FR RL FL, 1s each - watch spin direction\r\n");
@@ -261,6 +269,7 @@ static void handle_line(char *line)
 void cli_init(void)
 {
     g_len = 0;
+    g_discard_line = false;
     g_reboot_req = false;
     cli_write_str("\r\n" BOBFLIGHT_PRODUCT_NAME " " BOBFLIGHT_VERSION_STRING " ready\r\n");
 }
@@ -275,12 +284,18 @@ void cli_poll(void)
         char c = (char)buf[i];
         if (c == '\n' || c == '\r') {
             g_line[g_len] = '\0';
-            handle_line(g_line);
+            if(g_discard_line)cli_write_str("invalid CLI line refused\r\n");
+            else handle_line(g_line);
             g_len = 0;
+            g_discard_line = false;
+        } else if (g_discard_line) {
+            /* Discard the WHOLE invalid line, never execute its suffix. */
+        } else if (c == '\0') {
+            g_discard_line = true;
         } else if (g_len + 1 < sizeof(g_line)) {
             g_line[g_len++] = c;
         } else {
-            g_len = 0;
+            g_discard_line = true;
         }
     }
 }

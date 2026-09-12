@@ -16,8 +16,20 @@ async function main() {
   assert.match(bench.handle('dshot 300',false),/switched/);
   bench.handle('motor_seq',false);bench.disconnect();assert.match(bench.handle('dshot 600',false),/switched/);
   bench.reset();assert.equal(bench.rate,300);
+  for (let motor=1;motor<=4;motor++) for(let percent=0;percent<=35;percent++) {
+    assert.match(bench.handle(`motor_pulse ${motor} ${percent}`,false),/motor pulse accepted/);
+  }
+  for(const cmd of ['motor_pulse 0 8','motor_pulse 5 8','motor_pulse 1 -1','motor_pulse 1 36',
+    'motor_pulse 1 0.1','motor_pulse 1 100','motor_pulse 1 NaN','motor_pulse 1 8 junk',
+    'motor_pulse 1 4294967296','motor_pulse 1 8\nmotor_seq']) assert.match(bench.handle(cmd,false),/refused/);
+  bench.handle('motor_pulse 1 20',false);assert.match(bench.handle('dshot 600',false),/refused/);
+  now+=1000;assert.match(bench.handle('dshot 600',false),/switched/);
+  bench.handle('motor_seq',false);assert.match(bench.handle('motor_pulse 2 0',true),/accepted/);
+  assert.match(bench.handle('dshot 300',false),/switched/);
   const unavailable=new MockMotorBench();assert.match(unavailable.handle('motor_test 1',false),/refused/);
   assert.match(unavailable.handle('motor_test 0',true),/accepted/);
+  assert.match(unavailable.handle('motor_pulse 1 0',true),/accepted/);
+  assert.match(unavailable.handle('motor_pulse 1 8',false),/refused/);
   console.log('PASS deterministic mock: rate readback, timed pulse, sequence gaps, replacement, stop, arm, disconnect/reset');
 
   const client=new BobFlightCliClient(new MockTransportFactory({benchReady:true,boardId:'mock-bench-SIMULATED'}));
@@ -37,7 +49,12 @@ async function main() {
   assert.match(await client.sendCommand('motor_seq'),/sequence running/);
   assert.match(await client.sendCommand('motor_test 0'),/accepted/);
   assert.match(await client.sendCommand('dshot 300'),/switched to 300/);
-  for(const cmd of ['dshot 1200','dshot 600\nmotor_seq','motor_test 5','motor_seq now','motor_test -1']) {
+  for(const cmd of ['motor_pulse 1 1','motor_pulse 2 8','motor_pulse 3 20','motor_pulse 4 0']) {
+    assert.match(await client.sendCommand(cmd),/motor pulse accepted/);
+    assert.match(await client.sendCommand('motor_test 0'),/accepted/);
+  }
+  for(const cmd of ['motor_pulse 1 36','motor_pulse 1 -1','motor_pulse 1 1.5',
+    'motor_pulse 1 8\nmotor_seq','motor_pulse 0 8','motor_pulse 5 8','motor_pulse 1 NaN','dshot 1200' ,'dshot 600\nmotor_seq','motor_test 5','motor_seq now','motor_test -1']) {
     await assert.rejects(client.sendCommand(cmd),/unsupported CLI command/);
   }
   await client.disconnect();

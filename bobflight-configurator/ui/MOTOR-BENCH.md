@@ -1,15 +1,30 @@
 # Props-off motor workbench
 
-Original BobFlight implementation, Apache-2.0. This configurator change requires
-no new HEX when using the bench firmware from main `ee46b2b` or compatible later
-firmware. It is not a flight-qualification or hardware-validation result.
+Original BobFlight implementation, Apache-2.0. Adjustable pulse sliders require
+**updated firmware exposing `motor_pulse`** in addition to this configurator.
+The older `ee46b2b` bench HEX can still perform fixed 8% tests but cannot use
+adjustable pulses. This is not a flight-qualification or hardware-validation
+result. Do not flash a development artifact as flight firmware.
 
 ## Controls
 
 - Top view, front at the top: M4 front-left, M2 front-right, M3 rear-left,
-  M1 rear-right. Each individual request is a one-second, 8% command pulse.
-  This is a command value, **not measured RPM**.
-- Sequence explicitly requests M1 → M2 → M3 → M4. Firmware inserts 0.7-second
+  M1 rear-right. Each slider prepares an integer **0–35% command** (initially
+  zero). Moving a slider does NOT send a USB command or start a motor. Press
+  the explicit Test button for a one-second pulse at that selected value.
+  It is a normalized command, **not measured power or RPM**. The initial bench
+  cap is not a guarantee of harmless output; props MUST be removed.
+- `motor_pulse <1..4> <0..35>` enforces motor, percent and one-second duration
+  in firmware, not just in HTML. Zero stops ALL bench tests. Any nonzero pulse
+  cancels an existing sequence and requests only the selected motor. Bad,
+  non-integer, negative, extra or overflow input is refused, not clamped.
+  Existing `motor_test <0..4>` fixed 8% behavior is unchanged for old clients.
+- Sliders and starts cannot modify a pending/active test. A fresh stationary
+  acknowledgment is required before another pulse. Stop, reconnect, hiding,
+  leaving, revoked props confirmation or an operation error clears setpoints.
+  Read-only polling does not prevent preparing a local setpoint.
+- Sequence uses **fixed 8%**, independent of slider values, and explicitly
+  requests M1 → M2 → M3 → M4. Firmware inserts 0.7-second
   gaps. The UI uses a conservative seven-second estimated window, including
   the final gap; it is not live motor progress telemetry.
 - DShot300/600 selector queries `dshot` and confirms readback after changes.
@@ -20,6 +35,17 @@ firmware. It is not a flight-qualification or hardware-validation result.
   props acknowledgment, readiness, pending operation, or test-window lock.
   Firmware uses the same generic acknowledgment for Stop and individual tests;
   the UI explains it as a Stop acknowledgment, **not proof of physical stopping**.
+
+## Motor pole preference
+
+The editable **Motor pole count** field defaults to **14 magnetic poles / 7 pole
+pairs**, a common 2306 FPV starting value requested by the owner. Motor size does
+not guarantee pole count: verify the motor's specifications. Save accepts even
+integers 2–60. It persists only in this browser's local storage, applies to all
+four motors and is shared across connected aircraft; it is **not a firmware
+setting** and does not affect motor output yet. If storage is blocked, the UI
+reports that the value is page-session-only. Invalid stored data falls back to
+14. This prepares configuration for future RPM support, not fabricated telemetry.
 
 ## Gates and limitations
 
@@ -45,8 +71,14 @@ termination or lost USB. A stuck USB command can delay Stop until timeout.
 **If motors keep spinning, disconnect battery power.**
 
 There is no measured RPM, motor direction, active-sequence telemetry or physical
-stop sensor. No automatic direction reversal, flight arming, variable-throttle
-slider, or persistent speed setting is introduced.
+stop sensor. RPM reads `— / No telemetry`, never a fake zero or a throttle-based
+estimate, including in the mock. Bidirectional DShot is not implemented or
+silently enabled; see the [RPM implementation roadmap](RPM-ROADMAP.md). No automatic direction reversal, flight arming, continuous
+slider drive, master/all-motor slider, or persistent speed setting is introduced.
+
+On old firmware without `motor_pulse`, adjustable sliders stay disabled with
+an explicit firmware-update message; the individually labeled fixed 8% buttons
+remain available. There is no silent fallback from a requested percent to 8%.
 
 ## Offline simulation and tests
 
@@ -66,10 +98,19 @@ npm --prefix ui run smoke
 npm run build
 ```
 
-The 17 controller/gate regression tests use deterministic clocks and deferred
+The 28 controller/gate/preference regression tests use deterministic clocks and deferred
 promises to cover stale/unknown status, arm/output/confirmation gates, pulse and
 sequence windows, Stop during preflight or an in-flight pulse, reconnect,
 unmount/hide, malformed/refused acknowledgments, older firmware, mock behavior,
-and cross-page Stop priority. Protocol tests cover exact allowlisted commands,
+cross-page Stop priority, per-motor setpoints, no I/O during slider movement,
+zero-as-stop, invalid values, reset conditions and old-firmware fallback.
+Protocol tests cover exact allowlisted commands,
 injection/invalid argument rejection, transport responses and mock time windows.
 Both new suites run in CI in addition to existing firmware/configurator checks.
+
+Firmware regression coverage includes all 144 motor/percent combinations
+(motors 1–4, integer percent 0–35), 999/1000 ms cutoff, uint32 clock wrap,
+USB/health/arm gates, zero stop, sequence cancellation and legacy 8% restoration.
+A real host-CLI stdin test also covers help discovery, unavailable outputs,
+overflow/embedded-NUL line discard and clean recovery. Native timer/DMA and
+physical spin still require props-off hardware validation.
