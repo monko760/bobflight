@@ -41,6 +41,7 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "receiver",
   "receiver_map AETR",
   "receiver_map TAER",
+  "timing",
   "power",
   "arm",
   "disarm",
@@ -294,11 +295,11 @@ export class BobFlightCliClient {
           this.collector = null;
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
-          if ((line === "sensors" || line === "calibration") && /terminator missing/.test(err.message)) void this.disconnect();
+          if ((line === "sensors" || line === "calibration" || line === "timing") && /terminator missing/.test(err.message)) void this.disconnect();
           reject(err);
         },
         { idleMs, timeoutMs,
-          endMarker: line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
+          endMarker: line === "timing" ? "timing_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
 
