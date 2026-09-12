@@ -1,0 +1,166 @@
+/* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
+import assert from "node:assert/strict";
+import { BenchController, benchBlockReason, parseBenchHelp, parseDshot, assertBenchAck, MOTOR_POSITIONS } from "../src/motors/benchController";
+import type { CliCommand, ConnectionStatus, ParsedStatus } from "../src/protocol/types";
+import { CommandGate } from "../src/protocol/commandGate";
+import { MockBobFlightHost } from "../src/protocol/mockHost";
+
+let passed = 0;
+async function test(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log(`PASS ${name}`); }
+const ack = "motor test accepted (one second maximum)\r\n";
+const ready: ParsedStatus = { raw: "", board: "test", arm: "disarmed", mmio: "allowed", dshot_bound: "4/4", motor_output: "DShot300 ready", failClosed: true, failClosedReasons: ["bench firmware: flight arming disabled"] };
+function deferred<T>() { let resolve!: (t: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
+class FakeHost {
+  commands: string[] = [];
+  connection: ConnectionStatus = "connected";
+  status: ParsedStatus = { ...ready };
+  statusWait: Promise<ParsedStatus> | null = null;
+  commandWait: Promise<string> | null = null;
+  rate = 300;
+  refuse = "";
+  help = "  motor_test <0..4>\n  motor_seq - sequence\n  dshot [300|600]";
+  getConnectionStatus() { return this.connection; }
+  async getStatus() { this.commands.push("status"); return this.statusWait ? this.statusWait : { ...this.status }; }
+  async sendCommand(cmd: CliCommand) {
+    this.commands.push(cmd);
+    if (this.refuse === cmd) return "refused";
+    if (this.commandWait && cmd.startsWith("motor_test ") && cmd !== "motor_test 0") return this.commandWait;
+    if (cmd === "help") return this.help;
+    if (cmd === "dshot") return `dshot: ${this.rate} kbps`;
+    if (cmd.startsWith("dshot ")) { this.rate = Number(cmd.slice(6)); return `dshot: switched to ${this.rate} kbps`; }
+    if (cmd === "motor_seq") return "sequence running: RR FR RL FL, 1s each - watch spin direction";
+    return ack;
+  }
+}
+async function setup() {
+  const host = new FakeHost(); let now = 100;
+  const c = new BenchController(host, () => now);
+  c.connection(true); await c.poll(); c.confirmProps(true); c.confirmStationary(true);
+  host.commands = [];
+  return { host, c, advance: (ms: number) => { now += ms; }, now: () => now };
+}
+async function main() {
+  await test("capabilities are exact help-line tokens; old firmware stays unsupported", () => {
+    assert.deepEqual(parseBenchHelp("  motor_test <0..4>\n mention motor_seq"), { individual: true, sequence: false, dshot: false });
+    assert.equal(parseBenchHelp("  motor_sequence - nope").sequence, false);
+    assert.equal(parseDshot("dshot: 600 kbps\r\n"), 600);
+    assert.throws(() => parseDshot("DShot300 ready"));
+    assert.throws(() => parseDshot("dshot: 600 kbps\nrefused"));
+    assert.throws(() => assertBenchAck("motor_test 1", "ok"));
+    assert.throws(() => assertBenchAck("motor_seq", "motor_seq refused"));
+    assert.throws(() => assertBenchAck("dshot 600", "dshot: switched to 300 kbps"));
+    assert.deepEqual(MOTOR_POSITIONS.map(m => m.motor), [4,2,3,1]);
+  });
+  await test("fresh hardware, props-off and stationary gates; bench-only failClosed is NOT a motor gate", async () => {
+    const { c, now, advance } = await setup(); assert.equal(benchBlockReason(c.state, now()), null);
+    for (const [field, value] of [["arm","armed"],["mmio","denied"],["dshot_bound","3/4"],["motor_output","unavailable"]]) {
+      assert.ok(benchBlockReason({ ...c.state, status: { ...ready, [field]: value } }, now()));
+    }
+    c.confirmProps(false); assert.ok(benchBlockReason(c.state, now()));
+    c.confirmProps(true); c.confirmStationary(false); assert.ok(benchBlockReason(c.state, now()));
+    c.confirmStationary(true); advance(1501); assert.ok(benchBlockReason(c.state, now()));
+  });
+  await test("single pulse uses fresh status, locks rate/starts, does not auto-restart", async () => {
+    const { c, host, advance } = await setup();
+    await c.start(1); assert.deepEqual(host.commands, ["status","motor_test 1"]);
+    assert.equal(c.state.stationary, false);
+    await c.setRate(600); await c.start(2); assert.equal(host.commands.length, 2);
+    advance(2000); await c.poll(); await c.start(2);
+    assert.equal(host.commands.filter(x => x.startsWith("motor_test")).length, 1);
+    c.confirmStationary(true); await c.start(2);
+    assert.equal(host.commands.at(-1), "motor_test 2");
+  });
+  await test("sequence lock spans gaps, then requires physical stationary confirmation", async () => {
+    const { c, host, advance } = await setup(); await c.start("sequence");
+    advance(1500); await c.poll(); c.confirmStationary(true); assert.equal(c.state.stationary,false);
+    await c.setRate(600); assert.ok(!host.commands.includes("dshot 600"));
+    advance(5600); await c.poll(); assert.equal(c.state.stationary,false);
+    c.confirmStationary(true); await c.setRate(600); assert.equal(c.state.rate,600);
+  });
+  await test("Stop cancels a start awaiting preflight; no queued start or overlap", async () => {
+    const { c, host } = await setup(); const d = deferred<ParsedStatus>(); host.statusWait=d.promise;
+    const start=c.start(1); await Promise.resolve();
+    const stop=c.stop(); const second=c.start(2);
+    d.resolve({ ...ready }); await Promise.all([start,stop,second]);
+    assert.deepEqual(host.commands,["status","motor_test 0"]);
+    assert.equal(c.state.stationary,false); assert.equal(c.state.busy,false);
+  });
+  await test("Stop during a sent test waits for reply then sends stop; repeated Stop is coalesced", async () => {
+    const { c, host } = await setup(); const d=deferred<string>(); host.commandWait=d.promise;
+    const start=c.start(3); for(let i=0;i<8;i++) await Promise.resolve();
+    assert.ok(host.commands.includes("motor_test 3"));
+    const stop=c.stop(); const again=c.stop();
+    assert.ok(!host.commands.includes("motor_test 0"));
+    d.resolve(ack); await Promise.all([start,stop,again]);
+    assert.equal(host.commands.filter(x=>x==="motor_test 0").length,1);
+  });
+  await test("disconnect/reconnect discards pending starts and stops, resets confirmations and rate", async () => {
+    const { c, host }=await setup(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
+    const start=c.start(1); await Promise.resolve(); const stop=c.stop();
+    host.connection="disconnected";c.connection(false);host.connection="connected";c.connection(true);
+    d.resolve({ ...ready }); await Promise.all([start,stop]);
+    assert.deepEqual(host.commands,["status"]);assert.equal(c.state.propsOff,false);assert.equal(c.state.rate,null);assert.equal(c.state.status,null);
+  });
+  await test("fresh preflight becoming armed prevents the write", async () => {
+    const { c, host }=await setup();host.status.arm="armed";await c.start(1);
+    assert.deepEqual(host.commands,["status"]);
+  });
+  await test("unchecking props cancels preflight even if rechecked before the reply", async () => {
+    const { c, host }=await setup();const d=deferred<ParsedStatus>();host.statusWait=d.promise;
+    const start=c.start(1);await Promise.resolve();c.confirmProps(false);c.confirmProps(true);
+    d.resolve({ ...ready });await start;assert.deepEqual(host.commands,["status"]);
+  });
+  await test("hidden page cancels preflight, queues stop, never automatically resumes", async () => {
+    const { c, host }=await setup();const d=deferred<ParsedStatus>();host.statusWait=d.promise;
+    const start=c.start(1);await Promise.resolve();c.setVisible(false);const stop=c.stop();
+    d.resolve({ ...ready });await Promise.all([start,stop]);assert.deepEqual(host.commands,["status","motor_test 0"]);
+    c.setVisible(true);assert.equal(c.state.propsOff,false);await c.start(1);assert.equal(host.commands.length,2);
+  });
+  await test("leaving during a test requests a best-effort stop", async () => {
+    const { c, host }=await setup();await c.start(2);c.leave();await c.stop();
+    assert.equal(host.commands.at(-1),"motor_test 0");assert.equal(c.state.visible,false);
+  });
+  await test("refusal is surfaced; stop does not require readiness or props confirmation", async () => {
+    const { c, host }=await setup();host.refuse="motor_test 1";await c.start(1);
+    assert.match(c.state.error,/refused/);assert.equal(c.state.propsOff,false);
+    await c.stop();assert.match(c.state.reply,/Stop acknowledged/);
+    assert.equal(c.state.stationary,false);
+  });
+  await test("unknown rate readback and failed stop are never displayed as success", async () => {
+    const { c, host }=await setup();host.rate=1200;await c.poll();assert.match(c.state.error,/readback/);
+    host.refuse="motor_test 0";await c.stop();assert.match(c.state.error,/Stop not confirmed/);
+  });
+  await test("older firmware permits only advertised individual tests", async () => {
+    const host=new FakeHost();host.help="  motor_test <0..4>";
+    const c=new BenchController(host,()=>100);c.connection(true);await c.poll();c.confirmProps(true);c.confirmStationary(true);
+    await c.setRate(600);await c.start("sequence");assert.ok(!host.commands.includes("motor_seq"));assert.ok(!host.commands.includes("dshot 600"));
+    await c.start(4);assert.equal(host.commands.at(-1),"motor_test 4");assert.equal(c.state.rate,null);
+  });
+  await test("legacy browser mock supports DShot readback and refuses unbound motor starts", async () => {
+    const host=new MockBobFlightHost({connectDelayMs:0});await host.connect({path:"mock://bobflight"});
+    assert.equal(parseDshot(await host.sendCommand("dshot")),300);
+    assertBenchAck("dshot 600",await host.sendCommand("dshot 600"));
+    assert.equal(parseDshot(await host.sendCommand("dshot")),600);
+    assert.match(await host.sendCommand("motor_seq"),/refused/);
+    assert.match(await host.sendCommand("motor_test 1"),/refused/);
+    assertBenchAck("motor_test 0",await host.sendCommand("motor_test 0"));await host.disconnect();
+  });
+  await test("shared page command gate gives Stop priority without queuing starts", async () => {
+    const gate=new CommandGate(()=>1);const d=deferred<string>();const seen:string[]=[];
+    const polling=gate.run(async()=>{seen.push("poll");return d.promise;});
+    await Promise.resolve();await Promise.resolve();
+    await assert.rejects(gate.run(async()=>{seen.push("start");return "start";}),/not queued/);
+    const stop=gate.run(async()=>{seen.push("stop");return "stop";},true);
+    await assert.rejects(gate.run(async()=>"new poll"),/not queued/);
+    d.resolve("done");await Promise.all([polling,stop]);assert.deepEqual(seen,["poll","stop"]);
+  });
+  await test("shared page command gate cancels waiting Stops across reconnect", async () => {
+    let session=1;const gate=new CommandGate(()=>session);const d=deferred<string>();let stopped=false;
+    const poll=gate.run(()=>d.promise);await Promise.resolve();await Promise.resolve();
+    const stop=gate.run(async()=>{stopped=true;return "stop";},true);
+    const rejected=assert.rejects(stop,/session changed/);session++;d.resolve("done");
+    await Promise.all([poll,rejected]);assert.equal(stopped,false);
+  });
+  console.log(`${passed} motor-bench tests passed`);
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

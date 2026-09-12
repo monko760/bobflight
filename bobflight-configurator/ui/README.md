@@ -15,3 +15,8 @@ Start the Vite dev server from the monorepo, then open **http://127.0.0.1:5173**
 ## Protocol
 
 Uses  (Vite aliases to protocol source for browser ESM). Rates/PID use Protocol settings; local mockSettingsApi is fallback only.
+
+## Motor workbench
+
+See [Motor bench controls, safety gates, and tests](MOTOR-BENCH.md) for the
+DShot selector, motor layout, sequence controls, and offline simulation.

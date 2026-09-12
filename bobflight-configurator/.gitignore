@@ -20,3 +20,6 @@ tmp/
 temp/
 
 ui/scripts/*.bundle.mjs
+
+# Generated motor-bench test bundle
+ui/scripts/test-motor-bench.bundle.mjs

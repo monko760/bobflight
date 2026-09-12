@@ -9,6 +9,7 @@
 
 import {
   SETTINGS_KEYS,
+  MockMotorBench,
   cloneDefaultSettings,
   type SettingsKey,
 } from "@bobflight/protocol";
@@ -51,6 +52,7 @@ export class MockBobFlightHost implements BobFlightHost {
   private lineListeners = new Set<(line: string) => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private armed = false;
+  private bench = new MockMotorBench();
   private gyroHealthy = false;
   private failsafeActive = false;
   private connectDelayMs: number;
@@ -128,6 +130,7 @@ export class MockBobFlightHost implements BobFlightHost {
     }
     this.lastError = null;
     this.armed = false;
+    this.bench.reset();
     this.setStatus("connecting");
     await delay(this.connectDelayMs);
     if (!options.path) {
@@ -144,11 +147,12 @@ export class MockBobFlightHost implements BobFlightHost {
 
   async disconnect(): Promise<void> {
     this.setStatus("disconnected");
+    this.bench.disconnect();
     this.armed = false;
   }
 
   async sendCommand(cmd: CliCommand): Promise<string> {
-    if (!ALLOWED_CLI_COMMANDS.includes(cmd)) {
+    if (!ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(motor_test [0-4]|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     if (this.status !== "connected") {
@@ -218,10 +222,13 @@ export class MockBobFlightHost implements BobFlightHost {
   }
 
   private handle(cmd: CliCommand): string {
+    const benchReply = this.bench.handle(cmd, this.armed);
+    if (benchReply !== null) return benchReply;
     switch (cmd) {
       case "help":
         return [
           "BobFlight CLI",
+          this.bench.help,
           "  help     - this text",
           "  version  - firmware version",
           "  status   - MCU, loops, arm, gyro, board",
@@ -242,6 +249,7 @@ export class MockBobFlightHost implements BobFlightHost {
           `gyro_ok: ${gyroOk}`,
           "gyro_bind: mock",
           "dshot_bound: 0/4",
+          "motor_output: unavailable",
           "rx: none unbound",
           "mmio: denied",
           `arm: ${arm}`,
