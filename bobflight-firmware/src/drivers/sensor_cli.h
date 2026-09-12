@@ -4,6 +4,7 @@
  */
 #ifndef BOBFLIGHT_SENSOR_CLI_H
 #define BOBFLIGHT_SENSOR_CLI_H
+#include <math.h>
 static void cmd_sensors(bool details)
 {
     char buf[1100];
@@ -32,6 +33,9 @@ static void cmd_sensors(bool details)
         gyro_manual_calibration_active()?"yes":"no",d->config_ok?"yes":"no");
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
     cli_write_str(buf);
+    n=snprintf(buf,sizeof(buf),"cal_apply_detail: %s\r\n",c.apply_detail?c.apply_detail:"");
+    if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
+    cli_write_str(buf);
     if(details) {
         n=snprintf(buf,sizeof(buf),"sensor_chip: %s\r\nmpu_gyro_config: 0x%02x\r\nmpu_accel_config: 0x%02x\r\n"
             "gyro_bias: %.5f %.5f %.5f\r\naccel_bias: %.6f %.6f %.6f\r\naccel_scale: %.6f %.6f %.6f\r\n",
@@ -41,6 +45,23 @@ static void cmd_sensors(bool details)
             (double)c.accel_scale[0],(double)c.accel_scale[1],(double)c.accel_scale[2]);
         if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
         cli_write_str(buf);
+        cli_write_str("cal_diagnostics_version: 1\r\n");
+        for(unsigned face=0;face<6;face++) {
+            const float *v=c.face_mean[face];
+            if(!(c.faces&(1u<<face)))n=snprintf(buf,sizeof(buf),"cal_raw_face_%u: uncaptured\r\n",face);
+            else if(!isfinite(v[0]) || !isfinite(v[1]) || !isfinite(v[2]))n=snprintf(buf,sizeof(buf),"cal_raw_face_%u: unavailable\r\n",face);
+            else n=snprintf(buf,sizeof(buf),"cal_raw_face_%u: %.6f %.6f %.6f\r\n",face,(double)v[0],(double)v[1],(double)v[2]);
+            if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
+            cli_write_str(buf);
+        }
+        cli_write_str(c.candidate_valid?"cal_candidate_valid: yes\r\n":"cal_candidate_valid: no\r\n");
+        if(c.candidate_valid) {
+            n=snprintf(buf,sizeof(buf),"cal_candidate_bias: %.6f %.6f %.6f\r\ncal_candidate_scale: %.6f %.6f %.6f\r\n",
+                (double)c.candidate_bias[0],(double)c.candidate_bias[1],(double)c.candidate_bias[2],
+                (double)c.candidate_scale[0],(double)c.candidate_scale[1],(double)c.candidate_scale[2]);
+            if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
+            cli_write_str(buf);
+        }
     }
     cli_write_str(details?"calibration_end: 1\r\n":"sensors_end: 1\r\n");
 }

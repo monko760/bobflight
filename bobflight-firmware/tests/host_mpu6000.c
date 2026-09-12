@@ -30,11 +30,29 @@ int main(void){float d[3];b.gyro_spi_bus=4;b.gyro_cs_pin=HAL_PIN_PACK(4,4);
  val(0x3B,2048);val(0x3D,1024);val(0x3F,4096);val(0x43,164);val(0x45,-328);val(0x47,492);
  CHECK(gyro_sample(d));CHECK(fabsf(d[0]-20)<.01f&&fabsf(d[1]-10)<.01f&&fabsf(d[2]-30)<.01f);
  CHECK(fabsf(gyro_accel_g()[0]+.25f)<.001f&&fabsf(gyro_accel_g()[1]-.5f)<.001f);
- val(0x3B,0);val(0x3D,0);val(0x43,16);val(0x45,0);val(0x47,0);gyro_begin_calibration();
+ val(0x3B,0);val(0x3D,0);val(0x3F,3359);val(0x43,16);val(0x45,0);val(0x47,0);gyro_begin_calibration();
  for(int i=0;i<999;i++){++now;CHECK(gyro_sample(d));}CHECK(!gyro_calibrated());
  val(0x43,1640);++now;CHECK(gyro_sample(d));val(0x43,16);
  for(int i=0;i<1000;i++){++now;CHECK(gyro_sample(d));}CHECK(!gyro_calibrated());
  ++now;CHECK(gyro_sample(d));CHECK(gyro_calibrated());CHECK(fabsf(d[1])<.001f);
+ CHECK(!gyro_flight_ready()); /* Calibrated gyro at raw ~0.82 g is not flight-ready. */
+ CHECK(gyro_start_manual_calibration());CHECK(gyro_manual_calibration_active());
+ CHECK(!gyro_start_accel_calibration());gyro_cancel_manual_calibration();
+ CHECK(!gyro_manual_calibration_active());
+ CHECK(gyro_start_accel_calibration());
+ for(unsigned face=0;face<6;face++) {
+  CHECK(gyro_capture_accel_face(face));float raw[3]={0,0,-.2f};
+  raw[face/2u]+=(face&1u)?-1.f:1.f;
+  /* Inverse CW270: body X=-sensor Y, body Y=sensor X. */
+  val(0x3B,(int)(raw[1]*4096.f));val(0x3D,(int)(-raw[0]*4096.f));val(0x3F,(int)(raw[2]*4096.f));
+  for(unsigned i=0;i<501;i++){now++;CHECK(gyro_sample(d));gyro_calibration_touch();gyro_calibration_tick();}
+ }
+ CHECK(gyro_apply_accel_calibration());CHECK(gyro_flight_ready());
+ gyro_calibration_info_t info;gyro_calibration_info(&info);
+ CHECK(info.accel_valid&&info.candidate_valid&&info.faces==63&&strstr(info.apply_detail,"All six faces passed"));
+ now+=101;CHECK(!gyro_flight_ready());now++;CHECK(gyro_sample(d));CHECK(gyro_flight_ready());
+ val(0x3F,6000);now++;CHECK(gyro_sample(d));CHECK(!gyro_flight_ready());
+ val(0x3F,3277);now++;CHECK(gyro_sample(d));CHECK(gyro_flight_ready());
  CHECK(gyro_diagnostics()->config_ok);
  uint32_t seq=gyro_diagnostics()->sample_seq;
  regs[0x3a]=0;now++;CHECK(gyro_sample(d));CHECK(gyro_diagnostics()->sample_seq==seq);

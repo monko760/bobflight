@@ -28,7 +28,7 @@ int main(void){
  CHECK(fabsf(c.accel_bias[2]+.2f)<1e-5f&&fabsf(c.accel_scale[2]-1)<1e-5f);
  float a[3]={0,0,.8f},corrected[3];sc_correct_accel(&c,a,corrected);CHECK(fabsf(corrected[2]-1)<1e-5f);
  sc_begin_gyro(&c,now);feed(&c,&now,a,1001);CHECK(c.mode==SC_COMPLETE&&c.gyro_valid);
- sc_begin_gyro(&c,now);a[2]=.6f;feed(&c,&now,a,1100);CHECK(c.samples==0&&strstr(c.reason,"gravity"));
+ sc_begin_gyro(&c,now);a[2]=.4f;feed(&c,&now,a,1100);CHECK(c.samples==0&&strstr(c.reason,"gyro-raw-accel-outside"));
  /* All-axis offsets must survive orthogonal raw components, but are bounded
   * as a vector rather than allowing 0.3 g independently on every axis. */
  const float multi[3]={.18f,-.16f,.13f},scale[3]={1.02f,.98f,1.01f};
@@ -44,6 +44,8 @@ int main(void){
  /* Capturing a tilted but stationary pose must not become a good calibration. */
  CHECK(stage(&c,&now,zero,one)==0);c.face_mean[0][1]=.2f;
  CHECK(!sc_apply_accel(&c));CHECK(strstr(c.reason,"centers-disagree"));
+ CHECK(c.candidate_valid&&strstr(c.apply_detail,"Pair +X/-X, axis Y")&&strstr(c.apply_detail,"difference=+0.10000 g"));
+ CHECK(strstr(c.apply_detail,"limit=0.05000 g")&&c.apply_detail[sizeof(c.apply_detail)-1]==0);
  CHECK(stage(&c,&now,zero,one)==0);c.face_mean[0][1]=.15f;c.face_mean[1][1]=-.15f;
  CHECK(!sc_apply_accel(&c));CHECK(strstr(c.reason,"pose-residual"));
  CHECK(stage(&c,&now,zero,one)==0);c.face_mean[0][2]=NAN;CHECK(!sc_apply_accel(&c));
@@ -57,6 +59,6 @@ int main(void){
  CHECK(c.faces==0&&c.samples==0&&strstr(c.reason,"noisy"));
  const float still[3]={0,0,0};a[2]=.8f;
  for(unsigned i=0;i<1000;i++){sc_feed(&c,still,a,now);}CHECK(c.samples<=1&&c.faces==0);
- sc_cancel(&c,"cancelled");CHECK(c.accel_valid&&memcmp(old_bias,c.accel_bias,sizeof old_bias)==0);
- puts("PASS: +/- offset faces, all-axis solve, corrected gyro gate, large-offset warning, low sensitivity/oversized offset/pose inconsistency rejection, raw motion/noise/duplicates, atomic rollback");return 0;
+ sc_cancel(&c,"cancelled");CHECK(!c.candidate_valid&&c.apply_detail[0]==0);CHECK(c.accel_valid&&memcmp(old_bias,c.accel_bias,sizeof old_bias)==0);
+ puts("PASS: +/- offset faces, all-axis solve, gyro raw plausibility, large-offset warning, low sensitivity/oversized offset/pose inconsistency rejection, raw motion/noise/duplicates, atomic rollback");return 0;
 }

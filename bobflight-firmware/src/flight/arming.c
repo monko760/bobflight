@@ -37,7 +37,8 @@ bool arming_try_arm(void)
 #if !defined(BOBFLIGHT_FLIGHT_ENABLE) || !BOBFLIGHT_FLIGHT_ENABLE
     return false;
 #endif
-    if(!gyro_calibrated() || !rx_frame_fresh())return false;
+    /* Stationary gyro bias alone is insufficient to validate accelerometer gravity. */
+    if(!gyro_flight_ready() || !rx_frame_fresh())return false;
 #endif
     if (!gyro_is_healthy() || !g_gyro_ok) {
         return false;

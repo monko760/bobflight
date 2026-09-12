@@ -15,7 +15,8 @@ int main(void){
  CHECK(fabsf(c.gyro_bias[0]-1)<1e-5f&&fabsf(c.gyro_bias[1]+2)<1e-5f);
  sc_begin_gyro(&c,now);for(int i=0;i<2000;i++)sc_feed(&c,g,a,now);CHECK(c.samples==1);
  g[0]=6;feed(&c,g,a,&now,1);CHECK(c.samples==0);g[0]=1;
- a[2]=.82f;feed(&c,g,a,&now,1100);CHECK(c.samples==0&&strstr(c.reason,"gravity"));a[2]=1;
+ a[2]=.82f;feed(&c,g,a,&now,1100);CHECK(c.gyro_valid&&c.mode==SC_COMPLETE&&!c.accel_valid);a[2]=1;
+ sc_begin_gyro(&c,now);
  sc_tick(&c,c.phase_started+30000u);CHECK(c.mode==SC_ERROR&&c.gyro_bias[0]==1);
  sc_begin_gyro(&c,now);g[0]=NAN;feed(&c,g,a,&now,1);CHECK(c.mode==SC_ERROR);g[0]=1;
  sc_begin_gyro(&c,now);feed(&c,g,a,&now,600);now+=21;feed(&c,g,a,&now,1);CHECK(c.samples==1);
@@ -44,5 +45,5 @@ int main(void){
  /* A malicious/invalid staged solution never modifies applied coefficients. */
  sc_begin_accel(&c,now);c.faces=63;c.face_mean[0][0]=.01f;c.face_mean[1][0]=.01f;
  CHECK(!sc_apply_accel(&c));CHECK(fabsf(c.accel_scale[0]-scale[0])<1e-5f);
- puts("PASS: gyro and six-face solve, duplicates, motion/noise, wrong face, 0.82g, NaN, gaps, timeout, wrap, cancel and atomic apply");return 0;
+ puts("PASS: gyro and six-face solve, duplicates, motion/noise, wrong face, independent gyro at 0.82g, NaN, gaps, timeout, wrap, cancel and atomic apply");return 0;
 }

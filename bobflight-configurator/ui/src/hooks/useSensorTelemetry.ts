@@ -13,6 +13,7 @@ export function useSensorTelemetry(){
   const [snapshot,setSnapshot]=useState<SensorSnapshot|null>(null);
   const [fresh,setFresh]=useState(false),[fps,setFps]=useState(0);
   const [error,setError]=useState<string|null>(null),[reply,setReply]=useState<string|null>(null);
+  const [commandError,setCommandError]=useState<string|null>(null);
   const [pending,setPending]=useState(false),[oldFirmware,setOldFirmware]=useState(false);
   const [propsOff,setPropsOff]=useState(false),[stationary,setStationary]=useState(false);
   const latest=useRef<SensorSnapshot|null>(null),received=useRef(0),advanced=useRef(0);
@@ -27,7 +28,7 @@ export function useSensorTelemetry(){
   // hidden by React batching the status updates into a single connected render.
   useEffect(()=>host.onStatus(()=>{
     lane.invalidate();resetTelemetry();setPropsOff(false);setStationary(false);
-    setPending(false);setReply(null);setError(null);setOldFirmware(false);setSession(n=>n+1);
+    setPending(false);setReply(null);setCommandError(null);setError(null);setOldFirmware(false);setSession(n=>n+1);
   }),[host,lane,resetTelemetry]);
   useEffect(()=>{
     lane.invalidate();resetTelemetry();
@@ -77,7 +78,7 @@ export function useSensorTelemetry(){
       setFresh(valid);setFps(valid?times.current.length:0);
     },50);
     const visibility=()=>{
-      lane.invalidate();if(timer)clearTimeout(timer);resetTelemetry();setPending(false);setReply(null);
+      lane.invalidate();if(timer)clearTimeout(timer);resetTelemetry();setPending(false);setReply(null);setCommandError(null);
       setPropsOff(false);setStationary(false);
       if(document.visibilityState==="visible")void tick();
       // No deferred cancel across USB sessions. Firmware expires the manual
@@ -90,8 +91,8 @@ export function useSensorTelemetry(){
     if(lane.hasPendingAction)return;
     const cancel=cmd==="calibration_cancel" || cmd==="calibrate_accel cancel";
     const action=cancel?"accel_cancel":cmd==="calibrate_gyro"?"gyro_cal":cmd==="calibrate_accel start"?"accel_start":cmd==="calibrate_accel apply"?"accel_apply":/^calibrate_accel [+-][xyz]$/.test(cmd)?"accel_face":null;
-    if(!action){setError("Unsupported calibration command");return;}
-    const generation=lane.generation;setPending(true);setReply(null);
+    if(!action){setCommandError("Unsupported calibration command");return;}
+    const generation=lane.generation;setPending(true);setReply(null);setCommandError(null);
     try{
       const text=await lane.action(async()=>{
         if(document.visibilityState!=="visible")throw new Error("Sensor page is hidden");
@@ -102,9 +103,9 @@ export function useSensorTelemetry(){
       });
       if(generation!==lane.generation)return;
       if(/unknown|unsupported|refused|failed/i.test(text))throw new Error(text.trim());
-      setReply(text.trim());setError(null);return text.trim();
-    }catch(e){if(generation===lane.generation)setError(e instanceof Error?e.message:String(e));}
+      setReply(text.trim());setCommandError(null);return text.trim();
+    }catch(e){if(generation===lane.generation)setCommandError(e instanceof Error?e.message:String(e));}
     finally{if(generation===lane.generation)setPending(false);}
   },[host,lane]);
-  return {connected,snapshot,fresh,fps,error,reply,pending,oldFirmware,propsOff,setPropsOff,stationary,setStationary,command,pollDetailedCalibration,resetTelemetry};
+  return {connected,snapshot,fresh,fps,error:[commandError,error].filter(Boolean).join(" — ")||null,reply,pending,oldFirmware,propsOff,setPropsOff,stationary,setStationary,command,pollDetailedCalibration,resetTelemetry};
 }
