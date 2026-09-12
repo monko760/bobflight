@@ -58,7 +58,11 @@ void loop_pid(void)
         sticks[2] = rc[2];
         sticks[3] = rc[3];
     }
-    if(!rx_frame_fresh() || failsafe_active() || !sample_ok || !dshot_is_healthy()) {arming_disarm();arm_low_seen=false;}
+    /* Failsafe owns RX-loss disarm timing (staged); cascade keeps flying
+     * level commands from failsafe_command_override() while the window runs. */
+    const bool fs_flying = failsafe_command_override(sticks);
+    if(!sample_ok || !dshot_is_healthy()) {arming_disarm();arm_low_seen=false;}
+    else if(fs_flying) {arm_low_seen=false;}
     else if(rc[4]<0.f) {arming_disarm();arm_low_seen=true;}
     else if(rc[4]>0.5f && arm_low_seen && arming_state()!=ARM_ARMED) {
         arm_low_seen=false; /* Every arm attempt requires a new low-to-high switch edge. */
@@ -79,7 +83,9 @@ void loop_mixer_dshot(void)
         throttle = rc[3];
     }
 
-    if (arming_state() != ARM_ARMED || failsafe_active()) {
+    /* Failsafe's own disarm (DROP / land timer) is what stops motors;
+     * PROCEDURE(LAND) must reach the mixer with its descent throttle. */
+    if (arming_state() != ARM_ARMED) {
         for (int i = 0; i < MIXER_MOTOR_COUNT; i++) {
             g_motors[i] = 0.f;
         }
