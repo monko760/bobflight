@@ -20,6 +20,12 @@ void Default_Handler(void);
 void HardFault_Handler(void);
 void SysTick_Handler(void);
 void OTG_FS_IRQHandler(void);
+void USART1_IRQHandler(void);
+void USART2_IRQHandler(void);
+void USART3_IRQHandler(void);
+void UART4_IRQHandler(void);
+void USART6_IRQHandler(void);
+void UART7_IRQHandler(void);
 
 /* Sticky crumb — NOT in .bss (survives after BSS clear once Reset seeds it). */
 volatile uint8_t g_boot_crumb __attribute__((section(".noinit")));
@@ -196,12 +202,15 @@ void Reset_Handler(void)
 typedef void (*vector_fn)(void);
 
 /*
- * Vector table: system exceptions + external IRQs 0..67 (OTG_FS).
+ * Vector table: system exceptions + external IRQs 0..82.  The receiver can
+ * be configured on any supported UART, so every UART IRQ must be present in
+ * the table.  Leaving one out makes the CPU fetch an unrelated word after
+ * enabling RXNEIE, which looks like a USB disconnect/reset on the bench.
  * MemManage / BusFault / UsageFault → HardFault_Handler (crumb blink).
  * Unused IRQs → Default_Handler. Numbers from RM0431 F74x map.
  */
 __attribute__((section(".isr_vector"), used))
-static const vector_fn g_vectors[16 + 68] = {
+static const vector_fn g_vectors[16 + 83] = {
     (vector_fn)(uintptr_t)&_estack,
     Reset_Handler,
     Default_Handler, /* NMI */
@@ -215,7 +224,7 @@ static const vector_fn g_vectors[16 + 68] = {
     0,
     Default_Handler, /* PendSV */
     SysTick_Handler, /* SysTick */
-    /* External IRQ 0..66 */
+    /* External IRQ 0..82 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 0-3 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 4-7 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 8-11 */
@@ -225,13 +234,19 @@ static const vector_fn g_vectors[16 + 68] = {
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 24-27 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 28-31 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 32-35 */
-    Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 36-39 */
+    Default_Handler, USART1_IRQHandler, USART2_IRQHandler, USART3_IRQHandler, /* 36-39 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 40-43 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 44-47 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 48-51 */
-    Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 52-55 */
+    UART4_IRQHandler, Default_Handler, Default_Handler, Default_Handler, /* 52-55 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 56-59 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 60-63 */
     Default_Handler, Default_Handler, Default_Handler,                 /* 64-66 */
     OTG_FS_IRQHandler, /* 67 OTG_FS */
+    Default_Handler, Default_Handler, Default_Handler, /* 68-70 */
+    USART6_IRQHandler, /* 71 */
+    Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 72-75 */
+    Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 76-79 */
+    Default_Handler, Default_Handler, /* 80-81 */
+    UART7_IRQHandler /* 82 */
 };
