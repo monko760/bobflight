@@ -6,7 +6,9 @@
 #include "hal_f7_priv.h"
 #include "board/board.h"
 #include <string.h>
+#ifndef R
 #define R(base,offset) (*(volatile uint32_t*)((uintptr_t)(base)+(offset)))
+#endif
 struct hal_tim_dma {unsigned index; bool open;};
 static hal_tim_dma_t slots[4];
 static unsigned pending;
@@ -95,12 +97,17 @@ bool hal_tim_dma_start_burst(hal_tim_dma_t *slot,const uint16_t *words,size_t n)
         unsigned shift=(st%4==0?0:st%4==1?6:st%4==2?16:22);
         R(t,0)=0;R(t,0x0C)=0;
         R(dmas[g],st<4?8:12)=0x3Du<<shift;
-        for(unsigned k=0;k<4;k++)R(t,0x34+k*4)=frames[g][0][k];
+        /* PWM1 can drive high at CNT=0 even with CEN=0. Latching bit zero
+         * here would stretch its pulse through the remaining CPU setup.
+         * Keep the ACTIVE compares at zero; only a TIMED update may start
+         * the first data bit. This adds one leading, all-low bit period. */
+        for(unsigned k=0;k<4;k++)R(t,0x34+k*4)=0;
         R(t,0x14)=1; R(t,0x10)=0; R(t,0x24)=0;
-        /* UG latches bit zero; preload bit one before the first timed update. */
-        for(unsigned k=0;k<4;k++)R(t,0x34+k*4)=frames[g][1][k];
-        R(s,0)=0;R(s,4)=18u*4u;R(s,8)=(uint32_t)(t+0x4C);
-        R(s,12)=(uint32_t)(uintptr_t)&frames[g][2][0];R(s,20)=0;
+        /* First timed update latches bit 0, then DMA preloads bit 1.
+         * Subsequent updates latch bits 1..15 and the four idle slots. */
+        for(unsigned k=0;k<4;k++)R(t,0x34+k*4)=frames[g][0][k];
+        R(s,0)=0;R(s,4)=19u*4u;R(s,8)=(uint32_t)(t+0x4C);
+        R(s,12)=(uint32_t)(uintptr_t)&frames[g][1][0];R(s,20)=0;
         __DMB();
         R(s,0)=(channels[g]<<25)|(2u<<16)|(1u<<13)|(1u<<11)|(1u<<10)|(1u<<6)|1u;
         R(t,0x0C)=1u<<8; R(t,0)=(1u<<7)|1u;
