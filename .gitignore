@@ -3,6 +3,8 @@
 !/.gitignore
 !/README.md
 !/BASELINE.md
+!/.github/
+!/LICENSE
 !/bobflight-firmware/
 !/bobflight-configurator/
 
