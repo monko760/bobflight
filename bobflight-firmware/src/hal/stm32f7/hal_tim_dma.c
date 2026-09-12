@@ -16,6 +16,7 @@ static const uintptr_t timers[2]={0x40000400u,0x40010000u};
 static const uintptr_t dmas[2]={0x40026000u,0x40026400u};
 static const unsigned streams[2]={2,5}, channels[2]={5,6};
 static uint32_t periods[2];
+static uint32_t bit_rate = 300000u; /* DShot300 default; 600000 for DShot600 */
 static uintptr_t stream(unsigned group){return dmas[group]+0x10u+0x18u*streams[group];}
 static void stop(void) {
     for(unsigned g=0;g<2;g++) {
@@ -31,7 +32,7 @@ static bool configure(void) {
     (void)HAL_F7_RCC->APB2ENR;
     for(unsigned g=0;g<2;g++) {
         uintptr_t t=timers[g]; R(t,0)=0; R(t,0x0C)=0;
-        periods[g]=hal_f7_timclk(g==1)/300000u;
+        periods[g]=hal_f7_timclk(g==1)/bit_rate;
         if(periods[g]<8) return false;
         R(t,0x28)=0; R(t,0x2C)=periods[g]-1;
         R(t,0x18)=0x6868; R(t,0x1C)=0x6868; /* PWM1 + CCR preload */
@@ -49,7 +50,7 @@ static bool configure(void) {
 }
 hal_tim_dma_t *hal_tim_dma_open_cfg(const hal_tim_dma_cfg_t *cfg) {
     const board_t *b=board_get();
-    if(!cfg || !b || !board_mmio_permitted() || cfg->bit_hz!=300000u) return 0;
+    if(!cfg || !b || !board_mmio_permitted() || cfg->bit_hz!=bit_rate) return 0;
     static const unsigned tim[4]={3,3,1,1},ch[4]={3,4,1,2};
     static const hal_pin_t pins[4]={HAL_PIN_PACK(1,0),HAL_PIN_PACK(1,1),HAL_PIN_PACK(4,9),HAL_PIN_PACK(4,11)};
     for(unsigned i=0;i<4;i++)if(cfg->pin==pins[i] && cfg->tim==tim[i] && cfg->channel==ch[i]) {
@@ -59,6 +60,22 @@ hal_tim_dma_t *hal_tim_dma_open_cfg(const hal_tim_dma_cfg_t *cfg) {
     return 0;
 }
 hal_tim_dma_t *hal_tim_dma_open(unsigned tim,unsigned ch){(void)tim;(void)ch;return 0;}
+bool hal_tim_dma_set_bit_rate(uint32_t hz) {
+    if(hz!=300000u && hz!=600000u) return false;
+    if(hz==bit_rate) return true;
+    bit_rate=hz;
+    if(!initialized) return true; /* picked up by configure() later */
+    /* Re-time: stop bursts, recompute ARR, keep CCR scaling consistent. */
+    stop(); pending=0;
+    for(unsigned g=0;g<2;g++) {
+        uintptr_t t=timers[g];
+        periods[g]=hal_f7_timclk(g==1)/bit_rate;
+        if(periods[g]<8u) return false;
+        R(t,0x2C)=periods[g]-1;
+        R(t,0x14)=1;
+    }
+    return true;
+}
 bool hal_tim_dma_start_burst(hal_tim_dma_t *slot,const uint16_t *words,size_t n) {
     if(!slot || !slot->open || !words || n!=20)return false;
     if(!pending) {

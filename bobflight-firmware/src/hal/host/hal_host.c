@@ -207,6 +207,11 @@ bool hal_tim_dma_start_burst(hal_tim_dma_t *t, const uint16_t *words, size_t n)
     return false;
 }
 
+bool hal_tim_dma_set_bit_rate(uint32_t hz)
+{
+    return hz == 300000u || hz == 600000u;
+}
+
 bool hal_exti_attach(hal_pin_t pin, hal_exti_cb_t cb, void *ctx)
 {
     (void)pin;

@@ -116,6 +116,8 @@ typedef struct {
 hal_tim_dma_t *hal_tim_dma_open(unsigned tim, unsigned channel);
 hal_tim_dma_t *hal_tim_dma_open_cfg(const hal_tim_dma_cfg_t *cfg);
 bool hal_tim_dma_start_burst(hal_tim_dma_t *t, const uint16_t *words, size_t n);
+/** Re-time the DShot bit clock (300000 or 600000 Hz); false if invalid. */
+bool hal_tim_dma_set_bit_rate(uint32_t hz);
 
 /* ---- EXTI ---- */
 typedef void (*hal_exti_cb_t)(void *ctx);

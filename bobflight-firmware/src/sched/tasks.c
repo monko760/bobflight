@@ -22,10 +22,16 @@ static float sample_dt=0.001f;
 static bool sample_ok,arm_low_seen;
 static unsigned bench_motor;
 static uint32_t bench_started;
+static unsigned bench_seq_step; /* 0 = single test; 1..4 = running sequence */
 bool bench_motor_test(unsigned motor){
-    if(motor==0){bench_motor=0;return true;}
+    if(motor==0){bench_motor=0;bench_seq_step=0;return true;}
     if(motor>4 || arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
     bench_motor=motor;bench_started=hal_millis();return true;
+}
+
+bool bench_motor_seq_start(void){
+    if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
+    bench_seq_step=1;bench_motor=1;bench_started=hal_millis();return true;
 }
 
 static float g_gyro_raw[3];
@@ -92,8 +98,17 @@ void loop_mixer_dshot(void)
     } else {
         mixer_update(&g_pid, throttle, g_motors);
     }
-    if(bench_motor && arming_state()!=ARM_ARMED && hal_usb_cdc_connected() && (uint32_t)(hal_millis()-bench_started)<1000u)g_motors[bench_motor-1]=0.08f;
-    else bench_motor=0;
+    if(bench_motor) {
+        if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected()) {bench_motor=0;bench_seq_step=0;}
+        else {
+            const uint32_t bench_dt=(uint32_t)(hal_millis()-bench_started);
+            if(bench_dt<1000u) g_motors[bench_motor-1]=0.08f;
+            else if(bench_seq_step==0u) bench_motor=0;      /* single test done */
+            else if(bench_dt<1700u) { /* 0.7s all-off gap between motors */ }
+            else if(bench_seq_step<4u) {bench_seq_step++;bench_motor=bench_seq_step;bench_started=hal_millis();}
+            else {bench_motor=0;bench_seq_step=0;}
+        }
+    }
     dshot_write(g_motors);
 }
 

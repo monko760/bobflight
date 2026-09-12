@@ -138,6 +138,16 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/failsafe.c
     tests/host_failsafe.c)
   target_link_libraries(bobflight_failsafe_test m)
+
+  add_executable(bobflight_dshot_speed_test
+    src/flight/arming.c
+    src/drivers/dshot.c
+    tests/host_dshot_speed.c)
+  target_include_directories(bobflight_dshot_speed_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(bobflight_dshot_speed_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_dshot_speed_test m)
   target_include_directories(bobflight_arming_edges_test PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src)
@@ -174,7 +184,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mpu6000_test src/drivers/gyro.c tests/host_mpu6000.c)
   target_compile_definitions(bobflight_mpu6000_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_mpu6000_test m)
-  foreach(check rates_math arming_edges failsafe dshot_frame crsf_parse gyro_inject cascade_inject attitude mpu6000)
+  foreach(check rates_math arming_edges failsafe dshot_frame dshot_speed crsf_parse gyro_inject cascade_inject attitude mpu6000)
     add_test(NAME ${check} COMMAND bobflight_${check}_test)
   endforeach()
 

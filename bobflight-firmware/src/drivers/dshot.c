@@ -2,9 +2,12 @@
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
  *
- * DShot600 — public-protocol packet encode + TIM+DMA bit-period burst.
- * Encode is not Betaflight-derived. Burst only if board_t gave a valid
- * timer+pin (never on dummy IR). Motor count capped at DSHOT_MOTOR_COUNT.
+ * DShot TX, selectable 300/600 kbps — public-protocol packet encode +
+ * TIM+DMA bit-period burst. Encode is not Betaflight-derived. Burst only
+ * if board_t gave a valid timer+pin (never on dummy IR). Motor count
+ * capped at DSHOT_MOTOR_COUNT. Default 300 kbps (bench bring-up); the
+ * header previously claimed DShot600 while the timers were 300k — the
+ * rate is now an explicit, switchable setting.
  *
  * Bit timing (public DShot): bit period ~1.67 µs @ 600 kbit; logical 0/1
  * are ~1/3 and ~2/3 duty within that period. HAL programs ARR from bit_hz;
@@ -19,6 +22,7 @@
 #include <math.h>
 #include "flight/arming.h"
 static bool g_output_ok;
+static unsigned g_kbps = DSHOT_KBPS_300;
 
 static hal_tim_dma_t *g_tim[DSHOT_MOTOR_COUNT];
 static unsigned g_bound;
@@ -77,7 +81,7 @@ void dshot_init(void)
         cfg.tim = b->motors[i].timer;
         cfg.channel = b->motors[i].channel;
         cfg.pin = b->motors[i].pin;
-        cfg.bit_hz = 300000u;
+        cfg.bit_hz = 1000u * g_kbps;
         g_tim[i] = hal_tim_dma_open_cfg(&cfg);
         if (g_tim[i]) {
             g_bound++;
@@ -124,6 +128,26 @@ void dshot_write(const float motor[DSHOT_MOTOR_COUNT])
             if(!hal_tim_dma_start_burst(g_tim[i], g_burst[i], DSHOT_BURST_LEN)) {g_output_ok=false; arming_disarm();}
         }
     }
+}
+
+bool dshot_set_speed_kbps(unsigned kbps)
+{
+    if (kbps != DSHOT_KBPS_300 && kbps != DSHOT_KBPS_600) {
+        return false;
+    }
+    if (arming_state() == ARM_ARMED) {
+        return false; /* no re-timing mid-flight */
+    }
+    if (!hal_tim_dma_set_bit_rate(1000u * kbps)) {
+        return false;
+    }
+    g_kbps = kbps;
+    return true;
+}
+
+unsigned dshot_speed_kbps(void)
+{
+    return g_kbps;
 }
 
 unsigned dshot_bound_count(void)
