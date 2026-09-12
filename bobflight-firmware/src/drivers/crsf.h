@@ -31,4 +31,8 @@ bool crsf_parse_rc_frame(const uint8_t *frame, size_t n, float out[16]);
 #endif
 
 void crsf_to_controls(const float raw[16],float controls[16]);
+bool crsf_set_map(const char *map);
+const char *crsf_map(void);
+uint32_t crsf_crc_errors(void);
+uint32_t crsf_stream_resets(void);
 #endif /* BOBFLIGHT_CRSF_H */

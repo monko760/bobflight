@@ -5,6 +5,7 @@ export class MockMotorBench {
   private until = 0;
   constructor(readonly ready = false, private now: () => number = Date.now) {}
   reset(): void { this.rate = 300; this.until = 0; }
+  get active(): boolean { return this.now() < this.until; }
   disconnect(): void { this.until = 0; }
   get help(): string { return "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n  motor_pulse <1..4> <0..35> - one-second adjustable props-off pulse\r\n  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n  dshot [300|600] - show or switch DShot bit rate\r\n"; }
   handle(line: string, armed: boolean): string | null {

@@ -29,6 +29,8 @@ void rx_poll(void);
 /** Channels normalized roughly [-1,1] for sticks; mid = 0. Stub: zeros. */
 const float *rx_channels(void);
 bool rx_frame_fresh(void);
+/* UINT32_MAX means no accepted frame since receiver initialization. */
+uint32_t rx_frame_age_ms(void);
 bool rx_uart_bound(void);
 const char *rx_protocol_name(void);
 

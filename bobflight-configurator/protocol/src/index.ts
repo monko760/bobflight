@@ -120,3 +120,4 @@ export { assertMcuGate, normalizeFirmware } from "./flasher/mcu-gate";
 export { MockMotorBench } from "./bench-mock";
 
 export { mockSensorReply } from "./sensor-mock";
+export { MockReceiver } from "./receiver-mock";
