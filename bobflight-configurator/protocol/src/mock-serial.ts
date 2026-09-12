@@ -6,6 +6,7 @@
 import { EventEmitter } from "events";
 import { MockMotorBench } from "./bench-mock";
 import { mockSensorReply } from "./sensor-mock";
+import { MockReceiver } from "./receiver-mock";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -42,6 +43,7 @@ export class MockSerial extends EventEmitter {
 
   private lineBuf = "";
   private bench: MockMotorBench;
+  private receiver = new MockReceiver();
   private armed = false;
   private rebootRequested = false;
   /** Numeric store mirroring bf_config_t floats. */
@@ -146,6 +148,9 @@ export class MockSerial extends EventEmitter {
     const sensorReply = mockSensorReply(line, this.armed);
     if (sensorReply !== null) { this.emitData(sensorReply); return; }
     const benchReply = this.bench.handle(line, this.armed);
+    if (line==="reboot") this.receiver.reset();
+    const receiverReply = this.receiver.handle(line,this.armed,this.bench.active);
+    if(receiverReply!==null) { this.emitData(receiverReply);return; }
     if (benchReply !== null) { this.emitData(benchReply); return; }
 
     if (line === "help") {

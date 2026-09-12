@@ -31,6 +31,7 @@ hal_uart_t *hal_uart_open_cfg(const hal_uart_cfg_t *cfg) {
     default:return 0;
     }
     NVIC_DisableIRQ((IRQn_Type)active_irq);if(port.open)port.r->CR1=0;
+    port.open=false;
     if(apb2)HAL_F7_RCC->APB2ENR|=1u<<enable;else HAL_F7_RCC->APB1ENR|=1u<<enable;
     (void)HAL_F7_RCC->APB2ENR;HAL_F7_RCC->DCKCFGR2&=~(3u<<mux);
     port.r=(uart_regs_t*)base;port.r->CR1=0;active_irq=irq;

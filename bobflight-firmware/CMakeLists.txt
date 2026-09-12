@@ -118,6 +118,9 @@ include_directories(
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME boot_led_modes COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_boot_led_modes.py ${CMAKE_C_COMPILER})
+  add_executable(bobflight_receiver_test src/drivers/rx.c src/drivers/crsf.c tests/host_receiver.c)
+  target_link_libraries(bobflight_receiver_test m)
+  add_test(NAME receiver COMMAND bobflight_receiver_test)
   add_executable(bobflight_power_test src/drivers/power.c tests/host_power.c)
   target_link_libraries(bobflight_power_test m)
   add_dependencies(bobflight_power_test bobflight_pins_gen)

@@ -157,6 +157,17 @@ int main(void)
     if (!failsafe_command_override(st)) return fail("override for clamp check");
     if (st[3] > 1.0f) return fail("land throttle must clamp to 1.0");
 
+    /* A disarmed receiver configuration reset must retain the selected policy. */
+    arming_disarm();
+    failsafe_set_action(FAILSAFE_ACTION_HOLD);
+    failsafe_set_hold_ms(100u);
+    failsafe_reset_rx_link();
+    if (!failsafe_active()) return fail("receiver reset must invalidate old link");
+    arm_ok(8000u);
+    failsafe_tick(8251u);
+    if (failsafe_stage()!=FAILSAFE_STAGE_HOLD) return fail("receiver reset preserves hold time");
+    failsafe_tick(8352u);
+    if (arming_state()!=ARM_ARMED) return fail("receiver reset preserves HOLD action");
     puts("PASS: staged failsafe (recovery, drop, hold, land)");
     return 0;
 }

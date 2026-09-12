@@ -153,7 +153,7 @@ export class MockBobFlightHost implements BobFlightHost {
   }
 
   async sendCommand(cmd: CliCommand): Promise<string> {
-    if (!ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5])|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
+    if (!ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5])|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     if (this.status !== "connected") {
@@ -222,9 +222,13 @@ export class MockBobFlightHost implements BobFlightHost {
     return { ...this.settings };
   }
 
+  private receiver = new MockReceiver();
   private handle(cmd: CliCommand): string {
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;
+    if(cmd==="reboot") this.receiver.reset();
+    const receiverReply=this.receiver.handle(cmd,this.armed,this.bench.active);
+    if(receiverReply!==null)return receiverReply;
     const benchReply = this.bench.handle(cmd, this.armed);
     if (benchReply !== null) return benchReply;
     switch (cmd) {
@@ -288,3 +292,4 @@ export class MockBobFlightHost implements BobFlightHost {
   }
 }
 
+import { MockReceiver } from "@bobflight/protocol";
