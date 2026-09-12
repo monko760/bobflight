@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "flight/arming.h"
+#include "drivers/calibration_policy.h"
 #include "flight/failsafe.h"
 #include "drivers/gyro.h"
 #include "drivers/rx.h"
@@ -32,6 +33,10 @@ void arming_set_gyro_healthy(bool healthy)
 
 bool arming_try_arm(void)
 {
+#if BOBFLIGHT_ACCEL_BENCH_RELAXED
+    /* Independently fail closed even if another caller bypasses gyro readiness. */
+    return false;
+#endif
 #if defined(BOBFLIGHT_MCU)
     /* Bench image cannot arm; enable only after axis/motor bench validation. */
 #if !defined(BOBFLIGHT_FLIGHT_ENABLE) || !BOBFLIGHT_FLIGHT_ENABLE

@@ -104,6 +104,11 @@ export function SensorsPage() {
         Move the quad gently. Gyro measures rotation speed; acceleration includes gravity.
       </p>
 
+      {snapshot?.cal_bench_relaxed && <p role="alert" style={{border:"2px solid currentColor",padding:"12px"}}>
+        <strong>EXPERIMENTAL BENCH-ONLY CALIBRATION — NOT FOR FLIGHT.</strong> Relaxed pose limits are enabled.
+        Apply can install a diagnostic correction, not a flight-qualified calibration. Keep propellers removed;
+        firmware arming is disabled. Pair limit: 0.10 g; pose-component limit: 0.15 g. RAM-only.
+      </p>}
       {/* Banner message */}
       <p
         role="status"
@@ -251,7 +256,7 @@ export function SensorsPage() {
             <div className="status-card">
               <div className="k">Accel Calibrated</div>
               <div className="v">
-                {fresh ? (snapshot?.accel_calibrated ? "yes" : "no") : "—"}
+                {fresh ? (snapshot?.accel_calibrated ? (snapshot.cal_bench_relaxed ? "BENCH ONLY" : "yes") : "no") : "—"}
               </div>
             </div>
           </div>
@@ -363,7 +368,7 @@ export function SensorsPage() {
 
       <p>Green face cards mean <strong>captured</strong>, not calibrated. Apply must validate all six measurements together.</p>
       {snapshot?.cal_apply_detail && <p role="status" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>
-        <strong>{snapshot.accel_calibrated?"Last Apply result":"Apply diagnostics"}{fresh?"":" (stale)"}:</strong> {snapshot.cal_apply_detail}
+        <strong>{snapshot.accel_calibrated?(snapshot.cal_bench_relaxed?"Experimental bench Apply result":"Last Apply result"):"Apply diagnostics"}{fresh?"":" (stale)"}:</strong> {snapshot.cal_apply_detail}
       </p>}
       {/* 6-Face Controls & Progress */}
       <div style={{ marginBottom: "16px" }}>
@@ -518,6 +523,7 @@ export function SensorsPage() {
               Hex Readbacks: Gyro Config <code>{snapshot.mpu_gyro_config ?? "N/A"}</code> | Accel
               Config <code>{snapshot.mpu_accel_config ?? "N/A"}</code>
             </p>
+            <p>Calibration policy: <strong>{snapshot.cal_bench_relaxed===true?"RELAXED BENCH ONLY — never flight-qualified":snapshot.cal_bench_relaxed===false?"Standard checks":"Not reported by this firmware"}</strong></p>
             <h4>Captured raw faces (g) — not applied coefficients</h4>
             {snapshot.cal_raw_faces ? <table style={{width:"100%",textAlign:"left"}}>
               <thead><tr><th>Face</th><th>Raw X</th><th>Raw Y</th><th>Raw Z</th></tr></thead>

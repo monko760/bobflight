@@ -446,11 +446,16 @@ void gyro_host_inject_dps(const float dps[3], bool healthy)
 void gyro_begin_calibration(void){sc_begin_gyro(&g_cal,hal_millis());}
 bool gyro_calibrated(void){return g_cal.gyro_valid && g_cal.mode!=SC_GYRO && !g_manual;}
 bool gyro_flight_ready(void) {
+#if BOBFLIGHT_ACCEL_BENCH_RELAXED
+    /* A relaxed bench correction never grants flight readiness. */
+    return false;
+#else
     if(!gyro_calibrated() || !g_cal.accel_valid || !g_healthy || !g_diag.config_ok ||
        !g_diag.sample_seq || (uint32_t)(hal_millis()-g_diag.sample_ms)>100u)return false;
     float norm=0.f;
     for(unsigned i=0;i<3;i++){if(!isfinite(g_acc[i]))return false;norm+=g_acc[i]*g_acc[i];}
     return norm>=0.81f && norm<=1.21f;
+#endif
 }
 const float *gyro_accel_g(void){return g_acc;}
 const float *gyro_latest_dps(void){return g_latest;}

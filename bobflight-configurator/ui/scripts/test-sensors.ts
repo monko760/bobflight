@@ -95,6 +95,12 @@ async function main(){
   assert.equal(parseKeyValueSnapshot(report.replace('cal_apply_detail: Pair +X/-X, axis Y: midpoint=+0.1 g, limit=0.05 g','cal_apply_detail: '+ 'x'.repeat(256))),null);
   assert.ok(parseKeyValueSnapshot(report.replace('cal_raw_face_0: 0 0 1','cal_raw_face_0: unavailable')));
  });
+ await test('bench-relaxed policy is explicit, optional for old firmware, and rejects ambiguous flags',()=>{
+  assert.equal(parseKeyValueSnapshot(fixture)?.cal_bench_relaxed,undefined);
+  for(const [text,value] of [['yes',true],['no',false]] as const)
+   assert.equal(parseKeyValueSnapshot(fixture.replace('sensors_end: 1',`cal_bench_relaxed: ${text}\nsensors_end: 1`))?.cal_bench_relaxed,value);
+  for(const value of ['true','1','maybe',''])assert.equal(parseKeyValueSnapshot(fixture.replace('sensors_end: 1',`cal_bench_relaxed: ${value}\nsensors_end: 1`)),null);
+ });
  await test('single in-flight read; action waits for current read; no poll queue',async()=>{
   const lane=new SensorRequestLane();let release!:(s:string)=>void,reads=0,actions=0;
   const read=lane.read(()=>{reads++;return new Promise<string>(r=>release=r);});await Promise.resolve();

@@ -2,6 +2,7 @@
 #ifndef BOBFLIGHT_SENSOR_CALIBRATION_H
 #define BOBFLIGHT_SENSOR_CALIBRATION_H
 #include <stdbool.h>
+#include "drivers/calibration_policy.h"
 #include <stdint.h>
 typedef enum {SC_IDLE,SC_GYRO,SC_ACCEL_WAIT,SC_ACCEL_COLLECT,SC_COMPLETE,SC_ERROR} sc_mode_t;
 typedef struct {

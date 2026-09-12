@@ -78,6 +78,10 @@ add_custom_target(bobflight_pins_gen DEPENDS "${BOBFLIGHT_PINS_GEN}")
 
 option(BOBFLIGHT_HOST_SMOKE "Build host smoke binary (no MCU)" ON)
 option(BOBFLIGHT_FLIGHT_ENABLE "Enable AUX1 flight arming after physical bench validation" OFF)
+option(BOBFLIGHT_ACCEL_BENCH_RELAXED "Experimental relaxed accel pose checks; never flight-qualified" OFF)
+if(BOBFLIGHT_ACCEL_BENCH_RELAXED AND BOBFLIGHT_FLIGHT_ENABLE)
+  message(FATAL_ERROR "Relaxed accelerometer calibration is bench-only: flight must remain disabled")
+endif()
 option(BOBFLIGHT_PROVE_RESET "Reset_Handler-only forever PA2 blink (never main); diagnostic" OFF)
 option(BOBFLIGHT_BOOT_LED_DIAGNOSTICS "Blocking startup LED patterns for bring-up; leave OFF for normal boots" OFF)
 add_compile_definitions(BOBFLIGHT_BOOT_LED_DIAGNOSTICS=$<BOOL:${BOBFLIGHT_BOOT_LED_DIAGNOSTICS}>)
@@ -122,6 +126,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_host m)
   add_dependencies(bobflight_host bobflight_pins_gen)
   target_compile_definitions(bobflight_host PRIVATE
+    BOBFLIGHT_ACCEL_BENCH_RELAXED=$<BOOL:${BOBFLIGHT_ACCEL_BENCH_RELAXED}>
     BOBFLIGHT_HOST=1
     BOBFLIGHT_BOARD_ID="${BOBFLIGHT_BOARD}")
   message(STATUS "BobFlight: host smoke target 'bobflight_host'")
@@ -197,6 +202,20 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_compile_definitions(bobflight_arming_calibration_test PRIVATE BOBFLIGHT_MCU=1 BOBFLIGHT_FLIGHT_ENABLE=1)
   target_link_libraries(bobflight_arming_calibration_test m)
   add_test(NAME arming_calibration COMMAND bobflight_arming_calibration_test)
+  foreach(policy IN ITEMS strict relaxed)
+    add_executable(bobflight_accel_${policy}_policy_test src/drivers/sensor_calibration.c tests/host_accel_policy.c)
+    target_link_libraries(bobflight_accel_${policy}_policy_test m)
+    if(policy STREQUAL "relaxed")
+      target_compile_definitions(bobflight_accel_${policy}_policy_test PRIVATE BOBFLIGHT_ACCEL_BENCH_RELAXED=1)
+    endif()
+    add_test(NAME accel_${policy}_policy COMMAND bobflight_accel_${policy}_policy_test)
+  endforeach()
+  add_executable(bobflight_relaxed_arming_test src/flight/arming.c src/flight/failsafe.c tests/host_relaxed_arming.c)
+  target_compile_definitions(bobflight_relaxed_arming_test PRIVATE BOBFLIGHT_ACCEL_BENCH_RELAXED=1)
+  target_link_libraries(bobflight_relaxed_arming_test m)
+  add_test(NAME relaxed_arming COMMAND bobflight_relaxed_arming_test)
+  add_test(NAME calibration_policy_guards COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_calibration_policy_guards.py ${CMAKE_C_COMPILER} ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR})
   add_executable(bobflight_sensor_calibration_test src/drivers/sensor_calibration.c tests/host_sensor_calibration.c)
   target_link_libraries(bobflight_sensor_calibration_test m)
   add_test(NAME sensor_calibration COMMAND bobflight_sensor_calibration_test)
@@ -205,6 +224,10 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mpu6000_test src/drivers/gyro.c src/drivers/sensor_calibration.c tests/host_mpu6000.c)
   target_compile_definitions(bobflight_mpu6000_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_mpu6000_test m)
+  add_executable(bobflight_mpu6000_relaxed_test src/drivers/gyro.c src/drivers/sensor_calibration.c tests/host_mpu6000.c)
+  target_compile_definitions(bobflight_mpu6000_relaxed_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_ACCEL_BENCH_RELAXED=1)
+  target_link_libraries(bobflight_mpu6000_relaxed_test m)
+  add_test(NAME mpu6000_relaxed COMMAND bobflight_mpu6000_relaxed_test)
   add_executable(bobflight_bench_safety_test
     src/sched/tasks.c src/flight/pid.c src/flight/mixer.c
     src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c)
@@ -271,6 +294,7 @@ else()
     ${BF_TUSB_SOURCES})
   add_dependencies(bobflight.elf bobflight_pins_gen)
   target_compile_definitions(bobflight.elf PRIVATE
+    BOBFLIGHT_ACCEL_BENCH_RELAXED=$<BOOL:${BOBFLIGHT_ACCEL_BENCH_RELAXED}>
     BOBFLIGHT_MCU=1
     BOBFLIGHT_HAVE_CMSIS=1
     BOBFLIGHT_BOARD_ID="${BOBFLIGHT_BOARD}"

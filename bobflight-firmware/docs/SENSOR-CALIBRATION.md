@@ -101,6 +101,64 @@ is neither proof of a defective sensor nor sufficient evidence to apply any
 correction. Register configuration, sign, full six-face geometry and physical
 repeatability must be checked; this patch does not establish the hardware cause.
 
+## Explicit experimental bench relaxation (default OFF)
+
+Robert requested a temporary less-sensitive bench correction after the latest
+recorded six-face set narrowly failed the standard pose checks. This is **not a
+flight workaround** and does not establish that the offset or sensor is healthy.
+`-DBOBFLIGHT_ACCEL_BENCH_RELAXED=ON` changes only two Apply checks:
+
+| Check | Standard/default | Experimental bench |
+| --- | --- | --- |
+| Opposite-pair midpoint component difference | 0.05 g | 0.10 g |
+| Corrected face component residual | 0.10 g | 0.15 g |
+
+Scale (0.9–1.1), axis/vector bias (0.3 g), corrected norm (0.9–1.1 g), finite
+values, six faces, stationary sample counts/variance, raw acquisition bounds,
+timeouts, sensor lease, USB/motor/disarm guards and atomic rollback are unchanged.
+It still rejects the much worse earlier capture set. No per-sample unit-vector
+normalization or replacement of measured data is used. The latest recorded
+set passes only the explicitly relaxed policy in regression tests; that does
+not guarantee future captures pass or independently validate physical accuracy.
+
+Protection is layered: CMake and a shared preprocessor header reject relaxed
+mode combined with `BOBFLIGHT_FLIGHT_ENABLE`; `gyro_flight_ready()` returns false
+throughout a relaxed build, and `arming_try_arm()` independently refuses. The
+35%/one-second bench motor protections remain unchanged. Use propellers removed
+and USB-only power for sensor work. Default builds retain the standard policy.
+An experimental HEX must be named/manifested as relaxed bench and built with
+`BOBFLIGHT_FLIGHT_ENABLE=OFF`; do not quietly change the global default.
+
+Both telemetry commands advertise `cal_bench_relaxed: yes/no`. `accel_calibrated`
+still indicates that coefficients were applied, not flight readiness; updated
+UI shows **BENCH ONLY**, a prominent experimental warning, and the policy in the
+copyable report. The Apply reason includes `bench-relaxed-not-flight-qualified`,
+so even old clients that ignore optional metadata receive a warning. Protocol
+version remains 1 with a strictly parsed optional flag. Unreported policy on
+older firmware is labelled unknown rather than assumed standard.
+
+All coefficients remain RAM-only. A strict firmware restart clears the
+experimental correction; cancellation within a relaxed boot retains it only
+for that boot. Any future persistence implementation must explicitly version
+and retain the calibration policy provenance, and must never promote an
+experimental correction into flight-qualified settings.
+
+Added tests run the same recorded six-face dataset through standard and relaxed
+engines, reject the earlier dataset, test both numerical boundaries and all
+unchanged scale/bias/finite/rollback protections, and exercise motion/noise.
+MCU-driver/mock-SPI tests verify that even an accepted solution cannot assert
+flight readiness in relaxed mode. A separate arming test supplies otherwise
+ready inputs and confirms refusal. Negative CMake/preprocessor tests reject
+incompatible flags. Local validation: 24/24 host tests, 11 sensor UI groups,
+28 motor UI tests, protocol tests, strict C11 warnings plus ASan/UBSan, production
+configurator build, and both standard/relaxed Kakute F745 builds. Both linked
+bench builds refuse arming; DShot/timer/clock/USB/scheduler objects equal 96e6e34.
+
+All added code is original Apache-2.0 implementation; no third-party source,
+dependency or GPL-source imports were introduced. This is a focused architecture
+change and regression review, not a whole-repository license audit or physical
+flight validation.
+
 ## Recovery and numerical Apply diagnostics
 
 The Gyro section now has a dedicated **Cancel gyro calibration** control during
@@ -205,3 +263,7 @@ timer/DMA, clock, USB, scheduler and bench arming object bytes match 890061b.
 All new implementation is original Apache-2.0 code; no dependency, vendored
 source or GPL-source import was introduced. No whole-repository license audit
 or flight qualification is claimed.
+
+Review scope: the parent completed the source/guard review and regression checks
+above. The background reviewer was stopped before returning a completed report;
+no independent final-patch or license-audit signoff is claimed.
