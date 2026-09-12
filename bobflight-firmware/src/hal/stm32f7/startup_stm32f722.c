@@ -58,7 +58,8 @@ static void early_pa2_setup(void)
     *gpioa_moder = (*gpioa_moder & ~(3u << 4)) | (1u << 4);
 }
 
-/** Crude PA2 short ~50–80 ms pulse (main-entry / pre-board prove-out). */
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
+/** Crude PA2 short pulse (main-entry / pre-board diagnostic only). */
 void boot_pa2_crude_short_pulse(void)
 {
     volatile uint32_t *gpioa_odr = (volatile uint32_t *)0x40020014u; /* GPIOA->ODR */
@@ -70,6 +71,8 @@ void boot_pa2_crude_short_pulse(void)
     early_nop_busywait(400000u);
     *gpioa_odr |= (1u << 2); /* leave on — known state */
 }
+
+#endif
 
 /*
  * HardFault / MemManage / BusFault / UsageFault:
@@ -114,7 +117,7 @@ void HardFault_Handler(void)
     }
 }
 
-#if !(defined(BOBFLIGHT_PROVE_RESET) && (BOBFLIGHT_PROVE_RESET))
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS && !(defined(BOBFLIGHT_PROVE_RESET) && (BOBFLIGHT_PROVE_RESET))
 /*
  * Video-visible Reset prove-out then main.
  * 3 pulses, ~250 ms half-period each (both edges).
@@ -181,7 +184,9 @@ void Reset_Handler(void)
 #if defined(BOBFLIGHT_PROVE_RESET) && (BOBFLIGHT_PROVE_RESET)
     prove_reset_pa2_forever(); /* never returns — never main */
 #else
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
     early_pa2_blink();
+#endif
     (void)main();
 #endif
     for (;;) {

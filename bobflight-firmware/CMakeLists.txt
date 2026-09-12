@@ -79,6 +79,8 @@ add_custom_target(bobflight_pins_gen DEPENDS "${BOBFLIGHT_PINS_GEN}")
 option(BOBFLIGHT_HOST_SMOKE "Build host smoke binary (no MCU)" ON)
 option(BOBFLIGHT_FLIGHT_ENABLE "Enable AUX1 flight arming after physical bench validation" OFF)
 option(BOBFLIGHT_PROVE_RESET "Reset_Handler-only forever PA2 blink (never main); diagnostic" OFF)
+option(BOBFLIGHT_BOOT_LED_DIAGNOSTICS "Blocking startup LED patterns for bring-up; leave OFF for normal boots" OFF)
+add_compile_definitions(BOBFLIGHT_BOOT_LED_DIAGNOSTICS=$<BOOL:${BOBFLIGHT_BOOT_LED_DIAGNOSTICS}>)
 
 set(BF_COMMON_SOURCES
   src/app/main.c
@@ -110,6 +112,8 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_test(NAME boot_led_modes COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_boot_led_modes.py ${CMAKE_C_COMPILER})
   add_executable(bobflight_power_test src/drivers/power.c tests/host_power.c)
   target_link_libraries(bobflight_power_test m)
   add_dependencies(bobflight_power_test bobflight_pins_gen)

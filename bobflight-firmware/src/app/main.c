@@ -45,11 +45,13 @@ int main(void)
 {
 #ifndef BOBFLIGHT_HOST
     /*
-     * First thing in C (before app_init): sticky crumb=1 + crude PA2 short
-     * pulse via GPIOA MMIO — proves entered C without HAL / board_mmio.
+     * Keep the sticky stage in all MCU builds. The blocking PA2 success
+     * pulse is opt-in for bring-up, not part of the normal boot path.
      */
     boot_crumb_set(BOOT_CRUMB_MAIN);
+#if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
     boot_pa2_crude_short_pulse();
+#endif
 #endif
 
     if (!app_init()) {
