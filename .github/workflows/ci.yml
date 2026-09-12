@@ -72,6 +72,8 @@ jobs:
         run: npm --prefix ui run test:receiver
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
+      - name: Timing protocol tests
+        run: npm --prefix protocol run test:timing
       - name: Sensor protocol tests
         run: npm --prefix protocol run test:sensors
       - name: Sensor UI safety tests

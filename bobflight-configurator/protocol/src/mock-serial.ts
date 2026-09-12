@@ -145,6 +145,7 @@ export class MockSerial extends EventEmitter {
       line = line.slice(0, -1);
     }
     if (line.length === 0) return;
+    if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
     const sensorReply = mockSensorReply(line, this.armed);
     if (sensorReply !== null) { this.emitData(sensorReply); return; }
     const benchReply = this.bench.handle(line, this.armed);

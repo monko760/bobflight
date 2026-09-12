@@ -9,11 +9,27 @@
 #include "hal/hal.h"
 #include "hal_f7_priv.h"
 #include "board/board.h"
+#include "hal/cycle_clock.h"
 
 uint32_t SystemCoreClock = 16000000u; /* HSI default until PLL */
 
 static volatile uint32_t g_ms;
 static uint32_t g_hse_mhz;
+static volatile uint64_t g_tick_us;
+static uint64_t g_last_us;
+#if defined(BOBFLIGHT_HAVE_CMSIS)
+static cycle_clock_t g_cycle_clock;
+static volatile bool g_dwt_ready;
+static uint32_t g_time_core_hz;
+/* Called only with normal interrupts masked, including from SysTick. */
+static void clock_fold_cycles(void){
+ if(g_dwt_ready){
+  if(SystemCoreClock!=g_time_core_hz || !(CoreDebug->DEMCR&CoreDebug_DEMCR_TRCENA_Msk) ||
+     !(DWT->CTRL&DWT_CTRL_CYCCNTENA_Msk))g_dwt_ready=false;
+  else (void)cycle_clock_update(&g_cycle_clock,DWT->CYCCNT);
+ }
+}
+#endif
 
 /* Which path supplied SYSCLK / USB 48 MHz (for CLI / Lead LED encode). */
 static const char *g_usb_clk_src = "hsi-raw";
@@ -23,7 +39,10 @@ uint32_t tusb_time_millis_api(void);
 
 void SysTick_Handler(void)
 {
-    g_ms++;
+    uint32_t mask=__get_PRIMASK();__disable_irq();
+    g_ms++;g_tick_us+=1000u;
+    clock_fold_cycles(); /* Extend CYCCNT before its ~20–268 second wrap. */
+    __set_PRIMASK(mask);
     (void)tusb_time_millis_api(); /* retain for TinyUSB OPT_OS_NONE */
 }
 
@@ -365,17 +384,58 @@ void hal_clock_init(uint32_t hse_mhz)
 
 void hal_time_init(void)
 {
-    g_ms = 0;
+#if defined(BOBFLIGHT_HAVE_CMSIS)
+    uint32_t mask=__get_PRIMASK();__disable_irq();
+#endif
+    g_ms=0;g_tick_us=0;g_last_us=0;
+#if defined(BOBFLIGHT_HAVE_CMSIS)
+    g_dwt_ready=false;g_time_core_hz=SystemCoreClock;
+    if(board_mmio_permitted() && cycle_clock_init(&g_cycle_clock,SystemCoreClock,0)){
+        CoreDebug->DEMCR|=CoreDebug_DEMCR_TRCENA_Msk;
+        DWT->LAR=0xC5ACCE55u; /* ARM Cortex-M7 debug-component unlock key. */
+        __DSB();__ISB();
+        if(!(DWT->CTRL&DWT_CTRL_NOCYCCNT_Msk)){
+            DWT->CTRL|=DWT_CTRL_CYCCNTENA_Msk;
+            __DSB();__ISB();
+            uint32_t before=DWT->CYCCNT;
+            for(volatile unsigned i=0;i<64u;i++)__NOP();
+            uint32_t after=DWT->CYCCNT;
+            if(after!=before){
+                (void)cycle_clock_init(&g_cycle_clock,SystemCoreClock,after);
+                g_dwt_ready=true;
+            }
+        }
+    }
+    __set_PRIMASK(mask);
+#endif
 }
 
-uint32_t hal_millis(void)
-{
-    return g_ms;
+uint32_t hal_millis(void){return g_ms;}
+uint32_t hal_core_clock_hz(void){return SystemCoreClock;}
+bool hal_time_high_resolution(void){
+#if defined(BOBFLIGHT_HAVE_CMSIS)
+    uint32_t mask=__get_PRIMASK();__disable_irq();clock_fold_cycles();
+    bool ready=g_dwt_ready;__set_PRIMASK(mask);return ready;
+#else
+    return false;
+#endif
 }
-
+const char *hal_time_source(void){return hal_time_high_resolution()?"dwt-cyccnt":"systick-ms-fallback";}
 uint64_t hal_micros(void)
 {
-    return (uint64_t)g_ms * 1000ull;
+#if defined(BOBFLIGHT_HAVE_CMSIS)
+    uint32_t mask=__get_PRIMASK();__disable_irq();clock_fold_cycles();
+    uint64_t now=g_dwt_ready?g_cycle_clock.us:g_tick_us;
+#else
+    uint64_t now=g_tick_us;
+#endif
+    /* A latched fallback never moves time backwards. Before initialization,
+     * reads use the extended tick clock and are explicitly low resolution. */
+    if(now<g_last_us)now=g_last_us;else g_last_us=now;
+#if defined(BOBFLIGHT_HAVE_CMSIS)
+    __set_PRIMASK(mask);
+#endif
+    return now;
 }
 
 void hal_delay_ms(uint32_t ms)
@@ -407,12 +467,15 @@ void hal_delay_ms(uint32_t ms)
                     __NOP();
                 }
             }
-            g_ms = start + ms;
+            uint32_t mask=__get_PRIMASK();__disable_irq();
+            uint32_t elapsed=g_ms-start;
+            if(elapsed<ms){g_tick_us+=(uint64_t)(ms-elapsed)*1000u;g_ms=start+ms;}
+            __set_PRIMASK(mask);
             break;
         }
     }
 #else
-    g_ms += ms;
+    g_ms += ms;g_tick_us+=(uint64_t)ms*1000u;
 #endif
 }
 

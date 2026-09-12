@@ -22,7 +22,8 @@
     "smoke:webserial": "tsc && node dist/smoke/smoke-webserial-node.js",
     "smoke:flasher": "tsc && node dist/smoke/smoke-flasher.js",
     "test:motors": "tsc && node tests/motors.cjs",
-    "test:sensors": "tsc && node tests/sensors.cjs"
+    "test:sensors": "tsc && node tests/sensors.cjs",
+    "test:timing": "tsc && node tests/timing.cjs"
   },
   "engines": {
     "node": ">=18"

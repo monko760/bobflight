@@ -38,6 +38,7 @@ static void cli_write_str(const char *s)
 }
 
 #include "drivers/sensor_cli.h"
+#include "drivers/timing_cli.h"
 
 static void cmd_help(void)
 {
@@ -65,6 +66,7 @@ static void cmd_help(void)
         "  dshot [300|600] - show or switch DShot bit rate\r\n"
         "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
         "  disarm   - disarm\r\n"
+        "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
 }
 
@@ -250,6 +252,8 @@ static void handle_line(char *line)
         cmd_help();
     } else if (strcmp(line, "version") == 0) {
         cmd_version();
+    } else if (strcmp(line, "timing") == 0) {
+        cmd_timing();
     } else if (strcmp(line, "status") == 0) {
         cmd_status();
     } else if (strcmp(line, "receiver") == 0) {

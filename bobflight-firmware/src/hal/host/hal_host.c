@@ -1,3 +1,6 @@
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
 /*
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
@@ -23,7 +26,8 @@ bool hal_power_adc_poll(uint16_t *voltage, uint16_t *current) { (void)voltage; (
 #include <fcntl.h>
 #endif
 
-static uint64_t g_start_us;
+static uint64_t g_start_us,g_host_last;
+static bool g_host_clock_ok=true;
 
 static uint64_t host_now_us(void)
 {
@@ -32,17 +36,19 @@ static uint64_t host_now_us(void)
     static int init;
     LARGE_INTEGER now;
     if (!init) {
-        QueryPerformanceFrequency(&freq);
-        QueryPerformanceCounter(&start);
+        if(!QueryPerformanceFrequency(&freq) || freq.QuadPart<=0 || !QueryPerformanceCounter(&start)){g_host_clock_ok=false;return g_host_last;}
         init = 1;
     }
-    QueryPerformanceCounter(&now);
-    return (uint64_t)((now.QuadPart - start.QuadPart) * 1000000ull / (uint64_t)freq.QuadPart);
+    if(!QueryPerformanceCounter(&now) || now.QuadPart<start.QuadPart){g_host_clock_ok=false;return g_host_last;}
+    uint64_t ticks=(uint64_t)(now.QuadPart-start.QuadPart),f=(uint64_t)freq.QuadPart;
+    uint64_t result=(ticks/f)*1000000ull+(ticks%f)*1000000ull/f;
 #else
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000000ull + (uint64_t)tv.tv_usec;
+    struct timespec ts;
+    if(clock_gettime(CLOCK_MONOTONIC,&ts)!=0){g_host_clock_ok=false;return g_host_last;}
+    uint64_t result=(uint64_t)ts.tv_sec*1000000ull+(uint64_t)ts.tv_nsec/1000ull;
 #endif
+    if(result<g_host_last){g_host_clock_ok=false;return g_host_last;}
+    g_host_last=result;return result;
 }
 
 void hal_clock_init(uint32_t hse_mhz)
@@ -55,6 +61,9 @@ const char *hal_clock_usb_src(void)
     return "host";
 }
 
+uint32_t hal_core_clock_hz(void){return 0;}
+bool hal_time_high_resolution(void){return g_host_clock_ok;}
+const char *hal_time_source(void){return "host-monotonic";}
 void hal_time_init(void)
 {
     g_start_us = host_now_us();

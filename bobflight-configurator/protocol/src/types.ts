@@ -33,6 +33,7 @@ export type CliCommand =
   | "receiver"
   | "receiver_map AETR"
   | "receiver_map TAER"
+  | "timing"
   | "power"
   | `power_config ${number} ${number} ${number} ${number} ${number} ${number} ${number}`
   | "arm"
