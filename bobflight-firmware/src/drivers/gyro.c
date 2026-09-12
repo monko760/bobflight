@@ -11,15 +11,18 @@
  *   BMI270: CHIP_ID 0x00 → 0x24 (Bosch BST-BMI270-DS000); SPI needs priming read.
  */
 #include "drivers/gyro.h"
+#include "drivers/sensor_calibration.h"
 #include "board/board.h"
 #include "hal/hal.h"
 #include "flight/arming.h"
 
 #include <string.h>
 #include <math.h>
-static float g_acc[3], g_latest[3], g_bias[3], g_sum[3], g_sumsq[3], g_filter[3];
-static unsigned g_cal_samples;
-static bool g_calibrated;
+static float g_acc[3], g_latest[3], g_filter[3];
+static sensor_calibration_t g_cal;
+static bool g_manual;
+static uint32_t g_client_ms;
+static gyro_diagnostics_t g_diag;
 
 typedef enum {
     GYRO_CHIP_NONE = 0,
@@ -115,6 +118,7 @@ static uint8_t gyro_chipid_bmi(void)
 
 static bool configure_mpu6k(void)
 {
+    g_diag.chip="MPU6K-class";
     if(!gyro_spi_write_reg(0x6B,0x80))return false;
     hal_delay_ms(100);
     if(!gyro_spi_write_reg(0x68,0x07))return false;
@@ -124,8 +128,16 @@ static bool configure_mpu6k(void)
        !gyro_spi_write_reg(0x1A,3) || !gyro_spi_write_reg(0x1B,0x18) ||
        !gyro_spi_write_reg(0x1C,0x10) || !gyro_spi_write_reg(0x38,1))return false;
     hal_delay_ms(20);
-    uint8_t reg;
-    if(!gyro_spi_read_regs(0x1B,&reg,1) || reg!=0x18)return false;
+    uint8_t pwr, divider, filter;
+    g_diag.gyro_config = g_diag.accel_config = 0xff;
+    if(!gyro_spi_read_regs(0x1B,&g_diag.gyro_config,1) ||
+       !gyro_spi_read_regs(0x1C,&g_diag.accel_config,1) ||
+       !gyro_spi_read_regs(0x6B,&pwr,1) ||
+       !gyro_spi_read_regs(0x19,&divider,1) ||
+       !gyro_spi_read_regs(0x1A,&filter,1))return false;
+    if(g_diag.gyro_config!=0x18 || g_diag.accel_config!=0x10 ||
+       pwr!=0x01 || divider!=0 || filter!=3)return false;
+    g_diag.config_ok=true;
     g_dps_per_lsb=1.f/16.4f;
     return true;
 }
@@ -241,6 +253,10 @@ static int16_t le16(const uint8_t *p)
 void gyro_init(void)
 {
     const board_t *b = board_get();
+    memset(&g_diag,0,sizeof(g_diag));
+    g_diag.chip="unavailable";
+    g_diag.gyro_config=g_diag.accel_config=0xff;
+    sc_init(&g_cal);g_manual=false;
     gyro_begin_calibration();
     memset(g_acc,0,sizeof(g_acc));
     memset(g_latest,0,sizeof(g_latest));
@@ -284,6 +300,8 @@ void gyro_init(void)
     }
 
     if (probe_and_configure(b->gyro_chip)) {
+        g_diag.chip=g_kind==GYRO_CHIP_MPU6K ? "MPU6K-class" :
+                    g_kind==GYRO_CHIP_ICM42688 ? "ICM42688-calibration-unsupported" : "BMI270-calibration-unsupported";
         g_healthy = true;
         g_bind = "ok";
         arming_set_gyro_healthy(true);
@@ -320,7 +338,19 @@ bool gyro_sample(float dps[3])
     }
 
     switch (g_kind) {
-    case GYRO_CHIP_MPU6K:
+    case GYRO_CHIP_MPU6K: {
+        /* Count only fresh hardware samples, not repeated reads of output regs.
+         * INT_STATUS.DATA_RDY (MPU register map RM-MPU-6000A-00, 0x3A). */
+        uint8_t ready=0;
+        if(!gyro_spi_read_regs(0x3A,&ready,1)) {
+            g_healthy=false; arming_set_gyro_healthy(false); return false;
+        }
+        if(!(ready & 1u)) {
+            if(g_diag.sample_seq && (uint32_t)(hal_millis()-g_diag.sample_ms)<=20u) {
+                memcpy(dps,g_latest,sizeof(g_latest)); return true;
+            }
+            return false;
+        }
         /* GYRO_XOUT_H @ 0x43 — big-endian. */
         if (!gyro_spi_read_regs(0x3Bu, raw, 14)) {
             g_healthy=false; arming_set_gyro_healthy(false); return false;
@@ -330,6 +360,7 @@ bool gyro_sample(float dps[3])
         g_acc[2]=(float)be16(raw+4)/4096.f;
         x=be16(raw+8); y=be16(raw+10); z=be16(raw+12);
         break;
+    }
     case GYRO_CHIP_ICM42688:
         /* GYRO_DATA_X1 @ 0x25 — big-endian. */
         if (!gyro_spi_read_regs(0x25u, raw, 6)) {
@@ -360,22 +391,17 @@ bool gyro_sample(float dps[3])
         float v=dps[0]; dps[0]=-dps[1];dps[1]=v;
         v=g_acc[0];g_acc[0]=-g_acc[1];g_acc[1]=v;
     }
-    if(!g_calibrated) {
-        float norm=g_acc[0]*g_acc[0]+g_acc[1]*g_acc[1]+g_acc[2]*g_acc[2];
-        bool still=norm>0.81f && norm<1.21f;
-        for(unsigned i=0;i<3;i++)if(fabsf(dps[i])>5.f)still=false;
-        if(!still) {g_cal_samples=0;memset(g_sum,0,sizeof(g_sum));memset(g_sumsq,0,sizeof(g_sumsq));}
-        else {
-            for(unsigned i=0;i<3;i++){g_sum[i]+=dps[i];g_sumsq[i]+=dps[i]*dps[i];}
-            if(++g_cal_samples>=1000) {
-                bool stable=true;
-                for(unsigned i=0;i<3;i++){float mean=g_sum[i]/1000.f;if(g_sumsq[i]/1000.f-mean*mean>0.04f)stable=false;}
-                if(stable){for(unsigned i=0;i<3;i++)g_bias[i]=g_sum[i]/1000.f;g_calibrated=true;}
-                else gyro_begin_calibration();
-            }
-        }
+    if(g_kind==GYRO_CHIP_MPU6K) {
+        memcpy(g_diag.raw_acc_g,g_acc,sizeof(g_acc));
+        g_diag.sample_ms=hal_millis();
+        ++g_diag.sample_seq;
+        if(!g_diag.sample_seq) ++g_diag.sample_seq; /* zero means no sample */
     }
-    for(unsigned i=0;i<3;i++){dps[i]-=g_bias[i];g_latest[i]=dps[i];}
+    if(g_kind==GYRO_CHIP_MPU6K) {
+        sc_feed(&g_cal,dps,g_diag.raw_acc_g,g_diag.sample_ms);
+        sc_correct_accel(&g_cal,g_diag.raw_acc_g,g_acc);
+    }
+    for(unsigned i=0;i<3;i++){dps[i]-=g_cal.gyro_bias[i];g_latest[i]=dps[i];}
     return true;
 }
 
@@ -417,7 +443,50 @@ void gyro_host_inject_dps(const float dps[3], bool healthy)
 }
 #endif
 
-void gyro_begin_calibration(void){g_cal_samples=0;g_calibrated=false;memset(g_sum,0,sizeof(g_sum));memset(g_sumsq,0,sizeof(g_sumsq));memset(g_bias,0,sizeof(g_bias));}
-bool gyro_calibrated(void){return g_calibrated;}
+void gyro_begin_calibration(void){sc_begin_gyro(&g_cal,hal_millis());}
+bool gyro_calibrated(void){return g_cal.gyro_valid && g_cal.mode!=SC_GYRO && !g_manual;}
 const float *gyro_accel_g(void){return g_acc;}
 const float *gyro_latest_dps(void){return g_latest;}
+const gyro_diagnostics_t *gyro_diagnostics(void){return &g_diag;}
+static bool manual_sensor_ready(void) {
+    return g_healthy && g_diag.config_ok && g_diag.sample_seq &&
+        (uint32_t)(hal_millis()-g_diag.sample_ms)<=100u &&
+        arming_state()!=ARM_ARMED && hal_usb_cdc_connected();
+}
+void gyro_calibration_tick(void) {
+    uint32_t now=hal_millis();sc_tick(&g_cal,now);
+    if(g_manual) {
+        if(g_cal.mode==SC_COMPLETE || g_cal.mode==SC_ERROR || g_cal.mode==SC_IDLE)g_manual=false;
+        else if(!manual_sensor_ready() || (uint32_t)(now-g_client_ms)>2000u) {
+            sc_cancel(&g_cal,"cancelled-unsafe-stale-or-session-expired");g_manual=false;
+        }
+    }
+}
+void gyro_calibration_touch(void){g_client_ms=hal_millis();}
+bool gyro_manual_calibration_active(void){return g_manual;}
+bool gyro_start_manual_calibration(void) {
+    if(g_manual || !manual_sensor_ready())return false;
+    sc_begin_gyro(&g_cal,hal_millis());g_manual=true;gyro_calibration_touch();return true;
+}
+bool gyro_start_accel_calibration(void) {
+    if(g_manual || !manual_sensor_ready())return false;
+    sc_begin_accel(&g_cal,hal_millis());g_manual=true;gyro_calibration_touch();return true;
+}
+bool gyro_capture_accel_face(unsigned face) {
+    if(!g_manual || !manual_sensor_ready())return false;
+    bool ok=sc_capture_face(&g_cal,face,hal_millis());if(ok)gyro_calibration_touch();return ok;
+}
+bool gyro_apply_accel_calibration(void) {
+    if(!g_manual || !manual_sensor_ready())return false;
+    bool ok=sc_apply_accel(&g_cal);if(ok){g_manual=false;sc_correct_accel(&g_cal,g_diag.raw_acc_g,g_acc);}return ok;
+}
+void gyro_cancel_manual_calibration(void){sc_cancel(&g_cal,"cancelled");g_manual=false;}
+void gyro_calibration_info(gyro_calibration_info_t *info) {
+    if(!info)return;
+    info->state=sc_state_name(&g_cal);info->reason=g_cal.reason;
+    info->samples=g_cal.samples;info->required=sc_required(&g_cal);
+    info->faces=g_cal.faces;info->face=g_cal.face;info->accel_valid=g_cal.accel_valid;
+    memcpy(info->gyro_bias,g_cal.gyro_bias,sizeof(info->gyro_bias));
+    memcpy(info->accel_bias,g_cal.accel_bias,sizeof(info->accel_bias));
+    memcpy(info->accel_scale,g_cal.accel_scale,sizeof(info->accel_scale));
+}

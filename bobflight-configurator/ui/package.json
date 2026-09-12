@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "smoke": "esbuild scripts/smoke-mock.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/smoke-mock.bundle.mjs && node scripts/smoke-mock.bundle.mjs",
     "clean": "rm -rf dist scripts/smoke-mock.bundle.mjs",
-    "test:motors": "esbuild scripts/test-motor-bench.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-motor-bench.bundle.mjs && node scripts/test-motor-bench.bundle.mjs"
+    "test:motors": "esbuild scripts/test-motor-bench.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-motor-bench.bundle.mjs && node scripts/test-motor-bench.bundle.mjs",
+    "test:sensors": "esbuild scripts/test-sensors.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-sensors.bundle.mjs && node scripts/test-sensors.bundle.mjs"
   },
   "dependencies": {
     "@bobflight/protocol": "file:../protocol",

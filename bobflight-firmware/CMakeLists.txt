@@ -94,7 +94,7 @@ set(BF_COMMON_SOURCES
   src/flight/failsafe.c
   src/flight/rates.c
   src/flight/config.c
-  src/drivers/gyro.c
+  src/drivers/gyro.c src/drivers/sensor_calibration.c
   src/drivers/dshot.c
   src/drivers/rx.c
   src/drivers/crsf.c
@@ -180,7 +180,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_crsf_parse_test m)
 
   add_executable(bobflight_gyro_inject_test
-    src/drivers/gyro.c
+    src/drivers/gyro.c src/drivers/sensor_calibration.c
     tests/host_gyro_inject.c)
   target_include_directories(bobflight_gyro_inject_test PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -188,9 +188,14 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_compile_definitions(bobflight_gyro_inject_test PRIVATE BOBFLIGHT_HOST=1)
 
   target_link_libraries(bobflight_gyro_inject_test m)
+  add_executable(bobflight_sensor_cli_test tests/host_sensor_cli.c)
+  add_test(NAME sensor_cli COMMAND bobflight_sensor_cli_test)
+  add_executable(bobflight_sensor_calibration_test src/drivers/sensor_calibration.c tests/host_sensor_calibration.c)
+  target_link_libraries(bobflight_sensor_calibration_test m)
+  add_test(NAME sensor_calibration COMMAND bobflight_sensor_calibration_test)
   add_executable(bobflight_attitude_test src/flight/attitude.c tests/host_attitude.c)
   target_link_libraries(bobflight_attitude_test m)
-  add_executable(bobflight_mpu6000_test src/drivers/gyro.c tests/host_mpu6000.c)
+  add_executable(bobflight_mpu6000_test src/drivers/gyro.c src/drivers/sensor_calibration.c tests/host_mpu6000.c)
   target_compile_definitions(bobflight_mpu6000_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_mpu6000_test m)
   add_executable(bobflight_bench_safety_test
@@ -215,7 +220,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/config.c
     src/flight/arming.c
     src/flight/failsafe.c
-    src/drivers/gyro.c
+    src/drivers/gyro.c src/drivers/sensor_calibration.c
     src/drivers/rx.c
     src/drivers/crsf.c
     src/board/ir_load.c

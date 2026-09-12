@@ -36,6 +36,8 @@ static void cli_write_str(const char *s)
     hal_usb_cdc_write((const uint8_t *)s, strlen(s));
 }
 
+#include "drivers/sensor_cli.h"
+
 static void cmd_help(void)
 {
     cli_write_str(
@@ -49,7 +51,10 @@ static void cmd_help(void)
         "  set      - set <key> <value>\r\n"
         "  save     - persist config\r\n"
         "  defaults - restore defaults (no auto-save)\r\n"
-        "  calibrate_gyro - stationary gyro calibration\r\n"
+        "  sensors / calibration - live samples / calibration diagnostics\r\n"
+        "  calibrate_gyro - stationary bias calibration (RAM until reboot)\r\n"
+        "  calibrate_accel <start|+x|-x|+y|-y|+z|-z|apply|cancel> - six-face calibration\r\n"
+        "  calibration_cancel - cancel, retaining applied coefficients\r\n"
         "  receiver_uart <1|2|3|4|6|7> - receiver port until reboot\r\n"
         "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n"
         "  motor_pulse <1..4> <0..35> - one-second adjustable props-off pulse\r\n"
@@ -260,9 +265,8 @@ static void handle_line(char *line)
     } else if (strcmp(line, "disarm") == 0) {
         arming_disarm();
         cli_write_str("disarmed\r\n");
-    } else if(strcmp(line,"calibrate_gyro")==0){
-        if(arming_state()==ARM_ARMED)cli_write_str("refused: armed\r\n");
-        else{gyro_begin_calibration();cli_write_str("calibrating: keep still for one second\r\n");}
+    } else if(cmd_sensor_command(line)) {
+        /* sensor handler performed a bounded read or nonblocking action */
     } else if(strncmp(line,"receiver_uart ",14)==0){
         unsigned uart=0;char extra;
         if(arming_state()!=ARM_ARMED && sscanf(line+14,"%u %c",&uart,&extra)==1 && board_select_rx_uart(uart)){

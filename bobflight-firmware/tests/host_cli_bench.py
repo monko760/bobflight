@@ -16,3 +16,13 @@ for data in [b'x'*128+b'motor_pulse 1 0\n',b'motor_pulse 1 0\0junk\n']:
     out=run(data+b'motor_test 0\n');assert 'motor pulse accepted' not in out
     assert 'invalid CLI line refused' in out;assert 'motor test accepted' in out # clean recovery
 print('PASS: actual CLI help, zero stop, unavailable outputs, strict arguments, overflow/NUL discard and recovery')
+
+# Actual CLI parsing and response boundaries on unavailable dummy IMU.
+for cmd,end in [('sensors','sensors_end: 1'),('calibration','calibration_end: 1')]:
+    text=run((cmd+'\n').encode())
+    assert 'sensors_version: 1' in text and end in text and 'calibration_storage: ram-only' in text
+    assert 'sensor_config_ok: no' in text and 'sample_seq: 0' in text
+for cmd in ['calibrate_gyro','calibrate_accel start','calibrate_accel +x','calibrate_accel apply']:
+    assert 'calibration refused' in run((cmd+'\n').encode())
+assert 'calibration cancelled' in run(b'calibration_cancel\n')
+print('PASS: real sensor CLI framing and unavailable-IMU calibration refusals')

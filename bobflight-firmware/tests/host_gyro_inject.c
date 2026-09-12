@@ -42,6 +42,10 @@ void hal_delay_ms(uint32_t ms)
 }
 
 
+uint32_t hal_millis(void){return 0;}
+bool hal_usb_cdc_connected(void){return false;}
+arm_state_t arming_state(void){return ARM_DISARMED;}
+
 static board_t g_board;
 static bool g_arm_gyro;
 

@@ -70,6 +70,10 @@ jobs:
         run: npm --prefix protocol run test:motors
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
+      - name: Sensor protocol tests
+        run: npm --prefix protocol run test:sensors
+      - name: Sensor UI safety tests
+        run: npm --prefix ui run test:sensors
       - name: WebSerial smoke
         run: npm --prefix protocol run smoke:webserial
       - name: Flasher smoke

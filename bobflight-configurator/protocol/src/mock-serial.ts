@@ -5,6 +5,7 @@
 
 import { EventEmitter } from "events";
 import { MockMotorBench } from "./bench-mock";
+import { mockSensorReply } from "./sensor-mock";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -142,6 +143,8 @@ export class MockSerial extends EventEmitter {
       line = line.slice(0, -1);
     }
     if (line.length === 0) return;
+    const sensorReply = mockSensorReply(line, this.armed);
+    if (sensorReply !== null) { this.emitData(sensorReply); return; }
     const benchReply = this.bench.handle(line, this.armed);
     if (benchReply !== null) { this.emitData(benchReply); return; }
 

@@ -118,3 +118,5 @@ export { assertMcuGate, normalizeFirmware } from "./flasher/mcu-gate";
 
 /** Offline motor command simulator; not a hardware controller. */
 export { MockMotorBench } from "./bench-mock";
+
+export { mockSensorReply } from "./sensor-mock";

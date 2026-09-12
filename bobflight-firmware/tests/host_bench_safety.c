@@ -17,7 +17,9 @@
 #include <stdint.h>
 
 static uint32_t now;
-static bool usb=true, healthy=true;
+static bool usb=true, healthy=true, calibrating=false;
+bool gyro_manual_calibration_active(void){return calibrating;}
+void gyro_calibration_tick(void){}
 static arm_state_t arm=ARM_DISARMED;
 static float motors[4], rc[16], accel[3]={0,0,1};
 uint32_t hal_millis(void){return now;}
@@ -44,7 +46,7 @@ static bool output(unsigned motor){
     return true;
 }
 static void reset(void){
-    usb=true;healthy=true;arm=ARM_DISARMED;
+    usb=true;healthy=true;calibrating=false;arm=ARM_DISARMED;
     bench_motor_test(0);loop_mixer_dshot();
 }
 static bool level(unsigned motor,unsigned percent){
@@ -54,6 +56,12 @@ static bool level(unsigned motor,unsigned percent){
 int main(void){
     reset();
     CHECK(!bench_motor_active());
+    calibrating=true;
+    CHECK(!bench_motor_pulse(1,35));CHECK(!bench_motor_seq_start());
+    CHECK(bench_motor_test(0));CHECK(bench_motor_pulse(1,0));
+    calibrating=false;CHECK(bench_motor_pulse(1,35));loop_mixer_dshot();
+    calibrating=true;loop_mixer_dshot();CHECK(output(0));CHECK(!bench_motor_active());
+    reset();
     /* A single test replaces a sequence and must not advance to another motor. */
     now=0; CHECK(bench_motor_seq_start());loop_mixer_dshot();CHECK(output(1));
     now=100;CHECK(bench_motor_test(4));loop_mixer_dshot();CHECK(output(4));
