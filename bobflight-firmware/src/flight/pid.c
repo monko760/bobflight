@@ -2,8 +2,8 @@
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
  *
- * Rate PID with runtime config gains. Assumes ~4 kHz PID loop
- * (8 kHz gyro / denom 2) — no dt API by Lead contract.
+ * Rate PID with runtime config gains. The task loop supplies measured PID
+ * elapsed time via pid_set_dt; the default is retained for standalone callers.
  */
 #include "flight/pid.h"
 #include "flight/config.h"
