@@ -1,0 +1,85 @@
+/*
+ * Copyright 2026 Robert Leclercq
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/** USB CDC / serial port summary for enumeratePorts(). */
+export interface PortInfo {
+  path: string;
+  manufacturer?: string;
+  serialNumber?: string;
+  vendorId?: string;
+  productId?: string;
+  pnpId?: string;
+  friendlyName?: string;
+}
+
+/** High-level connection lifecycle (never implies armed). */
+export type ConnectionStatus =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "error";
+
+/** Exact FW CLI command names (lowercase, no args, no synonyms). */
+export type CliCommand =
+  | "help"
+  | "version"
+  | "status"
+  | "arm"
+  | "disarm"
+  | "reboot"
+  | "calibrate_gyro"
+  | `receiver_uart ${1 | 2 | 3 | 4 | 6 | 7}`
+  | `motor_test ${0 | 1 | 2 | 3 | 4}`;
+
+export interface ConnectOptions {
+  path: string;
+  /** Default 115200; USB CDC often ignores baud. */
+  baudRate?: number;
+  /** Use in-process MockSerial (path mock://... or transport: mock). */
+  transport?: "serial" | "mock" | "webserial";
+}
+
+export interface SendCommandOptions {
+  timeoutMs?: number;
+  /** Quiet window after last byte before treating response as complete. */
+  idleMs?: number;
+}
+
+/** Parsed `status` key:value lines (fail-closed markers noted in README). */
+export interface ParsedStatus {
+  raw: string;
+  flight_mode?: string;
+  gyro_calibrated?: string;
+  gyro_dps?: string;
+  accel_g?: string;
+  attitude_deg?: string;
+  rx_uart?: string;
+  rx_fresh?: string;
+  rx_frames?: string;
+  channels?: string;
+  motor_output?: string;
+
+  board?: string;
+  ir?: string;
+  mcu?: string;
+  gyro_ok?: "yes" | "no" | string;
+  gyro_bind?: string;
+  dshot_bound?: string;
+  rx?: string;
+  mmio?: string;
+  arm?: "armed" | "disarmed" | string;
+  failsafe?: "ACTIVE" | "ok" | string;
+  loop?: string;
+  /** True when Arm is blocked: gyro_ok:no and/or failsafe:ACTIVE (Lead). */
+  failClosed: boolean;
+  failClosedReasons: string[];
+}
+
+export interface ReconnectOptions {
+  enabled?: boolean;
+  maxAttempts?: number;
+  delayMs?: number;
+}

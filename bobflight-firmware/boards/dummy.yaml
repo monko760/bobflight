@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Dummy F722 IR — no pins. status: stub until Hardware verifies a real board.
+meta:
+  board_id: dummy
+  product_name: BobFlight dummy
+  manufacturer: BobDroneCo
+  ir_version: 1
+  status: stub
+  sources:
+    - "owned skeleton — not a T-Motor pinout"
+mcu:
+  family: STM32F722
+usb:
+  enable_cdc: true
+gyro:
+  chip: none
+  spi_bus: 0
+  cs_pin: ""
+  exti_pin: ""
+motors:
+  count: 4
+  protocol_default: DShot600
+  dshot_mode: pwm_timer
+  channels: []
+uart:
+  serial_rx:
+    uart: ""
+    pins:
+      rx: ""
+    protocol_default: CRSF

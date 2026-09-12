@@ -1,0 +1,17 @@
+/*
+ * Copyright 2026 Robert Leclercq
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * BobFlight version metadata (clean-room; independent of Betaflight).
+ */
+#ifndef BOBFLIGHT_VERSION_H
+#define BOBFLIGHT_VERSION_H
+
+#define BOBFLIGHT_VERSION_MAJOR 0
+#define BOBFLIGHT_VERSION_MINOR 1
+#define BOBFLIGHT_VERSION_PATCH 0
+#define BOBFLIGHT_VERSION_STRING "0.2.0-prototype-bench1"
+
+#define BOBFLIGHT_PRODUCT_NAME "BobFlight"
+
+#endif /* BOBFLIGHT_VERSION_H */

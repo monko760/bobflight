@@ -1,0 +1,3 @@
+BobFlight UI docs
+Use package scripts for install and dev server.
+Default protocol mode is mock.

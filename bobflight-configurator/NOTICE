@@ -1,0 +1,19 @@
+BobFlight Configurator
+Copyright 2026 Robert Leclercq
+
+This product includes software developed for BobFlight Configurator.
+Licensed under the Apache License, Version 2.0.
+SPDX-License-Identifier: Apache-2.0
+
+Independent clean-room implementation. Not affiliated with, endorsed by, or a
+fork of Betaflight Configurator or the Betaflight project. Do not copy or adapt
+GPL configurator sources (including betaflight/betaflight-configurator).
+Apache-2.0 does not grant trademark rights in "Betaflight" or related marks.
+
+Wire/protocol compatibility (e.g. MSP-style behavior), if any, must come from
+public specs / black-box interop tests — not from porting GPL configurator code.
+
+The BobFlight firmware F7 V2 pin-IR exception (GPL-attributed YAML under
+board-defs) does NOT extend to this configurator repository.
+
+Third-party notices (if any) are listed below.

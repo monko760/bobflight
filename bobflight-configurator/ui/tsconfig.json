@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "isolatedModules": true,
+    "paths": { "@bobflight/protocol": ["../protocol/src/index.ts"] },
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src/**/*"]
+}

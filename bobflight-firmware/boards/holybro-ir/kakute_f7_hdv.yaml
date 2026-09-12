@@ -1,0 +1,25 @@
+# Board facts: betaflight/unified-targets configs/default/HBRO-KAKUTEF7HDV.config
+# https://github.com/betaflight/unified-targets/blob/master/configs/default/HBRO-KAKUTEF7HDV.config
+# Pin facts only; independently implemented drivers. Not bench-verified.
+board_id: kakute_f7_hdv
+status: bf-derived
+family: STM32F745
+hse_mhz: 8
+led0_pin: PA2
+chip: MPU6000
+spi_bus: 4
+cs_pin: PE4
+exti_pin: PE1
+sck_pin: PE2
+miso_pin: PE5
+mosi_pin: PE6
+gyro_align: CW270_DEG
+motors:
+  - {index: 1, pin: PB0, timer: TIM3, channel: 3}
+  - {index: 2, pin: PB1, timer: TIM3, channel: 4}
+  - {index: 3, pin: PE9, timer: TIM1, channel: 1}
+  - {index: 4, pin: PE11, timer: TIM1, channel: 2}
+serial_rx:
+  uart: 6
+  pins: {tx: PC6, rx: PC7}
+  protocol_default: CRSF

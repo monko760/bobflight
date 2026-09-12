@@ -1,0 +1,84 @@
+/*
+ * Copyright 2026 Robert Leclercq
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Host edge cases: high-throttle refuse; failsafe mid-air disarm.
+ * Provides Drivers stubs; links flight arming + failsafe only.
+ */
+#include "flight/arming.h"
+#include "flight/failsafe.h"
+
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+/* --- Drivers stubs --- */
+static bool g_gyro_live = true;
+static float g_rc[16];
+
+bool gyro_is_healthy(void)
+{
+    return g_gyro_live;
+}
+
+const float *rx_channels(void)
+{
+    return g_rc;
+}
+
+static int fail(const char *msg)
+{
+    fprintf(stderr, "FAIL: %s\n", msg);
+    return 1;
+}
+
+int main(void)
+{
+    memset(g_rc, 0, sizeof(g_rc));
+
+    /* High throttle refuse */
+    arming_init();
+    failsafe_init();
+    g_gyro_live = true;
+    arming_set_gyro_healthy(true);
+    g_rc[3] = 0.20f;
+    if (arming_try_arm()) {
+        return fail("should refuse high throttle");
+    }
+    if (arming_state() != ARM_DISARMED) {
+        return fail("still disarmed after high-thr refuse");
+    }
+
+    if (!failsafe_active() || arming_try_arm()) return fail("startup must block without RX");
+    failsafe_note_rx_frame(0u);
+    failsafe_tick(0u);
+    if (failsafe_active()) return fail("frame at timestamp zero must be valid");
+
+    /* Low throttle + healthy → arm */
+    g_rc[3] = 0.0f;
+    if (!arming_try_arm()) {
+        return fail("should arm with low thr + healthy gyro");
+    }
+    if (arming_state() != ARM_ARMED) {
+        return fail("expected ARMED");
+    }
+
+    /* Failsafe mid-air → disarm (mixer/dshot path then zeros motors) */
+    failsafe_note_rx_frame(100u);
+    failsafe_tick(100u + 251u);
+    if (!failsafe_active()) {
+        return fail("failsafe should be active");
+    }
+    if (arming_state() != ARM_DISARMED) {
+        return fail("failsafe should disarm");
+    }
+
+    /* Cannot re-arm while failsafe active */
+    g_rc[3] = 0.0f;
+    if (arming_try_arm()) {
+        return fail("must refuse arm while failsafe active");
+    }
+
+    puts("PASS: arming edge cases (throttle + failsafe disarm)");
+    return 0;
+}

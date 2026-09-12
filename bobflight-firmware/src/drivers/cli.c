@@ -1,0 +1,270 @@
+/*
+ * Copyright 2026 Robert Leclercq
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include "drivers/cli.h"
+#include "drivers/gyro.h"
+#include "drivers/dshot.h"
+#include "drivers/rx.h"
+#include "drivers/persist.h"
+#include "flight/arming.h"
+#include "flight/failsafe.h"
+#include "flight/config.h"
+#include "board/board.h"
+#include "sched/scheduler.h"
+#include "hal/hal.h"
+#include "flight/attitude.h"
+#include "sched/tasks.h"
+#include "bobflight/version.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+static char g_line[128];
+static unsigned g_len;
+
+static void cli_write_str(const char *s)
+{
+    if (!s) {
+        return;
+    }
+    hal_usb_cdc_write((const uint8_t *)s, strlen(s));
+}
+
+static void cmd_help(void)
+{
+    cli_write_str(
+        "BobFlight CLI\r\n"
+        "  help     - this text\r\n"
+        "  version  - firmware version\r\n"
+        "  status   - MCU, loops, arm, gyro, board\r\n"
+        "  get      - get <key>\r\n"
+        "  set      - set <key> <value>\r\n"
+        "  save     - persist config\r\n"
+        "  defaults - restore defaults (no auto-save)\r\n"
+        "  calibrate_gyro - stationary gyro calibration\r\n"
+        "  receiver_uart <1|2|3|4|6|7> - receiver port until reboot\r\n"
+        "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n"
+        "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
+        "  disarm   - disarm\r\n"
+        "  reboot   - soft reset (host: exit loop flag)\r\n");
+}
+
+static void cmd_version(void)
+{
+    char buf[96];
+    snprintf(buf, sizeof(buf), "%s %s\r\n", BOBFLIGHT_PRODUCT_NAME, BOBFLIGHT_VERSION_STRING);
+    cli_write_str(buf);
+}
+
+static void cmd_status(void)
+{
+    const board_t *b = board_get();
+    const scheduler_stats_t *st = scheduler_stats();
+    char buf[1000];
+    const float *rates=gyro_latest_dps(),*acc=gyro_accel_g(),*angles=attitude_degrees(),*rc=rx_channels();
+    const char *flight="bench-only";
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    flight="angle-prototype";
+#endif
+    const char *irlab = "none";
+    if (b && b->ir_verified) {
+        irlab = "verified";
+    } else if (b && b->ir_bf_derived) {
+        irlab = "bf-derived";
+    } else if (b && b->is_dummy) {
+        irlab = "dummy";
+    }
+    snprintf(buf, sizeof(buf),
+             "board: %s\r\n"
+             "ir: %s\r\n"
+             "mcu: %s hse_mhz=%lu\r\n"
+             "usb_clk: %s\r\n"
+             "gyro_ok: %s\r\n"
+             "gyro_bind: %s\r\n"
+             "dshot_bound: %u/4\r\n"
+             "rx: %s %s\r\n"
+             "mmio: %s\r\n"
+             "arm: %s\r\n"
+             "failsafe: %s\r\n"
+             "loop: gyro=%lu Hz denom=%lu cascade=%lu bg=%lu\r\n"
+             "flight_mode: %s\r\n"
+             "gyro_calibrated: %s\r\n"
+             "gyro_dps: %.2f %.2f %.2f\r\n"
+             "accel_g: %.3f %.3f %.3f\r\n"
+             "attitude_deg: %.2f %.2f\r\n"
+             "rx_uart: %u\r\n"
+             "rx_fresh: %s\r\n"
+             "rx_frames: %lu\r\n"
+             "channels: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\r\n"
+             "motor_output: %s\r\n",
+             b ? b->board_id : "?",
+             irlab,
+             b ? b->mcu_family : "?",
+             (unsigned long)(b ? b->hse_mhz : 0),
+             hal_clock_usb_src(),
+             gyro_is_healthy() ? "yes" : "no",
+             gyro_bind_state(),
+             dshot_bound_count(),
+             rx_protocol_name(),
+             rx_uart_bound() ? "bound" : "unbound",
+             board_mmio_permitted() ? (b && b->ir_bf_derived && !b->ir_verified ? "allowed (bf-derived)" : "allowed") : "denied",
+             arming_state() == ARM_ARMED ? "armed" : "disarmed",
+             failsafe_active() ? "ACTIVE" : "ok",
+             (unsigned long)(st ? st->gyro_hz : 0),
+             (unsigned long)(st ? st->pid_process_denom : 0),
+             (unsigned long)(st ? st->cascade_runs : 0),
+             (unsigned long)(st ? st->bg_runs : 0),flight,gyro_calibrated()?"yes":"no",
+             (double)rates[0],(double)rates[1],(double)rates[2],(double)acc[0],(double)acc[1],(double)acc[2],
+             (double)angles[0],(double)angles[1],b?b->rx_uart:0,rx_frame_fresh()?"yes":"no",(unsigned long)rx_frame_count(),
+             (double)rc[0],(double)rc[1],(double)rc[2],(double)rc[3],(double)rc[4],(double)rc[5],(double)rc[6],(double)rc[7],
+             dshot_is_healthy()?"DShot300 ready":"unavailable");
+    cli_write_str(buf);
+}
+
+static void cmd_get(const char *key)
+{
+    float v;
+    char buf[64];
+    if (!key || !config_get_key(key, &v)) {
+        cli_write_str("unknown key\r\n");
+        return;
+    }
+    snprintf(buf, sizeof(buf), "%s=%.6g\r\n", key, (double)v);
+    cli_write_str(buf);
+}
+
+static void cmd_set(const char *key, const char *valstr)
+{
+    char *end = NULL;
+    float v;
+    char buf[72];
+    if(arming_state()==ARM_ARMED){cli_write_str("set failed: armed\r\n");return;}
+    if (!key) {
+        cli_write_str("unknown key\r\n");
+        return;
+    }
+    if (!valstr || !*valstr) {
+        cli_write_str("set failed\r\n");
+        return;
+    }
+    v = strtof(valstr, &end);
+    if (end == valstr) {
+        cli_write_str("set failed\r\n");
+        return;
+    }
+    if (!config_set_key(key, v)) {
+        /* distinguish unknown vs invalid */
+        float tmp;
+        if (!config_get_key(key, &tmp)) {
+            cli_write_str("unknown key\r\n");
+        } else {
+            cli_write_str("set failed\r\n");
+        }
+        return;
+    }
+    (void)config_get_key(key, &v);
+    snprintf(buf, sizeof(buf), "ok %s=%.6g\r\n", key, (double)v);
+    cli_write_str(buf);
+}
+
+static volatile bool g_reboot_req;
+
+bool cli_reboot_requested(void)
+{
+    return g_reboot_req;
+}
+
+static void handle_line(char *line)
+{
+    while (*line == ' ' || *line == '\t') {
+        line++;
+    }
+    char *end = line + strlen(line);
+    while (end > line && (end[-1] == '\r' || end[-1] == '\n' || end[-1] == ' ')) {
+        *--end = '\0';
+    }
+    if (*line == '\0') {
+        return;
+    }
+
+    if (strcmp(line, "help") == 0) {
+        cmd_help();
+    } else if (strcmp(line, "version") == 0) {
+        cmd_version();
+    } else if (strcmp(line, "status") == 0) {
+        cmd_status();
+    } else if (strncmp(line, "get ", 4) == 0) {
+        cmd_get(line + 4);
+    } else if (strncmp(line, "set ", 4) == 0) {
+        char *key = line + 4;
+        char *sp = strchr(key, ' ');
+        if (!sp) {
+            cli_write_str("set failed\r\n");
+        } else {
+            *sp = '\0';
+            cmd_set(key, sp + 1);
+        }
+    } else if (strcmp(line, "save") == 0) {
+        cli_write_str(arming_state()!=ARM_ARMED && persist_save() ? "saved\r\n" : "save failed\r\n");
+    } else if (strcmp(line, "defaults") == 0) {
+        if(arming_state()==ARM_ARMED){cli_write_str("refused: armed\r\n");return;}
+        config_defaults();
+        cli_write_str("defaults restored\r\n");
+    } else if (strcmp(line, "arm") == 0) {
+        if (arming_try_arm()) {
+            cli_write_str("armed\r\n");
+        } else {
+            cli_write_str("arm refused (gyro unhealthy or failsafe)\r\n");
+        }
+    } else if (strcmp(line, "disarm") == 0) {
+        arming_disarm();
+        cli_write_str("disarmed\r\n");
+    } else if(strcmp(line,"calibrate_gyro")==0){
+        if(arming_state()==ARM_ARMED)cli_write_str("refused: armed\r\n");
+        else{gyro_begin_calibration();cli_write_str("calibrating: keep still for one second\r\n");}
+    } else if(strncmp(line,"receiver_uart ",14)==0){
+        unsigned uart=0;char extra;
+        if(arming_state()!=ARM_ARMED && sscanf(line+14,"%u %c",&uart,&extra)==1 && board_select_rx_uart(uart)){
+            failsafe_init();rx_init();cli_write_str("receiver UART changed (until reboot)\r\n");
+        }else cli_write_str("receiver UART refused\r\n");
+    } else if(strncmp(line,"motor_test ",11)==0){
+        unsigned motor=99;char extra;
+        if(sscanf(line+11,"%u %c",&motor,&extra)==1 && bench_motor_test(motor))cli_write_str("motor test accepted (one second maximum)\r\n");
+        else cli_write_str("motor test refused\r\n");
+    } else if (strcmp(line, "reboot") == 0) {
+        cli_write_str("reboot...\r\n");
+        g_reboot_req = true;
+    } else {
+        cli_write_str("unknown — try help\r\n");
+    }
+}
+
+void cli_init(void)
+{
+    g_len = 0;
+    g_reboot_req = false;
+    cli_write_str("\r\n" BOBFLIGHT_PRODUCT_NAME " " BOBFLIGHT_VERSION_STRING " ready\r\n");
+}
+
+void cli_poll(void)
+{
+    /* Keep TinyUSB / CDC alive on MCU (bg_cli_poll path). Host HAL no-op. */
+    hal_usb_cdc_poll();
+    uint8_t buf[32];
+    size_t n = hal_usb_cdc_read(buf, sizeof(buf));
+    for (size_t i = 0; i < n; i++) {
+        char c = (char)buf[i];
+        if (c == '\n' || c == '\r') {
+            g_line[g_len] = '\0';
+            handle_line(g_line);
+            g_len = 0;
+        } else if (g_len + 1 < sizeof(g_line)) {
+            g_line[g_len++] = c;
+        } else {
+            g_len = 0;
+        }
+    }
+}

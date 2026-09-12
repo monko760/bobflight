@@ -1,0 +1,42 @@
+{
+  "name": "@bobflight/protocol",
+  "version": "0.1.0",
+  "description": "BobFlight Configurator host-FC USB CDC CLI transport (clean-room, Apache-2.0)",
+  "license": "Apache-2.0",
+  "author": "Robert Leclercq",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "smoke": "tsc && node dist/smoke/smoke.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:dfu": "tsc && node tests/dfu.cjs",
+    "smoke:settings": "tsc && node dist/smoke/smoke-settings.js",
+    "smoke:webserial": "tsc && node dist/smoke/smoke-webserial-node.js",
+    "smoke:flasher": "tsc && node dist/smoke/smoke-flasher.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.6.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "DELIVERABLE.md",
+    "src/flasher/FLASHER.md"
+  ],
+  "optionalDependencies": {
+    "serialport": "^12.0.0"
+  },
+  "private": true
+}

@@ -1,0 +1,20 @@
+{
+  "name": "bobflight-configurator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Apache-2.0 clean-room BobFlight Configurator",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "protocol",
+    "ui"
+  ],
+  "scripts": {
+    "build": "npm --prefix protocol run build && npm --prefix ui run build",
+    "dev": "npm --prefix ui run dev",
+    "typecheck": "npm --prefix protocol run typecheck && npm --prefix ui run typecheck",
+    "clean": "npm --prefix protocol run clean && npm --prefix ui run clean"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
