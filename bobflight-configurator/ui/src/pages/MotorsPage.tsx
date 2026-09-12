@@ -1,10 +1,22 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useState } from "react";
 import { useHost } from "../hooks/useHost";
-import { BenchController, benchBlockReason, MOTOR_POSITIONS, type BenchState } from "../motors/benchController";
+import { BenchController, benchBlockReason, MOTOR_POSITIONS, MAX_PULSE_PERCENT, type BenchState } from "../motors/benchController";
+
+import { browserPoleStorage, readMotorPoles, storeMotorPoles, validMotorPoles } from "../motors/motorPoles";
 
 export function MotorsPage() {
   const { host, postFlashGate } = useHost();
+  const [poleCount, setPoleCount] = useState(() => readMotorPoles(browserPoleStorage()));
+  const [poleDraft, setPoleDraft] = useState(() => String(poleCount));
+  const [poleMessage, setPoleMessage] = useState("");
+  const savePoles = () => {
+    const value = Number(poleDraft);
+    if (!validMotorPoles(value)) return;
+    const saved = storeMotorPoles(value, browserPoleStorage());
+    setPoleCount(value);
+    setPoleMessage(saved ? "Pole count saved in this browser." : "Using this value for this page session only: browser storage is unavailable.");
+  };
   const [controller, setController] = useState<BenchController | null>(null);
   const [state, setState] = useState<BenchState | null>(null);
   const [now, setNow] = useState(() => performance.now());
@@ -60,13 +72,24 @@ export function MotorsPage() {
     </fieldset>
     <p className="motor-gate" role="status">{reason ?? (state.busy ? "Communicating with controller…" : "Ready for an explicit test request.")}</p>
     {capability && !capability.individual && <p className="banner-warn">This firmware does not advertise motor_test. Install the tested BobFlight bench firmware before using these controls.</p>}
+    <p className="muted">Sliders prepare a command only—they never start a motor by themselves. This first slider version is capped at {MAX_PULSE_PERCENT}% and requires an explicit one-second test; no continuous throttle or master slider.</p>
+    {capability && !capability.pulse && <p className="banner-warn">Adjustable sliders need firmware with motor_pulse support. Your current firmware can still use the fixed 8% tests below. Updating only this configurator does not add firmware support.</p>}
     <div className="motor-workspace">
       <div className="motor-map" aria-label="Motor positions viewed from above; front at the top">
         <div className="motor-front">↑ FRONT · TOP VIEW</div>
         {MOTOR_POSITIONS.map(({ motor, name, position }) => <div key={motor} className={`motor-card ${position}`}>
           <span className="motor-number">M{motor}</span><strong>{name}</strong>
-          <span className="muted">1 second · 8% command</span>
-          <button disabled={disabled || !capability?.individual} onClick={() => void controller.start(motor)}>Test motor {motor}</button>
+          <div className="motor-rpm"><span>RPM</span><strong aria-label={`Motor ${motor} RPM unavailable`}>—</strong><small>No telemetry</small></div>
+          <label className="motor-slider-label" htmlFor={`motor-level-${motor}`}>Prepared command <output>{state.pulsePercent[motor]}%</output></label>
+          <input className="motor-level" id={`motor-level-${motor}`} type="range" min="0" max={MAX_PULSE_PERCENT} step="1" value={state.pulsePercent[motor]}
+            aria-valuetext={`${state.pulsePercent[motor]} percent command; not RPM or measured power`}
+            disabled={!state.connected || !capability?.pulse || !state.visible || state.actionPending || state.stopping || remaining > 0 || (!!state.testLabel && !state.stationary)}
+            onChange={e => controller.setPulsePercent(motor, Number(e.target.value))} />
+          <div className="motor-slider-scale"><span>0%</span><span>{MAX_PULSE_PERCENT}% bench cap</span></div>
+          {capability?.pulse
+            ? <button disabled={disabled || state.pulsePercent[motor] === 0} onClick={() => void controller.pulse(motor)}>Test M{motor} · {state.pulsePercent[motor]}% · 1s</button>
+            : <button disabled={disabled || !capability?.individual} onClick={() => void controller.start(motor)}>Test M{motor} · fixed 8% · 1s</button>}
+          <span className="muted">Changing the slider does not spin the motor.</span>
         </div>)}
         <div className="motor-map-caption">Expected wiring layout—not detected motor positions. Observe CW / CCW yourself; no direction reversal command is provided.</div>
       </div>
@@ -76,6 +99,20 @@ export function MotorsPage() {
           <div className="row">{([300, 600] as const).map(value => <button key={value} aria-pressed={state.rate === value} disabled={disabled || !capability?.dshot || state.rate === value} onClick={() => void controller.setRate(value)}>DShot{value}</button>)}</div>
           <p className="muted">Choose only a rate your ESC supports. Changes are read back from the controller and last until reboot. Motors must be stationary before switching.</p>
           {capability && !capability.dshot && <p className="banner-warn">Rate selection is unavailable on this firmware. No rate is assumed.</p>}
+        </section>
+        <section className="motor-option-panel"><h3>Motor pole count</h3>
+          <label htmlFor="motor-poles">Magnetic poles · all four motors</label>
+          <div className="row"><input id="motor-poles" type="number" min="2" max="60" step="2" value={poleDraft}
+            onChange={e => setPoleDraft(e.target.value)} aria-invalid={!validMotorPoles(Number(poleDraft))} />
+            <button disabled={!validMotorPoles(Number(poleDraft))} onClick={savePoles}>Save pole count</button></div>
+          <p>Current: <strong>{poleCount} poles · {poleCount / 2} pole pairs</strong></p>
+          {!validMotorPoles(Number(poleDraft)) && <p className="banner-warn">Enter an even whole number from 2 to 60.</p>}
+          <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
+          {poleMessage && <p role="status">{poleMessage}</p>}
+        </section>
+        <section className="motor-option-panel"><h3>RPM &amp; bidirectional DShot</h3>
+          <p><strong>Not available in this firmware.</strong> The current driver transmits DShot but does not receive ESC replies.</p>
+          <p className="muted">RPM fields stay blank—not zero or an estimate from the slider. Bidirectional support needs compatible ESC firmware and a new receive/capture driver; mechanical RPM also needs the motor pole count.</p>
         </section>
         <section className="motor-option-panel"><h3>Motor sequence</h3><p>M1 rear-right → M2 front-right → M3 rear-left → M4 front-left.</p>
           <p className="muted">One-second pulses at 8%, with 0.7-second gaps. Check each motor individually first.</p>

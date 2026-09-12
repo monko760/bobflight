@@ -357,3 +357,13 @@ main { flex: 1; padding: 1rem 1.25rem; overflow: auto; }
 .motor-result { border-top:1px solid #33445a; margin-top:1.25rem; }
 .motor-bench button:focus-visible,.motor-bench input:focus-visible { outline:3px solid #9ecbff; outline-offset:3px; }
 @media(max-width:760px){.motor-workspace{grid-template-columns:1fr}.motor-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.motor-stop{width:100%}}
+
+/* Prepared pulse controls: slider movement never transmits a motor command. */
+.motor-rpm { display:flex; align-items:baseline; justify-content:center; gap:.5rem; flex-wrap:wrap; }
+.motor-rpm strong { font-size:1.5rem; font-variant-numeric:tabular-nums; }
+.motor-rpm span,.motor-rpm small { color:#9aafc3; font-size:.75rem; }
+.motor-slider-label,.motor-slider-scale { width:100%; display:flex; justify-content:space-between; gap:.5rem; font-size:.8rem; }
+.motor-slider-label output { font-weight:700; font-variant-numeric:tabular-nums; }
+.motor-level { width:100%; min-height:32px; accent-color:#9ecbff; cursor:pointer; }
+.motor-level:disabled { opacity:.45; cursor:not-allowed; }
+.motor-slider-scale { color:#9aafc3; font-size:.7rem; }

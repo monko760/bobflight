@@ -22,6 +22,9 @@ export type ConnectionStatus =
   | "reconnecting"
   | "error";
 
+/** Integer bench pulse percent; runtime guards enforce the same 0–35 cap. */
+export type MotorPulsePercent = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35;
+
 /** Exact FW CLI commands (lowercase; only explicitly listed arguments). */
 export type CliCommand =
   | "help"
@@ -36,7 +39,8 @@ export type CliCommand =
   | "dshot 300"
   | "dshot 600"
   | `receiver_uart ${1 | 2 | 3 | 4 | 6 | 7}`
-  | `motor_test ${0 | 1 | 2 | 3 | 4}`;
+  | `motor_test ${0 | 1 | 2 | 3 | 4}`
+  | `motor_pulse ${1 | 2 | 3 | 4} ${MotorPulsePercent}`;
 
 export interface ConnectOptions {
   path: string;

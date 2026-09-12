@@ -256,7 +256,7 @@ export class BobFlightCliClient {
     cmd: CliCommand,
     opts?: SendCommandOptions
   ): Promise<string> {
-    if (!ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4])$/.test(cmd)) {
+    if (!ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5]))$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);

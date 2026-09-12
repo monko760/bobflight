@@ -26,15 +26,22 @@ static bool bench_output_pending;
 bool bench_motor_active(void){return bench_motor != 0u || bench_output_pending;}
 static uint32_t bench_started;
 static unsigned bench_seq_step; /* 0 = single test; 1..4 = running sequence */
+static float bench_throttle = 0.08f;
+bool bench_motor_pulse(unsigned motor, unsigned percent){
+    if(motor<1u || motor>4u || percent>BENCH_PULSE_MAX_PERCENT)return false;
+    if(percent==0u){bench_motor=0;bench_seq_step=0;return true;}
+    if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
+    bench_seq_step=0;bench_motor=motor;bench_throttle=(float)percent/100.f;
+    bench_started=hal_millis();return true;
+}
 bool bench_motor_test(unsigned motor){
-    if(motor==0){bench_motor=0;bench_seq_step=0;return true;}
-    if(motor>4 || arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
-    bench_seq_step=0;bench_motor=motor;bench_started=hal_millis();return true;
+    if(motor==0u){bench_motor=0;bench_seq_step=0;return true;}
+    return bench_motor_pulse(motor,8u);
 }
 
 bool bench_motor_seq_start(void){
     if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy())return false;
-    bench_seq_step=1;bench_motor=1;bench_started=hal_millis();return true;
+    bench_seq_step=1;bench_motor=1;bench_throttle=0.08f;bench_started=hal_millis();return true;
 }
 
 static float g_gyro_raw[3];
@@ -105,7 +112,7 @@ void loop_mixer_dshot(void)
         if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy()) {bench_motor=0;bench_seq_step=0;}
         else {
             const uint32_t bench_dt=(uint32_t)(hal_millis()-bench_started);
-            if(bench_dt<1000u) g_motors[bench_motor-1]=0.08f;
+            if(bench_dt<1000u) g_motors[bench_motor-1]=bench_throttle;
             else if(bench_seq_step==0u) bench_motor=0;      /* single test done */
             else if(bench_dt<1700u) { /* 0.7s all-off gap between motors */ }
             else if(bench_seq_step<4u) {bench_seq_step++;bench_motor=bench_seq_step;bench_started=hal_millis();}

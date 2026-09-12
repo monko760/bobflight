@@ -1,10 +1,11 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import assert from "node:assert/strict";
-import { BenchController, benchBlockReason, parseBenchHelp, parseDshot, assertBenchAck, MOTOR_POSITIONS } from "../src/motors/benchController";
+import { BenchController, benchBlockReason, parseBenchHelp, parseDshot, assertBenchAck, MOTOR_POSITIONS, MAX_PULSE_PERCENT } from "../src/motors/benchController";
 import type { CliCommand, ConnectionStatus, ParsedStatus } from "../src/protocol/types";
 import { CommandGate } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 
+import { DEFAULT_MOTOR_POLES, MOTOR_POLES_KEY, readMotorPoles, storeMotorPoles, validMotorPoles } from "../src/motors/motorPoles";
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log(`PASS ${name}`); }
 const ack = "motor test accepted (one second maximum)\r\n";
@@ -18,17 +19,18 @@ class FakeHost {
   commandWait: Promise<string> | null = null;
   rate = 300;
   refuse = "";
-  help = "  motor_test <0..4>\n  motor_seq - sequence\n  dshot [300|600]";
+  help = "  motor_pulse <1..4> <0..35>\n  motor_test <0..4>\n  motor_seq - sequence\n  dshot [300|600]";
   getConnectionStatus() { return this.connection; }
   async getStatus() { this.commands.push("status"); return this.statusWait ? this.statusWait : { ...this.status }; }
   async sendCommand(cmd: CliCommand) {
     this.commands.push(cmd);
     if (this.refuse === cmd) return "refused";
-    if (this.commandWait && cmd.startsWith("motor_test ") && cmd !== "motor_test 0") return this.commandWait;
+    if (this.commandWait && (cmd.startsWith("motor_test ") || cmd.startsWith("motor_pulse ")) && cmd !== "motor_test 0") return this.commandWait;
     if (cmd === "help") return this.help;
     if (cmd === "dshot") return `dshot: ${this.rate} kbps`;
     if (cmd.startsWith("dshot ")) { this.rate = Number(cmd.slice(6)); return `dshot: switched to ${this.rate} kbps`; }
     if (cmd === "motor_seq") return "sequence running: RR FR RL FL, 1s each - watch spin direction";
+    if (cmd.startsWith("motor_pulse ")) return "motor pulse accepted (one second maximum)";
     return ack;
   }
 }
@@ -41,7 +43,7 @@ async function setup() {
 }
 async function main() {
   await test("capabilities are exact help-line tokens; old firmware stays unsupported", () => {
-    assert.deepEqual(parseBenchHelp("  motor_test <0..4>\n mention motor_seq"), { individual: true, sequence: false, dshot: false });
+    assert.deepEqual(parseBenchHelp("  motor_test <0..4>\n mention motor_seq"), { individual: true, pulse: false, sequence: false, dshot: false });
     assert.equal(parseBenchHelp("  motor_sequence - nope").sequence, false);
     assert.equal(parseDshot("dshot: 600 kbps\r\n"), 600);
     assert.throws(() => parseDshot("DShot300 ready"));
@@ -160,6 +162,76 @@ async function main() {
     const stop=gate.run(async()=>{stopped=true;return "stop";},true);
     const rejected=assert.rejects(stop,/session changed/);session++;d.resolve("done");
     await Promise.all([poll,rejected]);assert.equal(stopped,false);
+  });
+  await test("sliders start at zero and moving them sends no command", async () => {
+    const { c, host }=await setup(); assert.equal(MAX_PULSE_PERCENT,35);
+    assert.deepEqual(c.state.pulsePercent,{1:0,2:0,3:0,4:0});
+    assert.equal(c.setPulsePercent(1,8),true);assert.equal(c.setPulsePercent(2,12),true);
+    assert.equal(c.setPulsePercent(4,20),true);assert.deepEqual(host.commands,[]);
+    assert.deepEqual(c.state.pulsePercent,{1:8,2:12,3:0,4:20});
+  });
+  await test("sliders reject nonintegers, nonfinite and out-of-range values without clamping", async () => {
+    const { c, host }=await setup();
+    for(const percent of [-1,0.1,1.5,20.1,36,100,NaN,Infinity,-Infinity]) assert.equal(c.setPulsePercent(1,percent),false);
+    assert.equal(c.state.pulsePercent[1],0);assert.deepEqual(host.commands,[]);
+  });
+  await test("prepared command is sent only by explicit test, with preflight, cap and pulse lock", async () => {
+    const { c, host, advance }=await setup();c.setPulsePercent(3,20);await c.pulse(3);
+    assert.deepEqual(host.commands,["status","motor_pulse 3 20"]);assert.equal(c.state.stationary,false);
+    assert.match(c.state.testLabel,/20% command/);assert.equal(c.setPulsePercent(3,1),false);
+    await c.setRate(600);assert.equal(host.commands.length,2);
+    advance(1300);await c.poll();await c.pulse(3);assert.equal(host.commands.filter(x=>x.startsWith("motor_pulse")).length,1);
+    c.confirmStationary(true);c.setPulsePercent(3,1);await c.pulse(3);assert.equal(host.commands.at(-1),"motor_pulse 3 1");
+  });
+  await test("Stop cancels adjustable preflight and zeros every prepared slider", async () => {
+    const { c, host }=await setup();c.setPulsePercent(1,8);c.setPulsePercent(4,20);
+    const d=deferred<ParsedStatus>();host.statusWait=d.promise;
+    const pulse=c.pulse(1);await Promise.resolve();const stop=c.stop();d.resolve({...ready});await Promise.all([pulse,stop]);
+    assert.deepEqual(host.commands,["status","motor_test 0"]);assert.deepEqual(c.state.pulsePercent,{1:0,2:0,3:0,4:0});
+  });
+  await test("zero percent is stop even without props or stationary acknowledgment", async () => {
+    const { c, host }=await setup();c.confirmProps(false);c.confirmStationary(false);await c.pulse(2);
+    assert.deepEqual(host.commands,["motor_test 0"]);assert.ok(!host.commands.some(x=>x.startsWith("motor_pulse")));
+  });
+  await test("slider setpoints can change during a read-only poll, not a start preflight", async () => {
+    const { c, host }=await setup();const d=deferred<ParsedStatus>();host.statusWait=d.promise;
+    const poll=c.poll();await Promise.resolve();assert.equal(c.setPulsePercent(1,8),true);
+    d.resolve({...ready});await poll;
+    const d2=deferred<ParsedStatus>();host.statusWait=d2.promise;const pulse=c.pulse(1);await Promise.resolve();
+    assert.equal(c.setPulsePercent(1,20),false);d2.resolve({...ready});await pulse;
+    assert.equal(host.commands.at(-1),"motor_pulse 1 8");
+  });
+  await test("disconnect, hidden page and revoked props clear prepared slider values", async () => {
+    const { c, host }=await setup();c.setPulsePercent(1,9);c.confirmProps(false);assert.equal(c.state.pulsePercent[1],0);
+    c.setPulsePercent(1,9);c.setVisible(false);await c.stop();assert.equal(c.state.pulsePercent[1],0);
+    c.setVisible(true);c.setPulsePercent(1,9);host.connection="disconnected";c.connection(false);
+    host.connection="connected";c.connection(true);assert.equal(c.state.pulsePercent[1],0);
+    assert.ok(!host.commands.some(x=>x.startsWith("motor_pulse")));
+  });
+  await test("adjustable refusal stays a refusal and resets setpoints", async () => {
+    const { c, host }=await setup();c.setPulsePercent(2,8);host.refuse="motor_pulse 2 8";await c.pulse(2);
+    assert.match(c.state.error,/refused/);assert.equal(c.state.pulsePercent[2],0);assert.equal(c.state.propsOff,false);
+  });
+  await test("old firmware cannot silently substitute fixed 8% for a slider request", async () => {
+    const host=new FakeHost();host.help="  motor_test <0..4>\n  dshot [300|600]";
+    const c=new BenchController(host,()=>100);c.connection(true);await c.poll();c.confirmProps(true);c.confirmStationary(true);
+    host.commands=[];assert.equal(c.setPulsePercent(1,20),false);await c.pulse(1);assert.deepEqual(host.commands,[]);
+    await c.start(1);assert.equal(host.commands.at(-1),"motor_test 1");
+  });
+  await test("35% cap is accepted, 36% refused, and only an explicit Test sends 35%", async () => {
+    const {c,host}=await setup();assert.equal(c.setPulsePercent(4,35),true);
+    assert.equal(c.setPulsePercent(4,36),false);assert.deepEqual(host.commands,[]);
+    await c.pulse(4);assert.equal(host.commands.at(-1),"motor_pulse 4 35");
+  });
+  await test("motor poles default to 14, accept even values and persist without USB", () => {
+    const map=new Map<string,string>();const storage={getItem:(k:string)=>map.get(k)??null,setItem:(k:string,v:string)=>{map.set(k,v);}};
+    assert.equal(DEFAULT_MOTOR_POLES,14);assert.equal(readMotorPoles(storage),14);
+    for(const v of [2,12,14,16,60]) { assert.ok(validMotorPoles(v));assert.equal(storeMotorPoles(v,storage),true);assert.equal(readMotorPoles(storage),v); }
+    for(const v of [0,1,13,15,14.5,62,NaN,Infinity]) { assert.equal(validMotorPoles(v),false);assert.throws(()=>storeMotorPoles(v,storage)); }
+    for(const raw of ["", "garbage", "13", "Infinity", "14junk", "1e2", "-14"]) {map.set(MOTOR_POLES_KEY,raw);assert.equal(readMotorPoles(storage),14);}
+    assert.equal(readMotorPoles(null),14);assert.equal(storeMotorPoles(14,null),false);
+    const denied={getItem:()=>{throw new Error("denied");},setItem:()=>{throw new Error("quota");}};
+    assert.equal(readMotorPoles(denied),14);assert.equal(storeMotorPoles(16,denied),false);
   });
   console.log(`${passed} motor-bench tests passed`);
 }
