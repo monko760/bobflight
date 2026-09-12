@@ -5,6 +5,8 @@
  * Host (gcc) HAL stubs for smoke builds — no MCU hardware.
  */
 #include "hal/hal.h"
+void hal_power_adc_init(hal_pin_t voltage, hal_pin_t current) { (void)voltage; (void)current; }
+bool hal_power_adc_poll(uint16_t *voltage, uint16_t *current) { (void)voltage; (void)current; return false; }
 
 #include <stdio.h>
 #include <string.h>
@@ -255,8 +257,13 @@ size_t hal_usb_cdc_read(uint8_t *buf, size_t maxlen)
     }
     host_stdin_nonblock();
 #if defined(_WIN32)
-    (void)errno;
-    return 0;
+    /* Read redirected test input without blocking the scheduler on a console. */
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD available = 0, count = 0;
+    if (GetFileType(input) != FILE_TYPE_PIPE ||
+        !PeekNamedPipe(input, NULL, 0, NULL, &available, NULL) || !available) return 0;
+    if (available > maxlen) available = (DWORD)maxlen;
+    return ReadFile(input, buf, available, &count, NULL) ? (size_t)count : 0;
 #else
     ssize_t n = read(STDIN_FILENO, buf, maxlen);
     if (n < 0) {

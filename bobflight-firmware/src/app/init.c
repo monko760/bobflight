@@ -13,6 +13,7 @@
 #include "drivers/rx.h"
 #include "drivers/cli.h"
 #include "drivers/persist.h"
+#include "drivers/power.h"
 #include "flight/pid.h"
 #include "flight/mixer.h"
 #include "flight/arming.h"
@@ -235,6 +236,7 @@ bool app_init(void)
 
     persist_init();
     (void)persist_load();
+    power_init();
 
     pid_init();
     mixer_init();
