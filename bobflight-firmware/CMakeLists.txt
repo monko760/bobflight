@@ -117,6 +117,7 @@ include_directories(
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_pid_elapsed_test src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c)
+  target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/rates.c src/flight/config.c)
   target_link_libraries(bobflight_pid_elapsed_test m)
   add_test(NAME pid_elapsed COMMAND bobflight_pid_elapsed_test)
   add_executable(bobflight_cycle_clock_test tests/host_cycle_clock.c)
@@ -247,6 +248,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/sched/tasks.c src/flight/pid.c src/flight/mixer.c
     src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c)
   target_compile_definitions(bobflight_bench_safety_test PRIVATE BOBFLIGHT_HOST=1)
+  target_sources(bobflight_bench_safety_test PRIVATE src/flight/rates.c)
   target_link_libraries(bobflight_bench_safety_test m)
   add_executable(bobflight_dshot_timer_test tests/host_dshot_timer.c)
   target_compile_definitions(bobflight_dshot_timer_test PRIVATE BOBFLIGHT_HOST=1)
@@ -256,6 +258,22 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   foreach(check rates_math arming_edges failsafe dshot_frame dshot_speed crsf_parse gyro_inject cascade_inject attitude mpu6000 bench_safety)
     add_test(NAME ${check} COMMAND bobflight_${check}_test)
   endforeach()
+
+  add_executable(bobflight_control_mode_test
+    src/sched/tasks.c src/flight/pid.c src/flight/attitude.c
+    src/flight/rates.c src/flight/config.c tests/host_control_mode.c)
+  target_compile_definitions(bobflight_control_mode_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_control_mode_test m)
+  add_test(NAME control_mode_routing COMMAND bobflight_control_mode_test)
+  add_executable(bobflight_control_mode_flight_guard_test
+    src/sched/tasks.c src/flight/pid.c src/flight/attitude.c
+    src/flight/rates.c src/flight/config.c tests/host_control_mode.c)
+  target_compile_definitions(bobflight_control_mode_flight_guard_test PRIVATE
+    BOBFLIGHT_HOST=1 BOBFLIGHT_FLIGHT_ENABLE=1)
+  target_link_libraries(bobflight_control_mode_flight_guard_test m)
+  add_test(NAME control_mode_flight_guard COMMAND bobflight_control_mode_flight_guard_test)
+  add_test(NAME control_mode_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_control_mode_cli.py $<TARGET_FILE:bobflight_host>)
 
   add_executable(bobflight_cascade_inject_test
     src/flight/pid.c

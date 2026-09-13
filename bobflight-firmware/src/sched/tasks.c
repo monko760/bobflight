@@ -27,6 +27,22 @@ static unsigned bench_motor;
 /* Remain busy until a cascade has actually submitted the stop frame. */
 static bool bench_output_pending;
 bool bench_motor_active(void){return bench_motor != 0u || bench_output_pending;}
+static control_mode_t g_control_mode = CONTROL_MODE_ANGLE;
+control_mode_t control_mode_get(void) { return g_control_mode; }
+const char *control_mode_name(void) {
+    return g_control_mode == CONTROL_MODE_ACRO ? "acro" : "angle";
+}
+bool control_mode_set(control_mode_t mode) {
+    if (mode != CONTROL_MODE_ANGLE && mode != CONTROL_MODE_ACRO) return false;
+    if (arming_state() == ARM_ARMED || bench_motor_active() ||
+        gyro_manual_calibration_active()) return false;
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    /* Acro routing has not been flight-qualified: bench builds only. */
+    if (mode == CONTROL_MODE_ACRO) return false;
+#endif
+    g_control_mode = mode;
+    return true;
+}
 static uint32_t bench_started;
 static unsigned bench_seq_step; /* 0 = single test; 1..4 = running sequence */
 static float bench_throttle = 0.08f;
@@ -95,7 +111,11 @@ void loop_pid(void)
         const float *angles=attitude_degrees();
         if(gyro_calibrated() && attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f && arming_try_arm())arm_low_seen=false;
     }
-    attitude_setpoint(sticks,g_setpoint);
+    /* Preserve the existing leveling override during staged failsafe. */
+    if (g_control_mode == CONTROL_MODE_ACRO && !fs_flying)
+        rates_update(sticks,g_setpoint);
+    else
+        attitude_setpoint(sticks,g_setpoint);
     if(arming_state()!=ARM_ARMED || sticks[3]<0.05f){
         pid_init();g_pid=(pid_axis_out_t){0};have_pid_time=false;
     } else if(pid_first){

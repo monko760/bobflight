@@ -40,11 +40,20 @@ static void cli_write_str(const char *s)
 #include "drivers/sensor_cli.h"
 #include "drivers/timing_cli.h"
 
+static void cmd_control_mode(void)
+{
+    cli_write_str("control_mode_version: 1\r\ncontrol_mode: ");
+    cli_write_str(control_mode_name());
+    cli_write_str("\r\ncontrol_mode_storage: ram-only\r\n"
+                  "control_mode_experimental: yes\r\ncontrol_mode_end: 1\r\n");
+}
+
 static void cmd_help(void)
 {
     cli_write_str(
         "BobFlight CLI\r\n"
         "  help     - this text\r\n"
+        "  control_mode [angle|acro] - experimental RAM-only bench routing\r\n"
         "  version  - firmware version\r\n"
         "  status   - MCU, loops, arm, gyro, board\r\n"
         "  power - battery readings and configuration\r\n"
@@ -254,6 +263,15 @@ static void handle_line(char *line)
         cmd_version();
     } else if (strcmp(line, "timing") == 0) {
         cmd_timing();
+    } else if (strcmp(line, "control_mode") == 0) {
+        cmd_control_mode();
+    } else if (strncmp(line, "control_mode ", 13) == 0) {
+        const char *arg = line + 13;
+        bool valid = strcmp(arg, "angle") == 0 || strcmp(arg, "acro") == 0;
+        control_mode_t mode = strcmp(arg, "acro") == 0 ? CONTROL_MODE_ACRO : CONTROL_MODE_ANGLE;
+        if (valid && control_mode_set(mode)) cmd_control_mode();
+        else cli_write_str("control_mode refused: angle|acro; disarmed, motors stopped, "
+                           "no calibration; acro requires bench build\r\n");
     } else if (strcmp(line, "status") == 0) {
         cmd_status();
     } else if (strcmp(line, "receiver") == 0) {
