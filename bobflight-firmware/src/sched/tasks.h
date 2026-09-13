@@ -14,6 +14,15 @@ extern "C" {
 #endif
 
 /* Cascade (cooperative; never block): gyro → filter → pid → mixer → dshot */
+/* Experimental RAM-only setpoint routing; never changes arming permission. */
+typedef enum {
+    CONTROL_MODE_ANGLE = 0,
+    CONTROL_MODE_ACRO = 1
+} control_mode_t;
+control_mode_t control_mode_get(void);
+const char *control_mode_name(void);
+bool control_mode_set(control_mode_t mode);
+
 void loop_gyro(void);
 void loop_filter(void);
 void loop_pid(void);
