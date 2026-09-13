@@ -127,6 +127,9 @@ include_directories(
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_config_store_test tests/host_config_store.c)
+  add_executable(bobflight_flash_watchdog_test tests/host_flash_watchdog.c)
+  target_include_directories(bobflight_flash_watchdog_test PRIVATE src)
+  add_test(NAME flash_watchdog COMMAND bobflight_flash_watchdog_test)
   add_test(NAME config_store COMMAND bobflight_config_store_test)
   add_executable(bobflight_persist_config_test tests/host_persist_config.c src/flight/config.c src/flight/mode_range.c)
   target_link_libraries(bobflight_persist_config_test m)

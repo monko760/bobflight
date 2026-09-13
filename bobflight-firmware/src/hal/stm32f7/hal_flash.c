@@ -9,6 +9,10 @@
 #include <string.h>
 #if defined(BOBFLIGHT_CONFIG_FLASH_F745) && defined(BOBFLIGHT_HAVE_CMSIS)
 #include "hal_f7_priv.h"
+#include "flash_watchdog.h"
+#include "flight/arming.h"
+#include "drivers/gyro.h"
+#include "sched/tasks.h"
 #define REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
 #define FLASH_KEYR REG32(0x40023C04u)
 #define FLASH_SR REG32(0x40023C0Cu)
@@ -38,9 +42,21 @@ static void leave(flash_context_t c){
 bool hal_flash_read(uint32_t off,void *dst,size_t n){if(!dst||!bounds(off,n)||!hal_flash_supported()||(FLASH_SR&BUSY))return false;memcpy(dst,(const void *)(uintptr_t)(CFG_BASE+off),n);return true;}
 bool hal_flash_erase_slot(unsigned slot){
  if(slot>=2||!hal_flash_supported())return false;
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+ return false;
+#endif
+ if(arming_state()==ARM_ARMED||bench_motor_active()||gyro_manual_calibration_active())return false;
+ flash_iwdg_t *wd=(flash_iwdg_t *)(uintptr_t)0x40003000u;
+ flash_iwdg_saved_t saved;
+ /* Code fetches stall during same-bank erase. Set a bounded maintenance
+  * window BEFORE starting it, and restore normal watchdog timing on all
+  * returning paths. A failed watchdog handshake must reset, never resume
+  * the controller with an unverified longer timeout. */
+ if(!flash_iwdg_begin(wd,&saved))for(;;){}
  flash_context_t c=enter();bool ok=unlock();
  if(ok){FLASH_SR=ERRORS|1u;FLASH_CR=(1u<<1)|((6u+slot)<<3);FLASH_CR|=1u<<16;__DSB();ok=idle()&&!(FLASH_SR&ERRORS);}
  if(!(FLASH_SR&BUSY)){FLASH_CR=LOCK;FLASH_SR=ERRORS|1u;}
+ if(!flash_iwdg_end(wd,&saved))for(;;){}
  leave(c);return ok;
 }
 bool hal_flash_write(uint32_t off,const void *src,size_t n){
