@@ -64,6 +64,28 @@ int main(void){float d[3];b.gyro_spi_bus=4;b.gyro_cs_pin=HAL_PIN_PACK(4,4);
  CHECK(!gyro_manual_calibration_active());
  CHECK(gyro_start_accel_calibration());CHECK(gyro_capture_accel_face(4));gyro_cancel_manual_calibration();
  CHECK(!gyro_manual_calibration_active());
+
+ gyro_calibration_info_t stored;gyro_calibration_info(&stored);
+ uint32_t binding=gyro_accel_calibration_binding();CHECK(binding!=0);
+ b.gyro_spi_bus=1;CHECK(!gyro_accel_restore_valid(stored.accel_bias,stored.accel_scale,binding));b.gyro_spi_bus=4;
+ strcpy(b.gyro_align,"CW0_DEG");CHECK(!gyro_accel_restore_valid(stored.accel_bias,stored.accel_scale,binding));strcpy(b.gyro_align,"CW270_DEG");
+ CHECK(!gyro_accel_restore_valid(stored.accel_bias,stored.accel_scale,binding^0x100));
+ float invalid_scale[3]={NAN,1,1};CHECK(!gyro_accel_restore_valid(stored.accel_bias,invalid_scale,binding));
+ CHECK(gyro_accel_restore_valid(stored.accel_bias,stored.accel_scale,binding)==!BOBFLIGHT_ACCEL_BENCH_RELAXED);
+ gyro_init();CHECK(!gyro_calibrated());gyro_calibration_info(&info);CHECK(!info.accel_valid);
+ if(!BOBFLIGHT_ACCEL_BENCH_RELAXED){
+  CHECK(gyro_accel_restore_valid(stored.accel_bias,stored.accel_scale,binding));
+  gyro_restore_accel_calibration(stored.accel_bias,stored.accel_scale,true);
+  gyro_calibration_info(&info);CHECK(info.accel_valid&&!info.candidate_valid&&info.faces==0);
+  CHECK(!gyro_calibrated()&&!gyro_flight_ready());
+  CHECK(info.gyro_bias[0]==0&&info.gyro_bias[1]==0&&info.gyro_bias[2]==0);
+  now++;CHECK(gyro_sample(d));CHECK(fabsf(gyro_diagnostics()->raw_acc_g[2]-.8f)<.001f);
+  CHECK(fabsf(gyro_accel_g()[2]-1.f)<.001f);
+  for(unsigned i=0;i<1001;i++){now++;CHECK(gyro_sample(d));}
+  CHECK(gyro_calibrated());gyro_calibration_info(&info);CHECK(info.accel_valid);
+  float zero[3]={0},one[3]={1,1,1};gyro_restore_accel_calibration(zero,one,false);
+  gyro_calibration_info(&info);CHECK(!info.accel_valid&&gyro_calibrated());
+ }
  broken=true;CHECK(!gyro_sample(d));CHECK(!healthy&&!gyro_is_healthy());
  broken=false;bad_accel=true;gyro_init();CHECK(!gyro_is_healthy()&&!gyro_diagnostics()->config_ok);
  puts("PASS: MPU6000 setup, scaling, alignment, calibration reset and bus failure");return 0;

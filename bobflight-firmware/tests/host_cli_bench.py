@@ -20,7 +20,7 @@ print('PASS: actual CLI help, zero stop, unavailable outputs, strict arguments, 
 # Actual CLI parsing and response boundaries on unavailable dummy IMU.
 for cmd,end in [('sensors','sensors_end: 1'),('calibration','calibration_end: 1')]:
     text=run((cmd+'\n').encode())
-    assert 'sensors_version: 1' in text and end in text and 'calibration_storage: ram-only' in text
+    assert 'sensors_version: 1' in text and end in text and 'calibration_storage: not-calibrated' in text
     assert 'sensor_config_ok: no' in text and 'sample_seq: 0' in text
 for cmd in ['calibrate_gyro','calibrate_accel start','calibrate_accel +x','calibrate_accel apply']:
     assert 'calibration refused' in run((cmd+'\n').encode())

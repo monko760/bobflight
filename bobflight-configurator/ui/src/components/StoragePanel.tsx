@@ -21,8 +21,8 @@ export function StoragePanel({revision=0,blocked=false}:{revision?:number;blocke
     const raw=await host.sendCommand(action==='diff'?'diff all':'dump all');if(!live(id))return;
     const data=parseConfigurationExport(raw,action);
     const url=URL.createObjectURL(new Blob([data.raw],{type:'text/plain'}));
-    try{const a=document.createElement('a');a.href=url;a.download=`bobflight-${data.board}-${data.firmware}-${action}-schema1.txt`;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
-    setMessage('Exported runtime configuration. Export does not save to the controller; verify board and version before restoring.');
+    try{const a=document.createElement('a');a.href=url;a.download=`bobflight-${data.board}-${data.firmware}-${action}-config.txt`;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
+    setMessage('Exported runtime configuration. Calibration metadata cannot be replayed; retain controller flash or recalibrate if it is lost. Export does not save to the controller.');
    }
    const next=parseStorage(await host.sendCommand('storage'));if(!live(id))return;
    if(action==='save'&&(next.backend!=='flash'||next.state!=='saved'||next.dirty))throw Error('Save readback was not verified.');
@@ -34,7 +34,7 @@ export function StoragePanel({revision=0,blocked=false}:{revision?:number;blocke
  const canSave=canSaveStorage(state,connected,pending||blocked);
  return <section aria-label="Controller storage" className="panel">
   <h3>Controller storage & backups</h3>
-  <p>Apply edits first, then Save to controller. Save includes PID/rates, receiver UART/map, all mode ranges, manual mode and manual/AUX selection. Calibration, power settings and DShot speed are not included yet.</p>
+  <p>Apply edits first, then Save to controller. Save includes PID/rates, receiver UART/map, all mode ranges, manual mode and manual/AUX selection. Schema 2 also saves validated, applied accelerometer calibration. Gyro bias, power settings and DShot speed are excluded. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
   <p>{!connected?'Disconnected — no current storage status.':state?`${state.backend==='flash'?'Controller flash':state.backend==='host_sim'?'Host simulation — not physical storage':'Unsupported'} · ${state.state} · ${state.dirty?'unsaved changes':'no unsaved changes'} · generation ${state.generation}`:'Storage capability not yet verified.'}</p>
   <button disabled={!canSave} onClick={()=>void run('save')}>Save to controller</button>{' '}
   <button disabled={!connected||pending||blocked} onClick={()=>void run('refresh')}>Refresh storage</button>{' '}

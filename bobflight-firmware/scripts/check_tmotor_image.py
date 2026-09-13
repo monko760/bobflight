@@ -5,7 +5,7 @@ import hashlib,struct,sys
 from pathlib import Path
 
 def validate(path,board='tmotor_f7_v2'):
-    versions={'tmotor_f7_v2':'0.2.0-prototype-tmotorf7v2-sensor2-bl1','kakute_f7_hdv':'0.2.0-prototype-switchbench2-bl1'}
+    versions={'tmotor_f7_v2':'0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1','kakute_f7_hdv':'0.2.0-prototype-switchbench2-bl1-calstore1'}
     if board not in versions:raise ValueError('Unsupported board')
     memory={};upper=0;eof=False
     for number,line in enumerate(Path(path).read_text().splitlines(),1):

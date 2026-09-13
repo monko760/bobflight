@@ -140,7 +140,13 @@ bool   hal_usb_cdc_connected(void);
 bool hal_bootloader_supported(void);
 bool hal_bootloader_request(void);
 
-/* ---- configuration flash: offsets relative to the two reserved 256 KiB slots ---- */
+/* ---- configuration storage: backend-owned logical offsets/erase geometry ----
+ * Two disjoint independently erasable regions reserved outside firmware. Reads
+ * are physical readback; writes obey program_unit and cannot fake cached success.
+ * v2 requires power-of-two programming granules <=32 bytes. Wider granules fail closed.
+ * Future HALs must handle their cache, ECC, voltage and watchdog requirements. */
+typedef struct { uint32_t offset[2], bytes[2], program_unit; } hal_flash_geometry_t;
+bool hal_flash_geometry(hal_flash_geometry_t *geometry);
 bool hal_flash_supported(void);
 const char *hal_flash_backend(void);
 bool hal_flash_erase_slot(unsigned slot);

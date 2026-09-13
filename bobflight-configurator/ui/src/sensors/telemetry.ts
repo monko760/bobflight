@@ -90,7 +90,10 @@ export function parseKeyValueSnapshot(rawText:string):SensorSnapshot|null {
   if(boolKeys.some(k=>kv[k]!=="yes" && kv[k]!=="no"))return null;
   if(kv.arm!=="armed" && kv.arm!=="disarmed")return null;
   if(!["idle","gyro","accel_wait","accel_collect","complete","error"].includes(kv.cal_state))return null;
-  if(kv.calibration_storage!=="ram-only" || kv.cal_reason===undefined)return null;
+  if(!["ram-only","not-calibrated","unsaved","flash-verified","host-sim","error"].includes(kv.calibration_storage) || kv.cal_reason===undefined)return null;
+  if(["unsaved","flash-verified","host-sim"].includes(kv.calibration_storage)&&kv.accel_calibrated!=="yes")return null;
+  if(kv.calibration_storage==="not-calibrated"&&kv.accel_calibrated!=="no")return null;
+  if(kv.calibration_storage==="flash-verified"&&kv.cal_bench_relaxed==="yes")return null;
   const nums={sample_seq:uint("sample_seq"),sample_ms:uint("sample_ms"),sensor_age_ms:uint("sensor_age_ms"),cal_samples:uint("cal_samples",30000),cal_required:uint("cal_required",1000),cal_faces:uint("cal_faces",63)};
   if(Object.values(nums).some(n=>!Number.isFinite(n)) || !/^(?:-1|[0-5])$/.test(kv.cal_face??""))return null;
   const vectors={gyro_dps:parseThreeFloats(kv.gyro_dps),accel_g:parseThreeFloats(kv.accel_g),accel_raw_g:parseThreeFloats(kv.accel_raw_g),attitude_deg:parseThreeFloats(kv.attitude_deg)};

@@ -360,8 +360,11 @@ export function SensorsPage() {
             A large accepted offset needs hardware investigation, not flight testing.
           </li>
           <li>
-            <strong>RAM-ONLY Storage:</strong> Calibration coefficients are stored in RAM ONLY and
-            will be lost when the board reboots or loses power (no persistent flash saving).
+            <strong>Apply, then Save:</strong> On schema-2 Holybro firmware, successful six-face Apply
+            updates RAM; switch to CLI and run <code>save</code>, then <code>storage</code>.
+            Verify <code>flash-verified</code> calibration after a full power cycle. Gyro bias is
+            recalibrated at startup, not saved. Older firmware and the T-Motor diagnostic target
+            remain RAM-only. Raw measurements and incomplete candidates are never saved.
           </li>
         </ul>
       </div>

@@ -10,6 +10,7 @@ void persist_init(void);
 bool persist_load(void);
 bool persist_save(void);
 bool persist_dirty(void);
+const char *persist_accel_storage(void);
 const char *persist_last_error(void);
 const char *persist_backend(void);
 uint32_t persist_generation(void);

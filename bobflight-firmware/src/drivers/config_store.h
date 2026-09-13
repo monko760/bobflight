@@ -9,4 +9,9 @@ config_store_result_t config_store_load(uint32_t board_id,void *payload,size_t b
 config_store_result_t config_store_save(uint32_t board_id,const void *payload,size_t bytes);
 uint32_t config_store_generation(void);
 const char *config_store_backend(void);
+/* v2 is 128 bytes; accepts and zero-extends only schema1/96-byte records.
+ * Save migrates to the alternate slot and commits last; never erases legacy first. */
+config_store_result_t config_store_load_v2(uint32_t board_id,void *payload,size_t bytes);
+config_store_result_t config_store_save_v2(uint32_t board_id,const void *payload,size_t bytes);
+uint32_t config_store_loaded_schema(void);
 #endif

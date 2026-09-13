@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
- * Schema 1: little-endian binary32 rates/PID, UART, input map, two preview ranges.
+ * Schema 2: schema1 bytes0..95 plus applied accelerometer calibration.
+ * Byte96 valid;97..99 reserved;100..103 sensor/range/model binding;104..115 bias;116..127 scale.
  * Byte offsets: floats 0..47; UART 48..51; map 52; mode-count 53; source 54; manual mode 55;
  * MODE_COUNT mode rows from byte 56: enabled, AUX, minLE16, maxLE16, reservedLE16.
  * Store requested configuration only, never effective mode, live telemetry or arming.
@@ -19,13 +20,14 @@
 #include <math.h>
 #include <float.h>
 
-#define PAYLOAD_BYTES 96u
+#define BASE_BYTES 96u
+#define PAYLOAD_BYTES 128u
 _Static_assert(MODE_COUNT == 2 || MODE_COUNT == 4, "Update persistence schema for new mode model");
 _Static_assert(sizeof(float)==4 && FLT_RADIX==2 && FLT_MANT_DIG==24, "binary32 config required");
 static const char *keys[12]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo",
  "pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d","pid_yaw_p","pid_yaw_i"};
 static uint8_t saved[PAYLOAD_BYTES];
-static bool have_saved,load_error;
+static bool have_saved,load_error,migration_pending;
 static const char *last_error="none";
 static void put32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(i*8));}
 static uint32_t get32(const uint8_t *p){uint32_t v=0;for(unsigned i=0;i<4;i++)v|=(uint32_t)p[i]<<(i*8);return v;}
@@ -45,7 +47,7 @@ static bool decode(const uint8_t *p,float values[12],mode_config_t modes[MODE_CO
  if(p[54]||p[55])return false;
 #endif
  if(p[53]==2&&p[54])return false;
- for(unsigned i=56u+p[53]*8u;i<PAYLOAD_BYTES;i++)if(p[i])return false;
+ for(unsigned i=56u+p[53]*8u;i<BASE_BYTES;i++)if(p[i])return false;
  for(unsigned i=0;i<MODE_COUNT;i++){
   if(i>=p[53]){const mode_config_t *d=mode_range_get((mode_id_t)i);if(!d)return false;modes[i]=*d;continue;}
   const uint8_t *r=p+56+i*8;if(r[0]>1||r[1]<1||r[1]>12||r[6]||r[7])return false;
@@ -53,6 +55,14 @@ static bool decode(const uint8_t *p,float values[12],mode_config_t modes[MODE_CO
   if(modes[i].min_us<900||modes[i].max_us>2100||modes[i].min_us>=modes[i].max_us)return false;
  }
  return true;
+}
+static void accel_values(const uint8_t*p,float bias[3],float scale[3]) {
+ for(unsigned i=0;i<3;i++){uint32_t b=get32(p+104+i*4),v=get32(p+116+i*4);memcpy(&bias[i],&b,4);memcpy(&scale[i],&v,4);}
+}
+static bool accel_decode_valid(const uint8_t*p) {
+ if(!p[96]){for(unsigned i=97;i<PAYLOAD_BYTES;i++)if(p[i])return false;return true;}
+ if(p[96]!=1||p[97]||p[98]||p[99])return false;
+ float b[3],v[3];accel_values(p,b,v);return gyro_accel_restore_valid(b,v,get32(p+100));
 }
 static bool encode(uint8_t p[PAYLOAD_BYTES]){
  const board_t *b=board_get();if(!b)return false;memset(p,0,PAYLOAD_BYTES);
@@ -62,7 +72,14 @@ static bool encode(uint8_t p[PAYLOAD_BYTES]){
  p[54]=(uint8_t)!strcmp(control_source_name(),"aux");
 #endif
  for(unsigned i=0;i<MODE_COUNT;i++){const mode_config_t *m=mode_range_get((mode_id_t)i);if(!m)return false;uint8_t *r=p+56+i*8;r[0]=m->enabled;r[1]=m->aux_channel;put16(r+2,m->min_us);put16(r+4,m->max_us);}
- float values[12];mode_config_t modes[MODE_COUNT];return decode(p,values,modes);
+ gyro_calibration_info_t cal;gyro_calibration_info(&cal);
+ if(cal.accel_valid){
+  uint32_t binding=gyro_accel_calibration_binding();
+  if(!gyro_accel_restore_valid(cal.accel_bias,cal.accel_scale,binding))return false;
+  p[96]=1;put32(p+100,binding);
+  for(unsigned i=0;i<3;i++){uint32_t b,v;memcpy(&b,&cal.accel_bias[i],4);memcpy(&v,&cal.accel_scale[i],4);put32(p+104+i*4,b);put32(p+116+i*4,v);}
+ }
+ float values[12];mode_config_t modes[MODE_COUNT];return decode(p,values,modes)&&accel_decode_valid(p);
 }
 static const char *store_error(config_store_result_t r){switch(r){case CONFIG_STORE_EMPTY:return "empty";case CONFIG_STORE_UNSUPPORTED:return "unsupported";case CONFIG_STORE_INVALID:return "invalid_record";case CONFIG_STORE_IO_ERROR:return "storage_io";default:return "none";}}
 static bool safe_to_change(void){
@@ -71,12 +88,12 @@ static bool safe_to_change(void){
  if(gyro_manual_calibration_active()){last_error="calibration_active";return false;}
  return true;
 }
-void persist_init(void){config_init();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;last_error="none";memset(saved,0,sizeof(saved));}
+void persist_init(void){config_init();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;migration_pending=false;last_error="none";memset(saved,0,sizeof(saved));}
 bool persist_load(void){
  if(!safe_to_change())return false;
- uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load(board_tag(),p,sizeof(p));
+ uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v2(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);load_error=r!=CONFIG_STORE_EMPTY&&r!=CONFIG_STORE_UNSUPPORTED;return false;}
- float values[12];mode_config_t modes[MODE_COUNT];if(!decode(p,values,modes)){last_error="invalid_settings";load_error=true;return false;}
+ float values[12];mode_config_t modes[MODE_COUNT];if(!decode(p,values,modes)||!accel_decode_valid(p)){last_error="invalid_settings";load_error=true;return false;}
  /* All validation precedes mutation. Known board UART setters cannot fail after validation. */
  const board_t *b=board_get();uint32_t uart=get32(p+48);
  if(uart!=b->rx_uart&&!board_select_rx_uart(uart)){last_error="invalid_uart";load_error=true;return false;}
@@ -87,6 +104,8 @@ bool persist_load(void){
 #if defined(BOBFLIGHT_CONTROL_SOURCE_API)
  (void)control_source_set(p[54]!=0);
 #endif
+ {float bias[3]={0},scale[3]={1,1,1};if(p[96])accel_values(p,bias,scale);gyro_restore_accel_calibration(bias,scale,p[96]!=0);}
+ migration_pending=config_store_loaded_schema()!=2;
  failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;last_error="none";return true;
 }
 bool persist_save(void){
@@ -95,14 +114,23 @@ bool persist_save(void){
  last_error="flight_build_unqualified";return false;
 #endif
  uint8_t p[PAYLOAD_BYTES];if(!encode(p)){last_error="invalid_settings";return false;}
- config_store_result_t r=config_store_save(board_tag(),p,sizeof(p));
+ config_store_result_t r=config_store_save_v2(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);return false;}
- uint8_t check[PAYLOAD_BYTES];r=config_store_load(board_tag(),check,sizeof(check));
+ uint8_t check[PAYLOAD_BYTES];r=config_store_load_v2(board_tag(),check,sizeof(check));
  if(r!=CONFIG_STORE_OK||memcmp(p,check,sizeof(p))){last_error="verify_failed";return false;}
- memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;last_error="none";return true;
+ memcpy(saved,p,sizeof(saved));have_saved=true;migration_pending=false;load_error=false;last_error="none";return true;
 }
-bool persist_dirty(void){uint8_t now[PAYLOAD_BYTES];return !have_saved||!encode(now)||memcmp(now,saved,sizeof(saved))!=0;}
+bool persist_dirty(void){uint8_t now[PAYLOAD_BYTES];return migration_pending||!have_saved||!encode(now)||memcmp(now,saved,sizeof(saved))!=0;}
 const char *persist_last_error(void){return last_error;}
 const char *persist_backend(void){return config_store_backend();}
 uint32_t persist_generation(void){return config_store_generation();}
 const char *persist_state(void){if(!config_store_supported())return "unsupported";if(load_error||(strcmp(last_error,"none")&&strcmp(last_error,"empty")))return "error";if(!have_saved)return "defaults";return persist_dirty()?"dirty":"saved";}
+
+const char *persist_accel_storage(void){
+ if(!config_store_supported())return "ram-only";
+ if(load_error)return "error";
+ gyro_calibration_info_t c;gyro_calibration_info(&c);if(!c.accel_valid)return "not-calibrated";
+ uint8_t now[PAYLOAD_BYTES];
+ if(!have_saved||!encode(now)||memcmp(now+96,saved+96,32))return "unsaved";
+ return !strcmp(config_store_backend(),"flash")?"flash-verified":"host-sim";
+}
