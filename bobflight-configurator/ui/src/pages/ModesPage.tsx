@@ -1,4 +1,5 @@
 import {StoragePanel} from "../components/StoragePanel";
+import {ModeReceiver} from '../components/ModeReceiver';
 /* SPDX-License-Identifier: Apache-2.0 */
 import {useEffect,useState} from 'react';
 import {parseModes,modeRangeCommand,controlSourceCommand,canEditModeRanges,canSelectControlSource,type ModeRow} from '../protocol';
@@ -41,6 +42,7 @@ export function ModesPage(){
   {!q.connected&&<p className="banner-warn">Connect your board first. No current board state is available.</p>}
   {(q.error||localError)&&<p role="alert" className="fail">{q.error||localError}</p>}
   <button disabled={!q.connected||q.pending} onClick={()=>void refresh()}>Refresh modes and discard drafts</button>
+  <ModeReceiver drafts={drafts??[]} editable={editable} onAssign={(name,aux)=>edit(name,{aux})}/>
   {s&&<>
    <p className="banner-warn">{s.apiVersion===2?'Control ranges route bench setpoints only after explicit AUX selection. ARM remains preview-only.':'Legacy firmware: ARM and ANGLE are previews only; update both firmware and configurator for three-mode routing.'} {s.flightEnabled?'Firmware reports flight enabled; experimental mode-source changes are disabled here.':'Flight disabled in this firmware.'} Not flight-qualified.</p>
    {s.source==='mock'&&<p>DEMO — no radio or motor hardware. Switch activity is not simulated.</p>}
@@ -64,7 +66,7 @@ export function ModesPage(){
     <button disabled={!editable} onClick={()=>void apply(m)}>Apply {m.name==='HORIZON'?'Level (Horizon)':m.name}</button>
    </fieldset>)}
   </>}
-  <p>AUX1–12 use equivalent microseconds (900–2100), not measured PWM pulses. No match, stale receiver data or overlapping control ranges fall back to Angle. Refresh after moving a switch.</p>
+  <p>AUX1–12 use equivalent microseconds (900–2100), not measured PWM pulses. No match, stale receiver data or overlapping control ranges fall back to Angle. Live switch positions update above; refresh modes to read the controller’s applied mode snapshot.</p>
   <p>Apply updates the running configuration; Save to controller retains all mode ranges and manual/AUX selection after a power cycle. The attitude estimator and sensor qualification remain required—even in Acro/Horizon. Do not attempt flight or flips.</p>
   {reply&&<p role="status">{reply}</p>}
  </div>;

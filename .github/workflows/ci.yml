@@ -82,6 +82,8 @@ jobs:
         run: node ../.github/scripts/storage-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
+      - name: Live receiver switch identification in Modes
+        run: node ui/scripts/test-mode-receiver.cjs
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
       - name: Timing protocol tests
