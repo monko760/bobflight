@@ -82,6 +82,16 @@ option(BOBFLIGHT_ACCEL_BENCH_RELAXED "Experimental relaxed accel pose checks; ne
 if(BOBFLIGHT_ACCEL_BENCH_RELAXED AND BOBFLIGHT_FLIGHT_ENABLE)
   message(FATAL_ERROR "Relaxed accelerometer calibration is bench-only: flight must remain disabled")
 endif()
+# TMOTORF7V2 is initially a USB/sensor comparison target, never a flight image.
+if(BOBFLIGHT_BOARD STREQUAL "tmotor_f7_v2")
+  if(BOBFLIGHT_FLIGHT_ENABLE OR BOBFLIGHT_ACCEL_BENCH_RELAXED)
+    message(FATAL_ERROR "TMOTORF7V2 sensor bring-up requires flight and relaxed calibration OFF")
+  endif()
+  if(DEFINED BOBFLIGHT_TARGET_MCU AND NOT BOBFLIGHT_TARGET_MCU STREQUAL "STM32F722")
+    message(FATAL_ERROR "TMOTORF7V2 requires the STM32F722 toolchain, not F745/H7")
+  endif()
+  add_compile_definitions(BOBFLIGHT_TARGET_TMOTORF7V2=1 BOBFLIGHT_TARGET_MCU_STM32F722=1)
+endif()
 option(BOBFLIGHT_PROVE_RESET "Reset_Handler-only forever PA2 blink (never main); diagnostic" OFF)
 option(BOBFLIGHT_BOOT_LED_DIAGNOSTICS "Blocking startup LED patterns for bring-up; leave OFF for normal boots" OFF)
 add_compile_definitions(BOBFLIGHT_BOOT_LED_DIAGNOSTICS=$<BOOL:${BOBFLIGHT_BOOT_LED_DIAGNOSTICS}>)
@@ -131,6 +141,16 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_include_directories(bobflight_flash_watchdog_test PRIVATE src)
   add_test(NAME flash_watchdog COMMAND bobflight_flash_watchdog_test)
   add_test(NAME config_store COMMAND bobflight_config_store_test)
+  add_test(NAME tmotor_image_validator COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_tmotor_image.py ${CMAKE_SOURCE_DIR})
+  add_executable(bobflight_tmotor_peripherals_test tests/host_tmotor_peripherals.c
+    src/hal/stm32f7/hal_tim_dma.c src/hal/stm32f7/hal_adc.c src/hal/stm32f7/hal_flash.c)
+  target_compile_options(bobflight_tmotor_peripherals_test PRIVATE -include ${CMAKE_SOURCE_DIR}/tests/tmotor_peripheral_mocks.h)
+  add_test(NAME tmotor_peripherals_fail_closed COMMAND bobflight_tmotor_peripherals_test)
+  add_executable(bobflight_gyro_spi_map_test tests/host_gyro_spi_map.c)
+  add_test(NAME gyro_spi_map COMMAND bobflight_gyro_spi_map_test)
+  add_test(NAME tmotor_target_contract COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_tmotor_target.py ${CMAKE_SOURCE_DIR} ${CMAKE_C_COMPILER})
   add_executable(bobflight_persist_config_test tests/host_persist_config.c src/flight/config.c src/flight/mode_range.c)
   target_link_libraries(bobflight_persist_config_test m)
   add_test(NAME persist_config COMMAND bobflight_persist_config_test)
@@ -410,6 +430,17 @@ else()
       COMMAND ${BF_OBJCOPY} -O ihex $<TARGET_FILE:bobflight.elf> ${CMAKE_BINARY_DIR}/bobflight.hex
       COMMAND ${BF_OBJCOPY} -O binary $<TARGET_FILE:bobflight.elf> ${CMAKE_BINARY_DIR}/bobflight.bin
       COMMENT "bobflight.hex / bobflight.bin")
+    if(BOBFLIGHT_BOARD STREQUAL "tmotor_f7_v2")
+      add_custom_command(TARGET bobflight.elf POST_BUILD
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/check_tmotor_image.py" "${CMAKE_BINARY_DIR}/bobflight.hex"
+        VERBATIM)
+      add_custom_target(check_tmotor_image
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/check_tmotor_image.py" "${CMAKE_BINARY_DIR}/bobflight.hex"
+        DEPENDS bobflight.elf VERBATIM)
+    endif()
+  endif()
+  if(BOBFLIGHT_BOARD STREQUAL "tmotor_f7_v2" AND NOT BF_OBJCOPY)
+    message(FATAL_ERROR "arm-none-eabi-objcopy is required for the TMOTORF7V2 image checker")
   endif()
   message(STATUS "BobFlight: MCU target 'bobflight.elf' (F7 HAL + ARM CMSIS Core; MMIO gated on verified IR)")
 endif()

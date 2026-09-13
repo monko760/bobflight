@@ -12,6 +12,7 @@
 #include <string.h>
 
 static board_t g_board;
+static bool target_mcu_ok=true;
 
 const board_t *board_get(void)
 {
@@ -71,12 +72,19 @@ bool board_ir_load_dummy(board_t *out)
 
 bool board_init(void)
 {
-    return board_ir_load_dummy(&g_board);
+    bool loaded=board_ir_load_dummy(&g_board);
+#if defined(BOBFLIGHT_MCU) && defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+    /* RM0431 F72x/73x device family + ST F722 FLASHSIZE register.
+     * Not proof of board identity; reject wrong family/capacity before peripherals. */
+    target_mcu_ok=((*(volatile const uint32_t *)(uintptr_t)0xE0042000u & 0xFFFu)==0x452u);
+    if(target_mcu_ok)target_mcu_ok=(*(volatile const uint16_t *)(uintptr_t)0x1FF07A22u==512u);
+#endif
+    return loaded && target_mcu_ok;
 }
 
 bool board_mmio_permitted(void)
 {
-    if (g_board.is_dummy) {
+    if (g_board.is_dummy || !target_mcu_ok) {
         return false;
     }
     return g_board.ir_verified || g_board.ir_bf_derived;
@@ -84,7 +92,7 @@ bool board_mmio_permitted(void)
 
 bool board_pins_live(void)
 {
-    return !g_board.is_dummy && (g_board.ir_verified || g_board.ir_bf_derived);
+    return target_mcu_ok && !g_board.is_dummy && (g_board.ir_verified || g_board.ir_bf_derived);
 }
 
 bool board_select_rx_uart(unsigned uart){

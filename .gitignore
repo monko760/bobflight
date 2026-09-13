@@ -45,3 +45,9 @@ coverage/
 Thumbs.db
 bobflight-configurator/fix-write.txt
 bobflight-configurator/writable-test
+
+# New target source build guide/script (not generated outputs).
+!/TMOTORF7V2.md
+!/build-tmotorf7v2-sensors.ps1
+
+__pycache__/
