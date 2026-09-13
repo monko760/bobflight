@@ -8,7 +8,7 @@ async function main(){
  const {CliPage}=loadUiTs(path.resolve(__dirname,'../src/pages/CliPage.tsx'),{
   react:{...require('react'),useEffect:()=>{},useRef:()=>({current:null}),useState:()=>{const i=hook++;return i===0?[input,v=>input=v]:i===1?[null,()=>{}]:[pending,v=>pending=v];}},
   '../hooks/useHost':{useHost:()=>({host:{sendCommand:async cmd=>sent.push(cmd)},connectionStatus:'connected',cliLines:[],appendCli:()=>{},refreshStatus:()=>{}})},
-  '../protocol':{ALLOWED_CLI_COMMANDS:['bench_switch','bench_stop']}
+  '../protocol':loadUiTs(path.resolve(__dirname,'../src/protocol/types.ts'))
  });
  let tree=CliPage();nodes(tree).find(n=>n.type==='form').props.onSubmit({preventDefault(){}});
  assert.equal(pending,'bench_switch');assert.equal(sent.length,0);

@@ -38,8 +38,21 @@ export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "bench_status",
   "receiver",
   "disarm",
-  "reboot",
+  "reboot", "bl", "bl discard",
 ] as const;
+
+/** Exact single-line UI input; preserve complete arguments, never just a verb. */
+export function parseCliInput(raw: string): CliCommand | null {
+  if (/[\x00-\x1f\x7f]/.test(raw)) return null; // reject multiline/control injection
+  const cmd = raw.trim().toLowerCase().replace(/ +/g, " ");
+  // Preserve the existing explicit bench command spelling restriction.
+  if ((cmd === "bench_switch" || cmd === "bench_stop") && raw.trim() !== cmd) return null;
+  return (ALLOWED_CLI_COMMANDS as readonly string[]).includes(cmd) ? cmd as CliCommand : null;
+}
+
+export function isBootloaderCommand(cmd: CliCommand): boolean {
+  return cmd === "bl" || cmd === "bl discard";
+}
 
 /** Thin host surface — mirrors BobFlightCliClient for screens. */
 export interface BobFlightHost {

@@ -96,6 +96,8 @@ jobs:
         run: npm --prefix ui run test:sensors
       - name: Flight modes protocol and Modes tab safety
         run: npm --prefix protocol run test:flight-modes
+      - name: Bootloader CLI parser, confirmation and transport
+        run: npm --prefix protocol run test:bootloader
       - name: WebSerial smoke
         run: npm --prefix protocol run smoke:webserial
       - name: Flasher smoke
