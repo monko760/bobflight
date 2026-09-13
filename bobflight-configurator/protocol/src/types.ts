@@ -43,6 +43,7 @@ export type CliCommand =
   | "arm"
   | "bench_switch"
   | "bench_stop"
+  | "bench_status"
   | "disarm"
   | "reboot"
   | "sensors"

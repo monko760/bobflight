@@ -35,6 +35,8 @@ export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "arm",
   "bench_switch",
   "bench_stop",
+  "bench_status",
+  "receiver",
   "disarm",
   "reboot",
 ] as const;

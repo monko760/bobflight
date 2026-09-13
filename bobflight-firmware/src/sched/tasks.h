@@ -49,6 +49,7 @@ bool bench_motor_active(void);
 /** Props-off AUX1 session: fixed 8%, 3s/run, 60s/session; never flight-arms. */
 bool bench_switch_start(void);
 void bench_switch_stop(void);
+const char *bench_switch_status(void);
 /** Spin motors 1..4 in order (RR, FR, RL, FL), 1s each, props-off bench use. */
 bool bench_motor_seq_start(void);
 
