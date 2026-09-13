@@ -15,8 +15,10 @@ import { ReceiverPage } from "./pages/ReceiverPage";
 import { ModesPage } from "./pages/ModesPage";
 import { MotorsPage } from "./pages/MotorsPage";
 import { SensorsPage } from "./pages/SensorsPage";
+import { BlackboxPage } from "./pages/BlackboxPage";
 
 type Tab =
+  | "blackbox"
   | "flasher"
   | "connect"
   | "setup"
@@ -34,6 +36,7 @@ type Tab =
   | "cli";
 
 const GATED_TABS: ReadonlySet<Tab> = new Set([
+  "blackbox",
   "setup",
   "ports",
   "configuration",
@@ -93,6 +96,7 @@ function Shell() {
               ["modes", "Modes"],
               ["motors", "Motors"],
               ["sensors", "Sensors"],
+              ["blackbox", "Blackbox"],
               ["status", "Status"],
               ["rates", "Rates"],
               ["pid", "PID"],
@@ -137,6 +141,7 @@ function Shell() {
           {tab === "modes" && <ModesPage />}
           {tab === "motors" && <MotorsPage />}
           {tab === "sensors" && <SensorsPage />}
+          <BlackboxPage visible={tab === 'blackbox'} />
           {tab === "status" && <StatusPage />}
           {tab === "rates" && <RatesPage />}
           {tab === "pid" && <PidPage />}
