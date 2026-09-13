@@ -1,3 +1,4 @@
+import { MockPortsModes } from "./ports-modes-mock";
 /*
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
@@ -43,6 +44,7 @@ export class MockSerial extends EventEmitter {
 
   private lineBuf = "";
   private bench: MockMotorBench;
+  private modesPorts = new MockPortsModes();
   private receiver = new MockReceiver();
   private armed = false;
   private rebootRequested = false;
@@ -66,6 +68,7 @@ export class MockSerial extends EventEmitter {
       failsafeActive: opts.failsafeActive ?? false,
       boardId: opts.boardId ?? "mock-board",
     };
+    this.modesPorts.reset();
     this.settings = cloneDefaultSettingValues();
   }
 
@@ -89,6 +92,7 @@ export class MockSerial extends EventEmitter {
     this.armed = false;
     this.rebootRequested = false;
     // Fresh session: reset settings store to defaults (disconnect reset).
+    this.modesPorts.reset();
     this.settings = cloneDefaultSettingValues();
     // cli_init banner — exact contract
     // Defer past attachPort() in BobFlightCliClient.connect (macrotask).
@@ -146,6 +150,8 @@ export class MockSerial extends EventEmitter {
     }
     if (line.length === 0) return;
     if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
+    const pm = this.modesPorts.handle(line,this.armed,this.bench.active);
+    if(pm!==null){this.emitData(pm);return;}
     const sensorReply = mockSensorReply(line, this.armed);
     if (sensorReply !== null) { this.emitData(sensorReply); return; }
     const benchReply = this.bench.handle(line, this.armed);
@@ -208,7 +214,8 @@ export class MockSerial extends EventEmitter {
       // Mock always succeeds (in-memory ack).
       this.emitData("saved\r\n");
     } else if (line === "defaults") {
-      this.settings = cloneDefaultSettingValues();
+      this.modesPorts.reset();
+    this.settings = cloneDefaultSettingValues();
       this.emitData("defaults restored\r\n");
     } else if (line.startsWith("get ") || line === "get") {
       const key = line === "get" ? "" : line.slice(4).trim();

@@ -19,6 +19,7 @@
 #include "flight/arming.h"
 #include "flight/failsafe.h"
 #include "flight/rates.h"
+#include "flight/mode_range.h"
 #include "sched/scheduler.h"
 
 #include <string.h>
@@ -262,6 +263,7 @@ bool app_init(void)
     pid_init();
     mixer_init();
     rates_init();
+    mode_range_init();
     arming_init();
     failsafe_init();
     /* Re-apply gyro health after arming_init cleared state */

@@ -8,7 +8,10 @@ on:
 
 jobs:
   firmware-host:
-    name: Firmware — host build + tests
+    strategy:
+      matrix:
+        board: [dummy, kakute_f7_hdv]
+    name: Firmware — host build + tests (${{ matrix.board }})
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -16,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -B build
+        run: cmake -B build -DBOBFLIGHT_BOARD=${{ matrix.board }}
       - name: Build
         run: cmake --build build -j
       - name: Test
@@ -68,6 +71,13 @@ jobs:
         run: npm --prefix protocol run smoke:settings
       - name: Motor protocol tests
         run: npm --prefix protocol run test:motors
+      - name: Ports and Modes numeric AUX tests
+        run: npm --prefix protocol run test:ports-modes
+      - name: Firmware to configurator Ports and Modes contract
+        run: |
+          cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract -DBOBFLIGHT_BOARD=kakute_f7_hdv -DBOBFLIGHT_FLIGHT_ENABLE=OFF
+          cmake --build ../bobflight-firmware/build-contract --target bobflight_host -j 4
+          node ../.github/scripts/ports-modes-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Motor bench UI safety tests

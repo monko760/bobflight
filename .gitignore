@@ -4,6 +4,8 @@
 !/README.md
 !/BASELINE.md
 !/POWER-BATTERY.md
+!/PORTS-MODES.md
+!/build-ports-modes.ps1
 !/build-power-battery.ps1
 !/.github/
 !/LICENSE

@@ -98,6 +98,7 @@ set(BF_COMMON_SOURCES
   src/flight/failsafe.c
   src/flight/rates.c
   src/flight/config.c
+  src/flight/mode_range.c
   src/drivers/gyro.c src/drivers/sensor_calibration.c
   src/drivers/dshot.c
   src/drivers/rx.c
@@ -116,6 +117,9 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_mode_range_test src/flight/mode_range.c tests/host_mode_range.c)
+  target_link_libraries(bobflight_mode_range_test m)
+  add_test(NAME mode_range COMMAND bobflight_mode_range_test)
   add_executable(bobflight_pid_elapsed_test src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c)
   target_link_libraries(bobflight_pid_elapsed_test m)
   add_test(NAME pid_elapsed COMMAND bobflight_pid_elapsed_test)
