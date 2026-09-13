@@ -20,6 +20,7 @@
 #include <math.h>
 static float g_acc[3], g_latest[3], g_filter[3];
 static sensor_calibration_t g_cal;
+static uint8_t g_sensor_id;
 static bool g_manual;
 static uint32_t g_client_ms;
 static gyro_diagnostics_t g_diag;
@@ -101,6 +102,7 @@ static uint8_t gyro_whoami_inv(void)
     if (!gyro_spi_read_regs(0x75u, &id, 1)) {
         return 0;
     }
+    g_sensor_id=id;
     return id;
 }
 
@@ -113,6 +115,7 @@ static uint8_t gyro_chipid_bmi(void)
     if (!bmi_spi_read_regs(0x00u, &id, 1)) {
         return 0;
     }
+    g_sensor_id=id;
     return id;
 }
 
@@ -264,7 +267,7 @@ void gyro_init(void)
     memset(&g_diag,0,sizeof(g_diag));
     g_diag.chip="unavailable";
     g_diag.gyro_config=g_diag.accel_config=0xff;
-    sc_init(&g_cal);g_manual=false;
+    sc_init(&g_cal);g_manual=false;g_sensor_id=0;
     gyro_begin_calibration();
     memset(g_acc,0,sizeof(g_acc));
     memset(g_latest,0,sizeof(g_latest));
@@ -503,7 +506,10 @@ bool gyro_apply_accel_calibration(void) {
 void gyro_cancel_manual_calibration(void){sc_cancel(&g_cal,"cancelled");g_manual=false;}
 void gyro_calibration_info(gyro_calibration_info_t *info) {
     if(!info)return;
-    info->apply_detail=g_cal.apply_detail;info->candidate_valid=g_cal.candidate_valid;
+    info->apply_detail=g_cal.apply_detail;
+    float bias2=0.f;for(unsigned i=0;i<3;i++)bias2+=g_cal.accel_bias[i]*g_cal.accel_bias[i];
+    if(g_cal.accel_valid&&bias2>0.01f&&!g_cal.apply_detail[0])info->apply_detail="Applied/restored accelerometer correction has a large offset; calibration storage is not flight qualification.";
+    info->candidate_valid=g_cal.candidate_valid;
     memcpy(info->candidate_bias,g_cal.candidate_bias,sizeof(info->candidate_bias));
     memcpy(info->candidate_scale,g_cal.candidate_scale,sizeof(info->candidate_scale));
     memcpy(info->face_mean,g_cal.face_mean,sizeof(info->face_mean));
@@ -513,4 +519,28 @@ void gyro_calibration_info(gyro_calibration_info_t *info) {
     memcpy(info->gyro_bias,g_cal.gyro_bias,sizeof(info->gyro_bias));
     memcpy(info->accel_bias,g_cal.accel_bias,sizeof(info->accel_bias));
     memcpy(info->accel_scale,g_cal.accel_scale,sizeof(info->accel_scale));
+}
+
+/* Bind persisted correction to the detected sensor ID, configured range and
+ * correction model v1. No gyro bias, readiness flags or calibration session is restored. */
+uint32_t gyro_accel_calibration_binding(void) {
+ if(!g_healthy||!g_diag.config_ok||g_kind!=GYRO_CHIP_MPU6K)return 0;
+ const board_t *b=board_get();if(!b)return 0;
+ uint32_t h=2166136261u;
+ /* Coefficients are in aligned axes; a target alignment change invalidates them. */
+ for(const unsigned char *p=(const unsigned char*)b->gyro_align;*p;p++)h=(h^*p)*16777619u;
+ uint32_t resource[2]={b->gyro_spi_bus,(uint32_t)b->gyro_cs_pin};
+ for(unsigned i=0;i<2;i++)for(unsigned shift=0;shift<32;shift+=8)h=(h^((resource[i]>>shift)&255u))*16777619u;
+ h=(h^1u)*16777619u;h=(h^g_sensor_id)*16777619u;h=(h^g_diag.accel_config)*16777619u;
+ return h;
+}
+bool gyro_accel_restore_valid(const float bias[3],const float scale[3],uint32_t binding) {
+ return !BOBFLIGHT_ACCEL_BENCH_RELAXED && binding && binding==gyro_accel_calibration_binding() && sc_accel_coefficients_valid(bias,scale);
+}
+void gyro_restore_accel_calibration(const float bias[3],const float scale[3],bool valid) {
+ /* Only persist_load calls after complete payload validation and safe-state checks. */
+ memcpy(g_cal.accel_bias,bias,sizeof(g_cal.accel_bias));
+ memcpy(g_cal.accel_scale,scale,sizeof(g_cal.accel_scale));g_cal.accel_valid=valid;
+ /* Do not mark gyro complete or create fake captured faces. gyro startup continues. */
+ sc_correct_accel(&g_cal,g_diag.raw_acc_g,g_acc);
 }

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "drivers/persist.h"
+#include "drivers/gyro.h"
 #include "board/board.h"
 #include "flight/config.h"
 #include "flight/mode_range.h"
@@ -38,6 +39,8 @@ bool persist_dirty(void){return dirty;}
 const char *persist_last_error(void){return saved?"none":"write_error";}
 uint32_t persist_generation(void){return 7;}
 bool persist_save(void){writes++;return saved;}
+const char *persist_accel_storage(void){return "not-calibrated";}
+void gyro_calibration_info(gyro_calibration_info_t*c){memset(c,0,sizeof(*c));for(unsigned i=0;i<3;i++)c->accel_scale[i]=1.f;}
 #include "drivers/storage_cli.h"
 int main(void){
  config_init();board.rx_uart=BOARD_GENERATED_RX_UART;strcpy(board.board_id,"dummy");

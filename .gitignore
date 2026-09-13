@@ -55,3 +55,6 @@ __pycache__/
 # Deliberate bootloader test documentation and owner-PC build script.
 !/BOOTLOADER.md
 !/build-bootloader-bench.ps1
+
+# Calibration persistence acceptance guide.
+!/CALIBRATION-PERSISTENCE.md

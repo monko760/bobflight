@@ -2,6 +2,7 @@
 #ifndef BOBFLIGHT_STORAGE_CLI_H
 #define BOBFLIGHT_STORAGE_CLI_H
 #include "drivers/persist.h"
+#include "drivers/gyro.h"
 #include "board/pins_generated.h"
 #include <stdarg.h>
 
@@ -14,9 +15,9 @@ static void cmd_storage(void)
     flight_enabled=1;
 #endif
     int n = snprintf(buf, sizeof(buf),
-        "storage_api: 1\r\nbackend: %s\r\nschema: 1\r\nstate: %s\r\n"
+        "storage_api: 1\r\nbackend: %s\r\nschema: 2\r\nstate: %s\r\n"
         "dirty: %u\r\ngeneration: %lu\r\nlast_error: %s\r\n"
-        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection\r\n"
+        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration\r\n"
         "armed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nflight_enabled: %u\r\nstorage_end: 1\r\n",
         persist_backend(), persist_state(), persist_dirty() ? 1u : 0u,
         (unsigned long)persist_generation(), persist_last_error(),
@@ -59,11 +60,17 @@ static void cmd_config_export(bool full)
     char out[1800]; size_t used = 0;
     const board_t *b = board_get();
     bool ok = export_append(out, sizeof(out), &used,
-        "# bobflight_config: 1\r\n# schema: 1\r\n# board: %s\r\n"
+        "# bobflight_config: 1\r\n# schema: 2\r\n# board: %s\r\n"
         "# firmware: %s\r\n# kind: %s\r\n# mode_count: %u\r\n"
-        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection\r\n"
-        "# excludes: calibration,power,dshot\r\n",
+        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration\r\n"
+        "# excludes: gyro_calibration,power,dshot\r\n",
         b ? b->board_id : "unknown", BOBFLIGHT_VERSION_STRING, full ? "dump" : "diff", (unsigned)MODE_COUNT);
+    gyro_calibration_info_t cal;gyro_calibration_info(&cal);
+    if(ok)ok=export_append(out,sizeof(out),&used,
+        "# accel_calibrated: %s\r\n# accel_bias: %.9g %.9g %.9g\r\n# accel_scale: %.9g %.9g %.9g\r\n"
+        "# accel_storage: %s\r\n# calibration_restore: metadata-only-recalibrate-if-flash-lost\r\n",
+        cal.accel_valid?"yes":"no",(double)cal.accel_bias[0],(double)cal.accel_bias[1],(double)cal.accel_bias[2],
+        (double)cal.accel_scale[0],(double)cal.accel_scale[1],(double)cal.accel_scale[2],persist_accel_storage());
     for (size_t i = 0; ok && i < sizeof(defaults) / sizeof(defaults[0]); ++i) {
         float value;
         ok = config_get_key(defaults[i].name, &value);

@@ -22,7 +22,7 @@
     "smoke:webserial": "tsc && node dist/smoke/smoke-webserial-node.js",
     "smoke:flasher": "tsc && node dist/smoke/smoke-flasher.js",
     "test:motors": "tsc && node tests/motors.cjs",
-    "test:sensors": "tsc && node tests/sensors.cjs",
+    "test:sensors": "tsc && node tests/sensors.cjs && node tests/calibration-persistence.cjs",
     "test:timing": "tsc && node tests/timing.cjs",
     "test:ports-modes": "tsc && node tests/ports-modes.cjs",
     "test:flight-modes": "tsc && node tests/flight-modes.cjs",

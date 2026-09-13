@@ -1,3 +1,5 @@
+> Current calibration-persistence branch versions append `-calstore1`. Follow [CALIBRATION-PERSISTENCE.md](CALIBRATION-PERSISTENCE.md) for this update. T-Motor hardware flash remains unsupported. Historical version examples below predate this increment.
+
 # TMOTORF7V2 — USB / MPU6000 sensor bring-up
 
 This is an **experimental sensor-only target**, not a flight release or a complete board port. Target: `tmotor_f7_v2`, STM32F722RE-class 512 KiB flash / 256 KiB RAM, MPU6000. Expected version: `0.2.0-prototype-tmotorf7v2-sensor2-bl1`.

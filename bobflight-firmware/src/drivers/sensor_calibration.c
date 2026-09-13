@@ -181,8 +181,18 @@ bool sc_apply_accel(sensor_calibration_t *c) {
     memcpy(c->accel_bias,bias,sizeof(bias));memcpy(c->accel_scale,scale,sizeof(scale));
     snprintf(c->apply_detail,sizeof(c->apply_detail),BOBFLIGHT_ACCEL_BENCH_RELAXED?
         "Experimental BENCH-ONLY correction applied in RAM; NOT flight-qualified. Pair limit 0.10 g, pose limit 0.15 g; large offsets still require hardware investigation.":
-        "All six faces passed; coefficients applied in RAM, not persistent storage.");
+        "All six faces passed; coefficients applied. Run save on supported storage, then verify after power cycle.");
     c->accel_valid=true;c->mode=SC_COMPLETE;
     c->reason=BOBFLIGHT_ACCEL_BENCH_RELAXED?"accel-bench-relaxed-not-flight-qualified-ram-only":bias_norm2>0.01f?"accel-calibrated-large-offset-check-hardware-ram-only":"accel-calibrated-ram-only";
     return true;
+}
+
+bool sc_accel_coefficients_valid(const float bias[3],const float scale[3]) {
+ float n=0.f;
+ if(!bias||!scale)return false;
+ for(unsigned i=0;i<3;i++){
+  if(!isfinite(bias[i])||!isfinite(scale[i])||fabsf(bias[i])>0.3f||scale[i]<0.9f||scale[i]>1.1f)return false;
+  n+=bias[i]*bias[i];
+ }
+ return n<=0.09f;
 }

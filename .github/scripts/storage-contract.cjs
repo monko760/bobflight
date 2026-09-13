@@ -12,8 +12,8 @@ assert.equal(backups.length,4);assert(!backups[0].raw.includes('\r\nmode_range '
 for(const command of ['mode_range ACRO 1 5 1300 1600','mode_range HORIZON 1 6 1600 1900','control_mode horizon','control_source aux'])assert(backups[2].raw.includes(command+'\r\n'));
 for(const e of backups){assert(Buffer.byteLength(e.raw)<1800);assert(!e.raw.includes('\r\narm\r\n'));assert(!e.raw.includes('\r\nsave\r\n'));}
 assert(!parseSaveReply('saved\r\n').ok);assert(!parseSaveReply('saved: host_sim verified\r\n').ok);assert(parseSaveReply('saved: flash verified\r\n').ok);
-for(const invalid of ['storage_api: 1\r\n',run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0].replace('schema: 1','schema: 2')]){if(invalid!==undefined)assert.throws(()=>parseStorage(invalid));}
-assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 1','# schema: 2'),'dump'));
+for(const invalid of ['storage_api: 1\r\n',run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0].replace('schema: 2','schema: 3')]){if(invalid!==undefined)assert.throws(()=>parseStorage(invalid));}
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 2','# schema: 3'),'dump'));
 assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# config_end: 1','arm\r\n# config_end: 1'),'dump'));
 assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('mode_range HORIZON 1 6 1600 1900','mode_range HORIZON 1 257 1600 1900'),'dump'));
 const actual=run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0];

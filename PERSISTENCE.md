@@ -1,3 +1,5 @@
+> Calibration persistence update: current schema 2 adds validated, applied accelerometer correction. See [CALIBRATION-PERSISTENCE.md](CALIBRATION-PERSISTENCE.md) for migration, supported targets and power-cycle acceptance. Older schema-1 descriptions below exclude calibration; gyro bias, power and DShot remain excluded.
+
 # Persistent configuration and CLI backups — experimental bench increment
 
 This increment replaces the RAM-only `save` placeholder with versioned controller configuration storage. It does not enable flight, change arming, or alter PR #20 control-mode resolution. ARM remains preview-only; the three bench flight modes retain their established restrictions.

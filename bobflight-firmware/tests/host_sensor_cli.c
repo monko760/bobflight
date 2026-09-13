@@ -35,6 +35,7 @@ bool gyro_start_accel_calibration(void){started++;return true;}
 bool gyro_capture_accel_face(unsigned f){captured++;last_face=f;return true;}
 bool gyro_apply_accel_calibration(void){applied++;return true;}
 void gyro_cancel_manual_calibration(void){cancelled++;}
+const char *persist_accel_storage(void){return "ram-only";}
 #include "drivers/sensor_cli.h"
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"FAIL sensor CLI line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static bool command(const char *s){output[0]=0;return cmd_sensor_command(s);}

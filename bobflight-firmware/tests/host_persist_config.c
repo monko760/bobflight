@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "drivers/config_store.h"
+#include "drivers/gyro.h"
+#include "drivers/sensor_calibration.h"
 #include "board/board.h"
 #include "flight/arming.h"
 #include "sched/tasks.h"
@@ -36,6 +38,17 @@ const char *config_store_backend(void){return supported?"host_sim":"unsupported"
 uint32_t config_store_generation(void){return generation;}
 config_store_result_t config_store_load(uint32_t id,void *p,size_t n){if(!supported)return CONFIG_STORE_UNSUPPORTED;if(read_failure)return CONFIG_STORE_IO_ERROR;if(!exists)return CONFIG_STORE_EMPTY;if(n!=image_len||id!=image_board)return CONFIG_STORE_INVALID;memcpy(p,image,n);return CONFIG_STORE_OK;}
 config_store_result_t config_store_save(uint32_t id,const void *p,size_t n){saves++;if(!supported)return CONFIG_STORE_UNSUPPORTED;if(write_failure)return CONFIG_STORE_IO_ERROR;if(!exists||n!=image_len||memcmp(p,image,n))generation++;memcpy(image,p,n);image_len=n;image_board=id;exists=true;return CONFIG_STORE_OK;}
+static gyro_calibration_info_t cal;
+void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
+uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
+bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding){return binding==gyro_accel_calibration_binding()&&sc_accel_coefficients_valid(b,v);}
+void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
+uint32_t config_store_loaded_schema(void){return image_len==96?1:2;}
+config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
+ if(image_len==96&&n==128&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,96);return CONFIG_STORE_OK;}
+ return config_store_load(id,p,n);
+}
+config_store_result_t config_store_save_v2(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
 /* Include the codec to validate the on-wire byte format, not just happy-path APIs. */
 #include "../src/drivers/persist.c"
 int main(void){
@@ -82,5 +95,38 @@ int main(void){
  persist_init();assert(persist_load());assert(mode_range_get(MODE_ANGLE)->aux_channel==12);assert(!mode_range_get(MODE_ACRO)->enabled);assert(!mode_range_get(MODE_HORIZON)->enabled);assert(persist_dirty());
 #endif
  memcpy(image,good,PAYLOAD_BYTES);read_failure=true;assert(!persist_load());read_failure=false;assert(persist_load());supported=false;assert(!persist_save());assert(!strcmp(persist_state(),"unsupported"));
+
+ supported=true;memcpy(image,good,PAYLOAD_BYTES);image_len=PAYLOAD_BYTES;assert(persist_load());
+ sensor_calibration_t solved;sc_init(&solved);solved.mode=SC_ACCEL_WAIT;solved.faces=63;
+ for(unsigned face=0;face<6;face++){
+  solved.face_mean[face][2]=-.2f;
+  solved.face_mean[face][face/2]+=(face&1)?-1.f:1.f;
+ }
+ assert(sc_apply_accel(&solved));cal.accel_valid=solved.accel_valid;
+ memcpy(cal.accel_bias,solved.accel_bias,12);memcpy(cal.accel_scale,solved.accel_scale,12);
+ assert(persist_dirty()&&!strcmp(persist_accel_storage(),"unsaved"));assert(persist_save());
+ assert(image[96]==1&&!persist_dirty()&&!strcmp(persist_accel_storage(),"host-sim"));
+ memcpy(good,image,PAYLOAD_BYTES);memset(&cal,0,sizeof(cal));persist_init();assert(persist_load());
+ assert(cal.accel_valid&&!memcmp(cal.accel_bias,solved.accel_bias,12)&&!memcmp(cal.accel_scale,solved.accel_scale,12));
+ assert(!cal.candidate_valid&&cal.faces==0&&cal.gyro_bias[0]==0);
+ cal.candidate_valid=true;cal.candidate_bias[0]=NAN;cal.gyro_bias[0]=42;
+ assert(!persist_dirty());calibrating=true;before=saves;assert(!persist_save()&&saves==before);calibrating=false;
+ cal.accel_bias[2]-=.01f;write_failure=true;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"unsaved"));write_failure=false;
+ assert(persist_load());assert(!memcmp(cal.accel_bias,solved.accel_bias,12));
+ const unsigned bad_cal[]={96,97,100,104,116};
+ for(unsigned i=0;i<sizeof(bad_cal)/sizeof(bad_cal[0]);i++){
+  memcpy(image,good,PAYLOAD_BYTES);unsigned o=bad_cal[i];
+  if(o==104||o==116)put32(image+o,0x7fc00000u);else image[o]^=2;
+  assert(config_set_key("rate_max_roll",444));float original=cal.accel_bias[2];
+  assert(!persist_load());assert(config_get_key("rate_max_roll",&v)&&v==444&&cal.accel_bias[2]==original);
+ }
+ memcpy(image,good,PAYLOAD_BYTES);for(unsigned i=0;i<3;i++){float b=.25f;uint32_t bits;memcpy(&bits,&b,4);put32(image+104+i*4,bits);}assert(!persist_load());
+ memcpy(image,good,PAYLOAD_BYTES);assert(persist_load());
+ /* A valid schema1 record migrates ALL existing settings, but never invents calibration. */
+ image_len=96;persist_init();assert(persist_load());assert(!cal.accel_valid);assert(persist_dirty());
+ assert(config_get_key("rate_max_roll",&v)&&v==777);assert(!strcmp(map,"TAER"));
+ assert(persist_save());assert(image_len==128&&!image[96]&&!persist_dirty());
+ supported=false;cal.accel_valid=true;before=saves;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"ram-only"));
+ puts("PASS actual six-face solver -> codec -> cold restore, candidate/gyro exclusion, atomic malformed-cal refusal, dirty/save/error state, old-settings migration and unsupported target");
  puts("PASS codec offsets, validated atomic restore, repeated boot-init roundtrip, dirty tracking, guards, failed writes/readback, malformed fields and scope");
 }

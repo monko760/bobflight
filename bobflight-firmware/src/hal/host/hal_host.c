@@ -300,6 +300,7 @@ bool hal_usb_cdc_connected(void)
 static uint8_t config_flash[2u*256u*1024u];
 static bool config_flash_ready;
 static void config_flash_init(void){if(!config_flash_ready){memset(config_flash,255,sizeof(config_flash));config_flash_ready=true;}}
+bool hal_flash_geometry(hal_flash_geometry_t*g){if(!g)return false;*g=(hal_flash_geometry_t){{0,262144},{262144,262144},1};return true;}
 bool hal_flash_supported(void){return true;}
 const char *hal_flash_backend(void){return "host_sim";}
 bool hal_flash_erase_slot(unsigned slot){if(slot>=2)return false;config_flash_init();memset(config_flash+slot*256u*1024u,255,256u*1024u);return true;}

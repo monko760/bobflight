@@ -30,5 +30,5 @@ $hex = Join-Path $repo 'bobflight-tmotorf7v2-sensors-bench.hex'
 Copy-Item -LiteralPath (Join-Path $build 'bobflight.hex') -Destination $hex -Force
 Get-FileHash -Algorithm SHA256 -LiteralPath $hex
 Write-Host 'BUILD CHECKPOINT: sensor-only image built and bounds/version checked. No controller was flashed.'
-Write-Host 'Expected firmware: 0.2.0-prototype-tmotorf7v2-sensor2-bl1; board tmotor_f7_v2.'
+Write-Host 'Expected firmware: 0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1; board tmotor_f7_v2.'
 Write-Host 'Read BOOTLOADER.md (Holybro first) and TMOTORF7V2.md before installation. Motors, flight and F722 configuration saving are unavailable.'

@@ -6,6 +6,7 @@
 #define BOBFLIGHT_SENSOR_CLI_H
 #include <math.h>
 #include "drivers/calibration_policy.h"
+#include "drivers/persist.h"
 static void cmd_sensors(bool details)
 {
     char buf[1100];
@@ -23,7 +24,7 @@ static void cmd_sensors(bool details)
         "accel_raw_g: %.4f %.4f %.4f\r\nattitude_deg: %.2f %.2f %.2f\r\nattitude_ready: %s\r\n"
         "arm: %s\r\nmotor_active: %s\r\ncal_state: %s\r\ncal_samples: %u\r\ncal_required: %u\r\n"
         "cal_faces: %u\r\ncal_face: %d\r\ncal_reason: %s\r\ncal_manual: %s\r\n"
-        "calibration_storage: ram-only\r\nsensor_config_ok: %s\r\n",
+        "calibration_storage: %s\r\nsensor_config_ok: %s\r\n",
         (unsigned long)d->sample_seq,(unsigned long)d->sample_ms,(unsigned long)age,
         gyro_is_healthy()?"yes":"no",gyro_calibrated()?"yes":"no",c.accel_valid?"yes":"no",
         (double)g[0],(double)g[1],(double)g[2],(double)a[0],(double)a[1],(double)a[2],
@@ -31,7 +32,7 @@ static void cmd_sensors(bool details)
         (double)r[0],(double)r[1],(double)r[2],attitude_ready()?"yes":"no",
         arming_state()==ARM_ARMED?"armed":"disarmed",bench_motor_active()?"yes":"no",
         c.state,c.samples,c.required,c.faces,c.face,c.reason,
-        gyro_manual_calibration_active()?"yes":"no",d->config_ok?"yes":"no");
+        gyro_manual_calibration_active()?"yes":"no",persist_accel_storage(),d->config_ok?"yes":"no");
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
     cli_write_str(buf);
     cli_write_str(BOBFLIGHT_ACCEL_BENCH_RELAXED?"cal_bench_relaxed: yes\r\n":"cal_bench_relaxed: no\r\n");

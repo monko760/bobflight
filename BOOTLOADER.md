@@ -1,3 +1,5 @@
+> Current calibration-persistence branch versions append `-calstore1`. Follow [CALIBRATION-PERSISTENCE.md](CALIBRATION-PERSISTENCE.md) for this update. T-Motor hardware flash remains unsupported. Historical version examples below predate this increment.
+
 # CLI `bl` / `BL` — bench ROM DFU test
 
 This update implements **software entry to the ST ROM bootloader**, not a new flash bootloader. It is a bench-only development increment, not hardware-qualified. Test **Holybro Kakute F7 HDV first**, using a board with a personally verified hardware BOOT/DFU recovery path. Flight enablement and arming logic are unchanged. T-Motor motor output and flash configuration support remain unavailable; Holybro's existing capabilities are retained.

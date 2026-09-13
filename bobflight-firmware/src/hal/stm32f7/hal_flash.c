@@ -29,6 +29,7 @@ bool hal_flash_supported(void){
   (REG32(0xE0042000u)&0xFFFu)==0x449u&&
   *(volatile const uint16_t *)(uintptr_t)0x1FF0F442u==1024u;
 }
+bool hal_flash_geometry(hal_flash_geometry_t*g){if(!g||!hal_flash_supported())return false;*g=(hal_flash_geometry_t){{0,SLOT_BYTES},{SLOT_BYTES,SLOT_BYTES},1};return true;}
 const char *hal_flash_backend(void){return hal_flash_supported()?"flash":"unsupported";}
 /* Poll count bounds repeated register reads; same-bank fetch stalls are not timed. */
 static bool idle(void){for(uint32_t i=0;i<100000000u;i++)if(!(FLASH_SR&BUSY))return true;return false;}
@@ -75,6 +76,7 @@ bool hal_flash_write(uint32_t off,const void *src,size_t n){
  leave(c);return ok;
 }
 #else
+bool hal_flash_geometry(hal_flash_geometry_t*g){(void)g;return false;}
 bool hal_flash_supported(void){return false;}
 const char *hal_flash_backend(void){return "unsupported";}
 bool hal_flash_erase_slot(unsigned slot){(void)slot;return false;}

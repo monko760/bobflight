@@ -19,6 +19,7 @@ typedef struct {
     bool have_last;
     float mean[6],m2[6],face_mean[6][3];
 } sensor_calibration_t;
+bool sc_accel_coefficients_valid(const float bias[3],const float scale[3]);
 void sc_init(sensor_calibration_t *c);
 void sc_begin_gyro(sensor_calibration_t *c,uint32_t now);
 void sc_begin_accel(sensor_calibration_t *c,uint32_t now);
