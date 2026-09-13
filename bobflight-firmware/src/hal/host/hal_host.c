@@ -305,3 +305,7 @@ const char *hal_flash_backend(void){return "host_sim";}
 bool hal_flash_erase_slot(unsigned slot){if(slot>=2)return false;config_flash_init();memset(config_flash+slot*256u*1024u,255,256u*1024u);return true;}
 bool hal_flash_read(uint32_t offset,void *dst,size_t len){if(!dst||offset>sizeof(config_flash)||len>sizeof(config_flash)-offset)return false;config_flash_init();memcpy(dst,config_flash+offset,len);return true;}
 bool hal_flash_write(uint32_t offset,const void *src,size_t len){if(!src||offset>sizeof(config_flash)||len>sizeof(config_flash)-offset)return false;config_flash_init();const uint8_t*p=src;for(size_t i=0;i<len;i++)if((config_flash[offset+i]&p[i])!=p[i])return false;for(size_t i=0;i<len;i++)config_flash[offset+i]&=p[i];return true;}
+
+/* Host is not an STM32 and must never claim to enter ROM DFU. */
+bool hal_bootloader_supported(void){return false;}
+bool hal_bootloader_request(void){return false;}

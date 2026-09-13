@@ -51,3 +51,7 @@ bobflight-configurator/writable-test
 !/build-tmotorf7v2-sensors.ps1
 
 __pycache__/
+
+# Deliberate bootloader test documentation and owner-PC build script.
+!/BOOTLOADER.md
+!/build-bootloader-bench.ps1

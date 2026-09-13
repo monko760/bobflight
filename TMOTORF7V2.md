@@ -1,6 +1,6 @@
 # TMOTORF7V2 — USB / MPU6000 sensor bring-up
 
-This is an **experimental sensor-only target**, not a flight release or a complete board port. Target: `tmotor_f7_v2`, STM32F722RE-class 512 KiB flash / 256 KiB RAM, MPU6000. Expected version: `0.2.0-prototype-tmotorf7v2-sensor1`.
+This is an **experimental sensor-only target**, not a flight release or a complete board port. Target: `tmotor_f7_v2`, STM32F722RE-class 512 KiB flash / 256 KiB RAM, MPU6000. Expected version: `0.2.0-prototype-tmotorf7v2-sensor2-bl1`.
 
 The purpose is to compare stationary accelerometer readings with the Kakute, not to enable flight. Do not use this firmware to fly. Motor DMA binding is unavailable on this target; arming remains disabled. ADC battery/current readings, F722 nonvolatile configuration saving, blackbox, GPS, OSD and other peripherals are not implemented/qualified here. `save` cannot make this diagnostic target persistent. This is a temporary limitation, not the intended end state for normal configuration. Calibration remains RAM-only.
 
@@ -13,6 +13,10 @@ IMU SPI1 uses PA5/PA6/PA7, PA4 CS and PC4 interrupt resource. This driver polls 
 The build uses nominal 8 MHz HSE and a conservative 168 MHz core / 48 MHz USB PLL path. Betaflight's 216 MHz STATUS is core speed, not crystal frequency. HSE has not been physically measured. The MCU family and 512 KiB flash-size registers are checked before normal peripheral access; this does not identify an entire board or replace recovery preparation. Only MPU6000 WHO_AM_I=0x68 is accepted.
 
 **Aircraft settings are separate from target defaults.** Board mounting yaw, custom motor reordering, receiver map, PID tuning and failsafe policy are not imported from a particular quad. Never apply a 10-inch aircraft's 180-degree mounting rotation to every TMOTORF7V2. This image reports nominal board-frame orientation; use board axes, not an assumed mounted aircraft heading. Betaflight calibration numbers and PID values are not BobFlight-compatible coefficients.
+
+## Broken BOOT button warning
+
+`bl` / `BL` is now implemented but hardware qualification is pending. Test it on the recoverable Holybro FIRST using [BOOTLOADER.md](BOOTLOADER.md). A working software command on Holybro does not establish T-Motor USB startup or ROM entry. With the T-Motor BOOT button broken, do not flash this experimental target until there is an independent recovery method (identified BOOT0 access/button repair or verified SWD access). Do not guess pads or short arbitrary contacts. CLI cannot recover firmware which fails before USB starts.
 
 ## 1. Preserve a recovery path first
 
@@ -40,7 +44,7 @@ This does not switch, stash, reset or overwrite the existing repo and its other-
 
 The script uses the existing CMake/ARM toolchain under `%USERPROFILE%\BF ChatGPt\tools` or PATH, plus `mingw32-make.exe` (existing TDM-GCC). CMake must also find Python 3 for code generation and image checks. All flight, relaxed-calibration, reset-only and blocking LED diagnostic flags are explicitly OFF. It rejects incompatible cached targets. No `npm install` is required for this firmware-only change.
 
-Expected checkpoint: compilation/link succeeds, `PASS TMOTORF7V2 HEX` verifies file checksums, program-memory bounds, initial stack/reset vectors and target/version markers, then a SHA-256 is printed. Output:
+Expected checkpoint: compilation/link succeeds, `PASS tmotor_f7_v2 HEX` verifies file checksums, program-memory bounds, initial stack/reset vectors and target/version markers, then a SHA-256 is printed. Output:
 
 `C:\Users\Monko\BobFlight-TMotor-Sensors\bobflight-tmotorf7v2-sensors-bench.hex`
 

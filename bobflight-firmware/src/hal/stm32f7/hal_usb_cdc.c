@@ -316,3 +316,13 @@ bool hal_usb_cdc_connected(void)
 {
     return g_usb_up && tud_cdc_connected();
 }
+
+/* Terminal bootloader-reset path only; interrupts are already disabled.
+ * Early reset entry supplies the disconnect settling interval before ROM. */
+void hal_usb_cdc_bootloader_disconnect(void)
+{
+    if (g_usb_up) {
+        USB_DCTL |= DCTL_SDIS;
+        g_usb_up = false;
+    }
+}
