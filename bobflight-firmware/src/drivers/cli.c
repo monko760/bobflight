@@ -42,6 +42,7 @@ static void cli_write_str(const char *s)
 #include "drivers/timing_cli.h"
 #include "drivers/ports_modes_cli.h"
 #include "drivers/storage_cli.h"
+#include "drivers/bootloader_cli.h"
 
 static void cmd_control_mode(void)
 {
@@ -85,6 +86,7 @@ static void cmd_help(void)
         "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
         "  disarm   - disarm\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
+        "  bl / BL  - ST ROM bootloader; bl discard explicitly loses unsaved RAM changes\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
 }
 
@@ -266,6 +268,9 @@ static void handle_line(char *line)
         return;
     }
 
+    if (bl_pending) return; /* Do not execute buffered arm/motor/config commands while exiting. */
+    if (cmd_bootloader(line)) return;
+
     if (strcmp(line, "storage") == 0) {
         cmd_storage();
     } else if (strcmp(line, "diff") == 0 || strcmp(line, "diff all") == 0) {
@@ -386,6 +391,8 @@ void cli_init(void)
     g_len = 0;
     g_discard_line = false;
     g_reboot_req = false;
+    bl_pending = bl_discard = false;
+    bl_started = 0;
     cli_write_str("\r\n" BOBFLIGHT_PRODUCT_NAME " " BOBFLIGHT_VERSION_STRING " ready\r\n");
 }
 
@@ -398,6 +405,13 @@ void cli_poll(void)
     size_t n = hal_usb_cdc_read(buf, sizeof(buf));
     for (size_t i = 0; i < n; i++) {
         char c = (char)buf[i];
+        if (bl_pending) {
+            /* Drop input while exiting, including a partial line crossing a
+             * cancelled request. Never execute a buffered suffix afterward. */
+            g_len = 0;
+            g_discard_line = c != '\n' && c != '\r';
+            continue;
+        }
         if (c == '\n' || c == '\r') {
             g_line[g_len] = '\0';
             if (g_discard_line) cli_write_str("invalid CLI line refused\r\n");
@@ -414,4 +428,5 @@ void cli_poll(void)
             g_discard_line = true;
         }
     }
+    bootloader_poll();
 }

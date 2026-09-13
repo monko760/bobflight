@@ -147,6 +147,10 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/hal/stm32f7/hal_tim_dma.c src/hal/stm32f7/hal_adc.c src/hal/stm32f7/hal_flash.c)
   target_compile_options(bobflight_tmotor_peripherals_test PRIVATE -include ${CMAKE_SOURCE_DIR}/tests/tmotor_peripheral_mocks.h)
   add_test(NAME tmotor_peripherals_fail_closed COMMAND bobflight_tmotor_peripherals_test)
+  add_executable(bobflight_bootloader_policy_test tests/host_bootloader_policy.c)
+  add_test(NAME bootloader_reset_policy COMMAND bobflight_bootloader_policy_test)
+  add_executable(bobflight_bootloader_cli_test tests/host_bootloader_cli.c)
+  add_test(NAME bootloader_cli_safety COMMAND bobflight_bootloader_cli_test)
   add_executable(bobflight_gyro_spi_map_test tests/host_gyro_spi_map.c)
   add_test(NAME gyro_spi_map COMMAND bobflight_gyro_spi_map_test)
   add_test(NAME tmotor_target_contract COMMAND ${Python3_EXECUTABLE}
@@ -184,6 +188,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_dependencies(bobflight_power_test bobflight_pins_gen)
   add_test(NAME power COMMAND bobflight_power_test)
   add_executable(bobflight_host ${BF_COMMON_SOURCES} src/hal/host/hal_host.c)
+  add_test(NAME bootloader_host_binding COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_bootloader_binding.py $<TARGET_FILE:bobflight_host> ${CMAKE_SOURCE_DIR})
   target_link_libraries(bobflight_host m)
   add_dependencies(bobflight_host bobflight_pins_gen)
   target_compile_definitions(bobflight_host PRIVATE
@@ -377,6 +383,7 @@ else()
     src/hal/stm32f7/hal_exti.c
     src/hal/stm32f7/hal_usb_cdc.c
     src/hal/stm32f7/hal_flash.c
+    src/hal/stm32f7/hal_bootloader.c
     src/hal/stm32f7/startup_stm32f722.c
     ${BF_TUSB_SOURCES})
   add_dependencies(bobflight.elf bobflight_pins_gen)
@@ -430,6 +437,11 @@ else()
       COMMAND ${BF_OBJCOPY} -O ihex $<TARGET_FILE:bobflight.elf> ${CMAKE_BINARY_DIR}/bobflight.hex
       COMMAND ${BF_OBJCOPY} -O binary $<TARGET_FILE:bobflight.elf> ${CMAKE_BINARY_DIR}/bobflight.bin
       COMMENT "bobflight.hex / bobflight.bin")
+    if(BOBFLIGHT_BOARD STREQUAL "tmotor_f7_v2" OR BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv")
+      add_custom_target(check_bootloader_image
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/check_tmotor_image.py" "${CMAKE_BINARY_DIR}/bobflight.hex" "${BOBFLIGHT_BOARD}"
+        DEPENDS bobflight.elf VERBATIM)
+    endif()
     if(BOBFLIGHT_BOARD STREQUAL "tmotor_f7_v2")
       add_custom_command(TARGET bobflight.elf POST_BUILD
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/check_tmotor_image.py" "${CMAKE_BINARY_DIR}/bobflight.hex"

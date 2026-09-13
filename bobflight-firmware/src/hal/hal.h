@@ -136,6 +136,10 @@ size_t hal_usb_cdc_read(uint8_t *buf, size_t maxlen);
 size_t hal_usb_cdc_write(const uint8_t *buf, size_t len);
 bool   hal_usb_cdc_connected(void);
 
+/** Software-only ROM bootloader entry: no flash writes; successful request resets. */
+bool hal_bootloader_supported(void);
+bool hal_bootloader_request(void);
+
 /* ---- configuration flash: offsets relative to the two reserved 256 KiB slots ---- */
 bool hal_flash_supported(void);
 const char *hal_flash_backend(void);
