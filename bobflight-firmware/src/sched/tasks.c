@@ -226,6 +226,12 @@ void loop_mixer_dshot(void)
         throttle = rc[3];
     }
 
+    /* Use the same failsafe throttle override as the PID task.
+     * Receiver memory intentionally retains the last real pilot frame. */
+    float failsafe_sticks[4] = {0.f, 0.f, 0.f, 0.f};
+    if (failsafe_command_override(failsafe_sticks))
+        throttle = failsafe_sticks[3];
+
     /* Failsafe's own disarm (DROP / land timer) is what stops motors;
      * PROCEDURE(LAND) must reach the mixer with its descent throttle. */
     if (arming_state() != ARM_ARMED) {

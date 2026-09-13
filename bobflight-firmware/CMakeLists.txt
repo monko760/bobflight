@@ -137,6 +137,23 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  # Native audit of actual scheduler -> RX/failsafe -> PID/mixer -> DShot packets.
+  # Hardware and diagnostic telemetry hook are mocked; never enables MCU arming.
+  add_executable(bobflight_failsafe_integration_test
+    tests/host_failsafe_integration.c
+    src/sched/scheduler.c src/sched/tasks.c
+    src/drivers/rx.c src/drivers/crsf.c src/drivers/dshot.c
+    src/flight/arming.c src/flight/failsafe.c src/flight/attitude.c
+    src/flight/config.c src/flight/pid.c src/flight/rates.c
+    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c)
+  target_compile_definitions(bobflight_failsafe_integration_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_failsafe_integration_test m)
+  foreach(fs_case boot drop drop-wrap bad-traffic repeated-valid land-throttle
+      land-disarm land-timer gyro-fault nonfinite-sensor scheduler-gap
+      dma-failure direct-disarm usb-flight-path)
+    add_test(NAME failsafe_integration_${fs_case}
+      COMMAND bobflight_failsafe_integration_test ${fs_case})
+  endforeach()
   add_executable(bobflight_pid_diag_task_test tests/host_pid_diag_task.c
     src/sched/tasks.c src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c
     src/flight/mixer.c src/flight/attitude.c src/flight/config.c src/flight/rates.c
