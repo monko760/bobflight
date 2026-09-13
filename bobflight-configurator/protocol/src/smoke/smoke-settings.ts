@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   assert(su.unknown === true && !su.ok, "parseSetReply unknown");
   const sf = parseSetReply("set failed\r\n");
   assert(sf.failed === true && !sf.ok, "parseSetReply failed");
-  assert(parseSaveReply("saved\r\n").ok, "parseSaveReply");
+  assert(parseSaveReply("saved: flash verified\r\n").ok, "parseSaveReply");
   assert(!parseSaveReply("save failed\r\n").ok, "parseSaveReply fail");
   assert(parseDefaultsReply("defaults restored\r\n").ok, "parseDefaultsReply");
 
@@ -119,8 +119,8 @@ async function main(): Promise<void> {
   assert(still.value === "0.005", `unchanged after fail, got ${still.value}`);
 
   // --- save acks ---
-  await client.saveSettings();
-  console.log("saveSettings: ok");
+  await client.saveSettings().then(() => { throw new Error("Mock must not claim flash persistence"); }, () => {});
+  console.log("saveSettings: mock correctly refuses durable controller save");
 
   // --- defaults restores (does not auto-save; values reset in RAM) ---
   const afterDefaults = await client.restoreDefaults();

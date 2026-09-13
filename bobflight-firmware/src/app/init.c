@@ -257,7 +257,6 @@ bool app_init(void)
     rx_init();
 
     persist_init();
-    (void)persist_load();
     power_init();
 
     pid_init();
@@ -268,6 +267,8 @@ bool app_init(void)
     failsafe_init();
     /* Re-apply gyro health after arming_init cleared state */
     arming_set_gyro_healthy(gyro_is_healthy());
+    /* Defaults and subsystem init must finish before restoring persistent settings. */
+    (void)persist_load();
 
     /* 6 scheduler — dummy 8 kHz / denom 2 */
     scheduler_init(1000, 1);

@@ -7,7 +7,7 @@
  */
 MEMORY
 {
-  FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 1024K
+  FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 512K
   RAM   (rwx): ORIGIN = 0x20000000, LENGTH = 64K
   DMA_RAM (rwx): ORIGIN = 0x20010000, LENGTH = 256K
 }
@@ -25,3 +25,8 @@ SECTIONS
   .dma (NOLOAD) : { . = ALIGN(32); *(.dma*) . = ALIGN(32); } > DMA_RAM
   ._user_heap_stack (NOLOAD) : { . = ALIGN(8); . = . + 0x400; . = ALIGN(8); } > RAM
 }
+/* RM0385 sectors 6/7 reserved for redundant configuration; excluded from image. */
+PROVIDE(__config_slot0 = 0x08080000);
+PROVIDE(__config_slot1 = 0x080C0000);
+ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x08080000, "Firmware overlaps config flash")
+ASSERT(ORIGIN(FLASH) + LENGTH(FLASH) == 0x08080000, "Invalid F745 config reservation")

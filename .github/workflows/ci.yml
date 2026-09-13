@@ -78,6 +78,8 @@ jobs:
           cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract -DBOBFLIGHT_BOARD=kakute_f7_hdv -DBOBFLIGHT_FLIGHT_ENABLE=OFF
           cmake --build ../bobflight-firmware/build-contract --target bobflight_host -j 4
           node ../.github/scripts/ports-modes-contract.cjs
+      - name: Firmware to configurator persistent storage and exports
+        run: node ../.github/scripts/storage-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Motor bench UI safety tests

@@ -32,3 +32,6 @@ export type { ParsedGetReply, ParsedSetReply } from "@bobflight/protocol";
 
 export { parsePorts, parseModes, modeRangeCommand, isModeRangeCommand, controlSourceCommand, isControlSourceCommand, canEditModeRanges, canSelectControlSource } from "@bobflight/protocol";
 export type { ParsedPorts, ParsedModes, ModeRow } from "@bobflight/protocol";
+
+export {parseStorage,parseConfigurationExport,canSaveStorage} from "@bobflight/protocol";
+export type {StorageSnapshot} from "@bobflight/protocol";

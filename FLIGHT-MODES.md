@@ -25,7 +25,7 @@ All modes still depend on the current attitude estimator's loop-health gates, in
 
 The Modes response is API 2, with four rows, explicit ARM-preview semantics, selected source, requested mode, last controller-pass effective mode and conflict indication. The UI treats these as timestamped snapshots, not live flight telemetry. Requested and effective values can differ until the next task pass or during failsafe. Old API-1 firmware remains a two-row preview in the new UI and cannot enable the new AUX source. Older configurators should reject the new API rather than misrepresent its semantics.
 
-Configuration remains RAM-only in this increment. Apply is read back and verified, but **does not survive reboot/power loss**, and the old Save command does not persist it. Nonvolatile configuration is a separate workstream; do not call that work complete because these modes appear in the tab.
+Apply updates runtime configuration. This persistence increment adds explicit verified Save for all four mode ranges, the manual mode and manual/AUX source. See [Persistent configuration](PERSISTENCE.md) for supported hardware, installation, power-cycle tests and limitations.
 
 ## Install on the development branch
 
@@ -52,7 +52,7 @@ Configuration remains RAM-only in this increment. Apply is read back and verifie
 
 1. Reconnect USB. `status` must still report disarmed and bench-only. In Modes, verify ARM remains explicitly preview-only and Angle, Acro, Level (Horizon) are listed. Fresh boot source/requested mode must be Manual/Angle; Acro and Horizon ranges disabled. If these do not match, stop and verify matching firmware/UI revisions.
 2. With a connected receiver and three-position switch on AUX2, configure **non-overlapping** enabled ranges: Angle 900–1300, Level (Horizon) 1301–1700, Acro 1701–2100. Each Apply must be confirmed by board readback. Explicitly select AUX source. Keep the separate actual arm switch low; never attempt arming. Refresh after moving the switch: requested/effective mode should follow Angle → Horizon → Acro, with a fresh receiver indication.
-3. Test fallbacks without starting motors: create overlapping ranges, refresh and verify conflict with Angle fallback; restore non-overlapping ranges. Turn off the transmitter and refresh to verify stale receiver and Angle fallback. Return the transmitter, switch source to Manual, and set `control_mode angle`. Power-cycle USB only and verify Manual/Angle defaults and reset ranges. That reset is expected until separate persistence work is completed.
+3. Test fallbacks without starting motors: create overlapping ranges, refresh and verify conflict with Angle fallback; restore non-overlapping ranges. Turn off the transmitter and refresh to verify stale receiver and Angle fallback. Return the transmitter, switch source to Manual, and set `control_mode angle`. Save the desired source/manual mode and ranges, remove all board power, reconnect and verify restoration. Without Save, a reboot restores the previous stored configuration, or defaults when no valid record exists.
 
 Stop immediately if the UI claims armed/flight-ready, a readback differs from the request, source/mode changes are accepted while a motor test or calibration is running, a conflict does not fall back to Angle, or settings appear retained without verified persistence support. Do not use a motor test to investigate this increment. Collect `status`, `timing`, `modes` and sensor snapshots; no active control-loop or flight-safety claim follows from successful UI checks.
 

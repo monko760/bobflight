@@ -208,10 +208,7 @@ export class MockBobFlightHost implements BobFlightHost {
     return { key, value: this.settings[key] };
   }
 
-  async saveSettings(): Promise<void> {
-    this.requireConnected();
-    // In-memory mock: always succeed.
-  }
+  async saveSettings(): Promise<void> { throw new Error("Demo/RAM settings are not stored on a controller"); }
 
   async restoreDefaults(): Promise<Record<SettingsKey, string>> {
     this.requireConnected();

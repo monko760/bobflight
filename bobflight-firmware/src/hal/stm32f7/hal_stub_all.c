@@ -55,6 +55,9 @@ size_t hal_usb_cdc_read(uint8_t *buf, size_t maxlen) { (void)buf; (void)maxlen; 
 size_t hal_usb_cdc_write(const uint8_t *buf, size_t len) { (void)buf; return len; }
 bool hal_usb_cdc_connected(void) { return false; }
 
+bool hal_flash_supported(void){return false;}
+const char *hal_flash_backend(void){return "unsupported";}
+bool hal_flash_erase_slot(unsigned slot){(void)slot;return false;}
 bool hal_flash_read(uint32_t offset, void *dst, size_t len)
 { (void)offset; if (dst && len) memset(dst, 0xff, len); return false; }
 bool hal_flash_write(uint32_t offset, const void *src, size_t len)
