@@ -37,6 +37,7 @@ export type CliCommand =
   | "receiver"
   | "receiver_map AETR"
   | "receiver_map TAER"
+  | "pid_diag" | "pid_diag status" | "pid_diag start" | "pid_diag start rx" | "pid_diag stop"
   | "timing"
   | "power"
   | `power_config ${number} ${number} ${number} ${number} ${number} ${number} ${number}`

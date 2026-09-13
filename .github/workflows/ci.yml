@@ -80,6 +80,8 @@ jobs:
           node ../.github/scripts/ports-modes-contract.cjs
       - name: Firmware to configurator persistent storage and exports
         run: node ../.github/scripts/storage-contract.cjs
+      - name: Actual firmware PID diagnostic framing and config isolation
+        run: node ../.github/scripts/pid-diagnostics-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
@@ -88,6 +90,8 @@ jobs:
         run: node ui/scripts/test-switch-bench.cjs
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
+      - name: Zero-output PID diagnostic CLI and framing tests
+        run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests
         run: npm --prefix protocol run test:timing
       - name: Sensor protocol tests
