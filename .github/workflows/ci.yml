@@ -63,6 +63,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
+      - name: USB bench blackbox recorder
+        run: node ui/scripts/test-blackbox.cjs
       - name: Protocol smoke
         run: npm --prefix protocol run smoke
       - name: DFU flash model test
