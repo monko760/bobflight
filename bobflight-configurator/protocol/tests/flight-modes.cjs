@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 const assert=require('node:assert/strict');
-const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const path=require('node:path');
+const {loadUiTs}=require('./load-ui-ts.cjs');
 const P=require('../dist');
 const {parseModes,MockPortsModes,isControlSourceCommand,controlSourceCommand,canEditModeRanges,canSelectControlSource,ResponseCollector,BobFlightCliClient,MockTransportFactory}=P;
 async function main(){
@@ -25,19 +26,25 @@ async function main(){
  assert.equal(parseModes(await client.sendCommand('control_source aux')).controlSource,'aux');
  await assert.rejects(()=>client.sendCommand('control_source aux\narm'),/unsupported/);await client.disconnect();
  // Exercise the actual ModesPage component, injecting only hooks/snapshot transport.
- const ts=require('typescript');const file=path.resolve(__dirname,'../../ui/src/pages/ModesPage.tsx');
- const js=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+ const file=path.resolve(__dirname,'../../ui/src/pages/ModesPage.tsx');
  function page(snapshot,connected=true,pending=false){
-  const calls=[];const module={exports:{}};
+  const calls=[];
   const query={snapshot,connected,pending,error:'',loadedAt:1,execute:async(cmd,verify)=>{calls.push(cmd);const v={...snapshot,controlSource:cmd.endsWith('aux')?'aux':'manual'};verify?.(v);return v;}};
   const react={...require('react'),useEffect:()=>{},useState:initial=>[initial===null?snapshot?.modes??null:initial,()=>{}]};
-  const customRequire=id=>id==='react'?react:id==='../protocol'?P:id==='./useConfigSnapshot'?{useConfigSnapshot:()=>query}:require(id);
-  vm.runInNewContext('(function(require,module,exports){'+js+'\n})',{console})(customRequire,module,module.exports);
-  return {tree:module.exports.ModesPage(),calls};
+  const component=loadUiTs(file,{
+   react,'../protocol':P,'./useConfigSnapshot':{useConfigSnapshot:()=>query},
+   '../hooks/useHost':{useHost:()=>{throw Error('Storage hook is outside the ModesPage unit render');}}
+  });
+  return {tree:component.ModesPage(),calls};
  }
  function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return [];return [tree,...nodes(tree.props?.children)];}
  function text(t){return Array.isArray(t)?t.map(text).join(''):t&&typeof t==='object'?text(t.props?.children):String(t??'');}
- const ready=page(s);assert.match(text(ready.tree),/Level \(Horizon\)/);assert.match(text(ready.tree),/ARM — preview only/);
+ const ready=page(s);
+ const storage=nodes(ready.tree).find(n=>typeof n.type==='function'&&n.type.name==='StoragePanel');
+ assert(storage,'ModesPage must include the real imported StoragePanel');
+ assert.equal(storage.props.revision,1);assert.equal(storage.props.blocked,false);
+ assert.equal(nodes(page(s,true,true).tree).find(n=>typeof n.type==='function'&&n.type.name==='StoragePanel').props.blocked,true);
+ assert.match(text(ready.tree),/Level \(Horizon\)/);assert.match(text(ready.tree),/ARM — preview only/);
  const button=nodes(ready.tree).find(n=>n.type==='button'&&text(n)==='Enable AUX mode selection');assert.equal(button.props.disabled,false);await button.props.onClick();assert.deepEqual(ready.calls,['control_source aux']);
  for(const [snap,connected,pending] of [[s,false,false],[s,true,true],[{...s,armed:true},true,false],[{...s,benchActive:true},true,false],[{...s,calibrationActive:true},true,false],[{...s,flightEnabled:true},true,false]]){
   const p=page(snap,connected,pending),b=nodes(p.tree).find(n=>n.type==='button'&&text(n)==='Enable AUX mode selection');
@@ -45,6 +52,6 @@ async function main(){
  }
  const disconnected=page(s,false);assert.doesNotMatch(text(disconnected.tree),/Last snapshot:/);assert.doesNotMatch(text(disconnected.tree),/Requested at snapshot:/);
  assert.match(text(page(old).tree),/Legacy firmware/);assert.equal(nodes(page(old).tree).some(n=>n.type==='button'&&text(n)==='Enable AUX mode selection'),false);
- console.log('PASS flight modes: API2/legacy strict parsing, overlap/stale fallback, source allowlist/framing, client roundtrip and actual ModesPage guard/readback/disconnect wiring');
+ console.log('PASS flight modes: API2/legacy strict parsing, overlap/stale fallback, source allowlist/framing, client roundtrip and real StoragePanel import plus actual ModesPage guard/readback/disconnect wiring');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
