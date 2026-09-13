@@ -46,6 +46,7 @@ export type CliCommand =
   | "bench_status"
   | "disarm"
   | "reboot"
+  | "bl" | "bl discard"
   | "sensors"
   | "calibration"
   | "calibration_cancel"

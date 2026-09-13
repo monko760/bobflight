@@ -149,6 +149,7 @@ export class MockSerial extends EventEmitter {
       line = line.slice(0, -1);
     }
     if (line.length === 0) return;
+    if(line === "bl" || line === "bl discard"){this.emitData("bl unavailable: mock transport has no ROM bootloader\r\n");return;}
     if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
     const pm = this.modesPorts.handle(line,this.armed,this.bench.active);
     if(pm!==null){this.emitData(pm);return;}

@@ -25,7 +25,8 @@
     "test:sensors": "tsc && node tests/sensors.cjs",
     "test:timing": "tsc && node tests/timing.cjs",
     "test:ports-modes": "tsc && node tests/ports-modes.cjs",
-    "test:flight-modes": "tsc && node tests/flight-modes.cjs"
+    "test:flight-modes": "tsc && node tests/flight-modes.cjs",
+    "test:bootloader": "tsc && node tests/bootloader.cjs"
   },
   "engines": {
     "node": ">=18"
