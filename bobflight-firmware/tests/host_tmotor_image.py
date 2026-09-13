@@ -7,7 +7,7 @@ root=Path(sys.argv[1]);spec=importlib.util.spec_from_file_location('checker',roo
 def rec(address,kind,data):
  b=bytes([len(data),address>>8,address&255,kind])+data
  return ':'+(b+bytes([-sum(b)&255])).hex()
-def fixture(sp=0x20010000,reset=0x08000009,marker=b'tmotor_f7_v2\0' b'0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1-piddiag1\0'):
+def fixture(sp=0x20010000,reset=0x08000009,marker=b'tmotor_f7_v2\0' b'0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1-piddiag2\0'):
  return [rec(0,4,b'\x08\x00'),rec(0,0,struct.pack('<II',sp,reset)),rec(8,0,marker),rec(0,1,b'')]
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)/'synthetic.txt'
@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as td:
   except (ValueError,KeyError):assert not valid;return
   assert valid
  check(fixture(),True)
- holy=fixture(marker=b'kakute_f7_hdv\0' b'0.2.0-prototype-switchbench2-bl1-calstore1-piddiag1\0')
+ holy=fixture(marker=b'kakute_f7_hdv\0' b'0.2.0-prototype-switchbench2-bl1-calstore1-piddiag2\0')
  check(holy,True,'kakute_f7_hdv')
  check(holy,False,'tmotor_f7_v2')
  check(fixture(),False,'kakute_f7_hdv')

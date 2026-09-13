@@ -303,6 +303,12 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME sensor_calibration COMMAND bobflight_sensor_calibration_test)
   add_executable(bobflight_attitude_test src/flight/attitude.c tests/host_attitude.c)
   target_link_libraries(bobflight_attitude_test m)
+  add_executable(bobflight_pid_mpu_freshness_test tests/host_pid_mpu_freshness.c
+    src/drivers/gyro.c src/drivers/sensor_calibration.c src/flight/pid_diag.c
+    src/flight/pid_diag_core.c src/flight/pid.c src/flight/config.c src/flight/rates.c)
+  target_compile_definitions(bobflight_pid_mpu_freshness_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_pid_mpu_freshness_test m)
+  add_test(NAME pid_mpu_freshness COMMAND bobflight_pid_mpu_freshness_test)
   add_executable(bobflight_mpu6000_test src/drivers/gyro.c src/drivers/sensor_calibration.c tests/host_mpu6000.c)
   target_compile_definitions(bobflight_mpu6000_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_mpu6000_test m)

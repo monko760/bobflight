@@ -33,6 +33,6 @@ $hex = Join-Path $repo ("bobflight-" + $Board + "-bootloader-bench.hex")
 Copy-Item -LiteralPath (Join-Path $build 'bobflight.hex') -Destination $hex -Force
 Get-FileHash -Algorithm SHA256 -LiteralPath $hex
 Write-Host 'BUILD CHECKPOINT: bench image built and bounds/version checked. No controller was flashed.'
-$expectedVersion = if ($Board -eq 'kakute_f7_hdv') { '0.2.0-prototype-switchbench2-bl1-calstore1-piddiag1' } else { '0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1-piddiag1' }
+$expectedVersion = if ($Board -eq 'kakute_f7_hdv') { '0.2.0-prototype-switchbench2-bl1-calstore1-piddiag2' } else { '0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1-piddiag2' }
 Write-Host "Expected firmware: $expectedVersion; board $Board."
 Write-Host 'Read BOOTLOADER.md before installation. Test Holybro first; arming remains disabled.'
