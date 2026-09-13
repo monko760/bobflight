@@ -133,10 +133,8 @@ int main(void)
     if (!failsafe_command_override(st)) return fail("override during LAND");
     if (st[3] < 0.399f || st[3] > 0.401f) return fail("descent throttle");
     failsafe_tick(5551u); /* 199ms into 200ms land timer */
-    if (arming_state() != ARM_DISARMED && 5552u - 5352u < 200u) {
-        /* still inside timer on this tick — disarm lands on the next one */
-    }
-    failsafe_tick(5560u);
+    if (arming_state() != ARM_ARMED) return fail("LAND must remain armed at 199ms");
+    failsafe_tick(5552u); /* exactly 200ms into the procedure */
     if (arming_state() != ARM_DISARMED) return fail("land timer out → disarm");
 
     /* 8. Cannot re-arm while failsafe latched; fresh frame unlocks. */
