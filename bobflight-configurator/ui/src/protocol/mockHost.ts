@@ -1,3 +1,4 @@
+import { MockPortsModes, isModeRangeCommand } from "@bobflight/protocol";
 /**
  * Browser-safe mock host matching BobFlightCliClient surface.
  * Same FW CLI contract as Protocol MockSerial (banner, status keys,
@@ -89,6 +90,7 @@ export class MockBobFlightHost implements BobFlightHost {
 
   private setStatus(s: ConnectionStatus): void {
     if (this.status === s) return;
+    if(s==="disconnected")this.modesPorts.reset();
     this.status = s;
     for (const cb of this.statusListeners) {
       try {
@@ -153,7 +155,7 @@ export class MockBobFlightHost implements BobFlightHost {
   }
 
   async sendCommand(cmd: CliCommand): Promise<string> {
-    if (!ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5])|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
+    if (!isModeRangeCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5])|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     if (this.status !== "connected") {
@@ -222,8 +224,10 @@ export class MockBobFlightHost implements BobFlightHost {
     return { ...this.settings };
   }
 
+  private modesPorts = new MockPortsModes();
   private receiver = new MockReceiver();
   private handle(cmd: CliCommand): string {
+    const pm=this.modesPorts.handle(cmd,this.armed,this.bench.active);if(pm!==null)return pm;
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;

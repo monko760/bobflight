@@ -29,3 +29,6 @@ export {
   DEFAULT_SETTINGS,
 } from "@bobflight/protocol";
 export type { ParsedGetReply, ParsedSetReply } from "@bobflight/protocol";
+
+export { parsePorts, parseModes, modeRangeCommand, isModeRangeCommand } from "@bobflight/protocol";
+export type { ParsedPorts, ParsedModes, ModeRow } from "@bobflight/protocol";

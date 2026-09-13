@@ -97,7 +97,7 @@ export class ResponseCollector {
       // Only sensor queries use explicit framing. Never return partial snapshots
       // merely because USB packets pause; leave all legacy/motor framing alone.
       const lines = this.chunks.join("").split(/\r\n|\n|\r/).slice(0, -1);
-      if (lines.includes(this.endMarker) || lines.some(line => /^unknown(?: — try help| command)?$/.test(line.trim()))) this.finish(false);
+      if (lines.includes(this.endMarker) || (this.endMarker === "modes_end: 1" && lines.some(line => line.startsWith("mode_range refused:"))) || lines.some(line => /^unknown(?: — try help| command)?$/.test(line.trim()))) this.finish(false);
       return;
     }
     this.idleTimer = setTimeout(() => this.finish(false), this.idleMs);

@@ -121,3 +121,7 @@ export { MockMotorBench } from "./bench-mock";
 
 export { mockSensorReply } from "./sensor-mock";
 export { MockReceiver } from "./receiver-mock";
+
+export * from "./parse-ports";
+export * from "./parse-modes";
+export { MockPortsModes } from "./ports-modes-mock";

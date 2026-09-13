@@ -19,6 +19,7 @@
 #include "sched/tasks.h"
 #include "drivers/bench_parse.h"
 #include "bobflight/version.h"
+#include "flight/mode_range.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -39,6 +40,7 @@ static void cli_write_str(const char *s)
 
 #include "drivers/sensor_cli.h"
 #include "drivers/timing_cli.h"
+#include "drivers/ports_modes_cli.h"
 
 static void cmd_help(void)
 {
@@ -47,6 +49,9 @@ static void cmd_help(void)
         "  help     - this text\r\n"
         "  version  - firmware version\r\n"
         "  status   - MCU, loops, arm, gyro, board\r\n"
+        "  ports    - UART/USB pin mapping & roles\r\n"
+        "  modes    - ARM & ANGLE mode ranges & active status\r\n"
+        "  mode_range <ARM|ANGLE> <0|1> <1..12> <min> <max> - configure mode range\r\n"
         "  power - battery readings and configuration\r\n"
         "  power_config <divider> <mV/A or 0> <offset_mV> <cells or 0> <warn_V> <critical_V> <mAh> - until reboot\r\n"
         "  get      - get <key>\r\n"
@@ -252,25 +257,27 @@ static void handle_line(char *line)
         cmd_help();
     } else if (strcmp(line, "version") == 0) {
         cmd_version();
+    } else if (cmd_ports_modes_command(line)) {
+        /* Handled ports, modes, mode_range, or receiver_uart */
     } else if (strcmp(line, "timing") == 0) {
         cmd_timing();
     } else if (strcmp(line, "status") == 0) {
         cmd_status();
     } else if (strcmp(line, "receiver") == 0) {
         cmd_receiver();
-    } else if (strncmp(line,"receiver_map ",13)==0) {
-        if (arming_state()!=ARM_ARMED && !bench_motor_active() && crsf_set_map(line+13)) {
+    } else if (strncmp(line, "receiver_map ", 13) == 0) {
+        if (arming_state() != ARM_ARMED && !bench_motor_active() && crsf_set_map(line + 13)) {
             failsafe_reset_rx_link(); rx_init(); cmd_receiver();
         } else cli_write_str("receiver map refused: AETR/TAER, disarmed and motors stopped required\r\n");
     } else if (strcmp(line, "power") == 0) {
         cmd_power();
-    } else if (strncmp(line, "power_config ",13)==0) {
+    } else if (strncmp(line, "power_config ", 13) == 0) {
         power_config_t c; char extra;
-        if (arming_state()==ARM_ARMED || bench_motor_active()) {
+        if (arming_state() == ARM_ARMED || bench_motor_active()) {
             cli_write_str("power_config refused: stop motors and disarm\r\n");
-        } else if (sscanf(line+13,"%f %f %f %u %f %f %u %c", &c.voltage_scale,
-            &c.current_mv_per_amp,&c.current_offset_mv,&c.cells,&c.warning_cell_v,
-            &c.critical_cell_v,&c.capacity_mah,&extra)==7 && power_configure(&c)) {
+        } else if (sscanf(line + 13, "%f %f %f %u %f %f %u %c", &c.voltage_scale,
+            &c.current_mv_per_amp, &c.current_offset_mv, &c.cells, &c.warning_cell_v,
+            &c.critical_cell_v, &c.capacity_mah, &extra) == 7 && power_configure(&c)) {
             cmd_power();
         } else cli_write_str("power_config refused: invalid values\r\n");
     } else if (strncmp(line, "get ", 4) == 0) {
@@ -285,9 +292,9 @@ static void handle_line(char *line)
             cmd_set(key, sp + 1);
         }
     } else if (strcmp(line, "save") == 0) {
-        cli_write_str(arming_state()!=ARM_ARMED && persist_save() ? "saved\r\n" : "save failed\r\n");
+        cli_write_str(arming_state() != ARM_ARMED && persist_save() ? "saved\r\n" : "save failed\r\n");
     } else if (strcmp(line, "defaults") == 0) {
-        if(arming_state()==ARM_ARMED){cli_write_str("refused: armed\r\n");return;}
+        if (arming_state() == ARM_ARMED) { cli_write_str("refused: armed\r\n"); return; }
         config_defaults();
         cli_write_str("defaults restored\r\n");
     } else if (strcmp(line, "arm") == 0) {
@@ -299,36 +306,32 @@ static void handle_line(char *line)
     } else if (strcmp(line, "disarm") == 0) {
         arming_disarm();
         cli_write_str("disarmed\r\n");
-    } else if(cmd_sensor_command(line)) {
+    } else if (cmd_sensor_command(line)) {
         /* sensor handler performed a bounded read or nonblocking action */
-    } else if(strncmp(line,"receiver_uart ",14)==0){
-        unsigned uart=0;char extra;
-        if(arming_state()!=ARM_ARMED && !bench_motor_active() && sscanf(line+14,"%u %c",&uart,&extra)==1 && board_select_rx_uart(uart)){
-            failsafe_reset_rx_link();rx_init();cli_write_str("receiver UART changed (until reboot)\r\n");
-        }else cli_write_str("receiver UART refused\r\n");
-    } else if(strncmp(line,"motor_pulse ",12)==0){
-        unsigned motor,percent;
-        if(bench_parse_pulse(line+12,&motor,&percent) && bench_motor_pulse(motor,percent))
+    } else if (strncmp(line, "motor_pulse ", 12) == 0) {
+        unsigned motor, percent;
+        if (bench_parse_pulse(line + 12, &motor, &percent) && bench_motor_pulse(motor, percent))
             cli_write_str("motor pulse accepted (one second maximum)\r\n");
         else cli_write_str("motor pulse refused\r\n");
-    } else if(strncmp(line,"motor_test ",11)==0){
-        unsigned motor=99;
-        if(bench_parse_motor(line+11,&motor) && bench_motor_test(motor))cli_write_str("motor test accepted (one second maximum)\r\n");
+    } else if (strncmp(line, "motor_test ", 11) == 0) {
+        unsigned motor = 99;
+        if (bench_parse_motor(line + 11, &motor) && bench_motor_test(motor))
+            cli_write_str("motor test accepted (one second maximum)\r\n");
         else cli_write_str("motor test refused\r\n");
-    } else if(strcmp(line,"motor_seq")==0){
-        if(bench_motor_seq_start())cli_write_str("sequence running: RR FR RL FL, 1s each - watch spin direction\r\n");
+    } else if (strcmp(line, "motor_seq") == 0) {
+        if (bench_motor_seq_start()) cli_write_str("sequence running: RR FR RL FL, 1s each - watch spin direction\r\n");
         else cli_write_str("motor_seq refused (disarmed, USB CDC and healthy DShot required)\r\n");
-    } else if(strcmp(line,"dshot")==0){
+    } else if (strcmp(line, "dshot") == 0) {
         char buf[48];
-        snprintf(buf,sizeof(buf),"dshot: %u kbps\r\n",dshot_speed_kbps());
+        snprintf(buf, sizeof(buf), "dshot: %u kbps\r\n", dshot_speed_kbps());
         cli_write_str(buf);
-    } else if(strncmp(line,"dshot ",6)==0){
-        unsigned kbps=0;char extra;
-        if(sscanf(line+6,"%u %c",&kbps,&extra)==1 && dshot_set_speed_kbps(kbps)){
+    } else if (strncmp(line, "dshot ", 6) == 0) {
+        unsigned kbps = 0; char extra;
+        if (sscanf(line + 6, "%u %c", &kbps, &extra) == 1 && dshot_set_speed_kbps(kbps)) {
             char buf[48];
-            snprintf(buf,sizeof(buf),"dshot: switched to %u kbps\r\n",dshot_speed_kbps());
+            snprintf(buf, sizeof(buf), "dshot: switched to %u kbps\r\n", dshot_speed_kbps());
             cli_write_str(buf);
-        }else cli_write_str("dshot speed refused (300 or 600, disarmed, bench stopped only)\r\n");
+        } else cli_write_str("dshot speed refused (300 or 600, disarmed, bench stopped only)\r\n");
     } else if (strcmp(line, "reboot") == 0) {
         cli_write_str("reboot...\r\n");
         g_reboot_req = true;
@@ -356,7 +359,7 @@ void cli_poll(void)
         char c = (char)buf[i];
         if (c == '\n' || c == '\r') {
             g_line[g_len] = '\0';
-            if(g_discard_line)cli_write_str("invalid CLI line refused\r\n");
+            if (g_discard_line) cli_write_str("invalid CLI line refused\r\n");
             else handle_line(g_line);
             g_len = 0;
             g_discard_line = false;
