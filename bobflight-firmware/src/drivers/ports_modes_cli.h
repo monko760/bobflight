@@ -49,11 +49,11 @@ static void cmd_ports(void)
         "board: %s\r\n"
         "receiver_uart: %u\r\n"
         "reboot_required: no\r\n"
-        "persistence: session\r\n"
+        "persistence: %s\r\n"
         "armed: %u\r\n"
         "bench_active: %u\r\n"
         "port: 0,USB_VCP,-,-,cli,0\r\n",
-        board_id, rx_uart, is_armed ? 1 : 0, is_bench ? 1 : 0);
+        board_id, rx_uart, strcmp(persist_backend(), "flash") == 0 ? "flash" : "session", is_armed ? 1 : 0, is_bench ? 1 : 0);
     if (n < 0 || (size_t)n >= sizeof(buf)) {
         cli_write_str("ports response failed: overflow\r\n");
         return;
@@ -93,10 +93,10 @@ static void cmd_modes(void)
     flight_enabled = 1;
 #endif
     int n=snprintf(buf,sizeof(buf),
-        "modes_api: 2\r\npersistence: session\r\nsemantics: bench-control\r\n"
+        "modes_api: 2\r\npersistence: %s\r\nsemantics: bench-control\r\n"
         "flight_enabled: %u\r\narmed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nrx_fresh: %u\r\n"
         "arm_semantics: preview\r\ncontrol_source: %s\r\nrequested_mode: %s\r\neffective_mode: %s\r\nmode_conflict: %u\r\n",
-        flight_enabled,arming_state()==ARM_ARMED,bench_motor_active(),gyro_manual_calibration_active(),rx_frame_fresh(),
+        strcmp(persist_backend(), "flash")==0?"flash":"session",flight_enabled,arming_state()==ARM_ARMED,bench_motor_active(),gyro_manual_calibration_active(),rx_frame_fresh(),
         control_source_name(),control_requested_name(),control_effective_name(),control_mode_conflict());
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("modes response failed: overflow\r\n");return;}
     cli_write_str(buf);
@@ -264,7 +264,7 @@ static void cmd_receiver_uart_handle(const char *line)
     if (arming_state() != ARM_ARMED && !bench_motor_active() && board_select_rx_uart((unsigned)uart_u32)) {
         failsafe_reset_rx_link();
         rx_init();
-        cli_write_str("receiver UART changed (until reboot)\r\n");
+        cli_write_str("receiver UART applied (explicit save required)\r\n");
     } else {
         cli_write_str("receiver UART refused\r\n");
     }

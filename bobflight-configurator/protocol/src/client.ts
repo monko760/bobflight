@@ -1,3 +1,4 @@
+import {parseStorage,isVerifiedFlashSave} from "./storage";
 import { isModeRangeCommand, isControlSourceCommand } from "./parse-modes";
 /*
  * Copyright 2026 Robert Leclercq
@@ -30,13 +31,12 @@ import {
   isSettingsKey,
   parseDefaultsReply,
   parseGetReply,
-  parseSaveReply,
   parseSetReply,
   type SettingsKey,
 } from "./settings";
 
 const ALLOWED_COMMANDS: readonly CliCommand[] = [
-  "help", "ports", "modes",
+  "help", "ports", "modes", "storage", "save", "diff all", "dump all",
   "version",
   "status",
   "receiver",
@@ -284,7 +284,7 @@ export class BobFlightCliClient {
     }
 
     const idleMs = opts?.idleMs ?? DEFAULT_IDLE_MS;
-    const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = opts?.timeoutMs ?? (line === "save" ? 15000 : DEFAULT_TIMEOUT_MS);
 
     const responsePromise = new Promise<string>((resolve, reject) => {
       this.collector = new ResponseCollector(
@@ -296,11 +296,11 @@ export class BobFlightCliClient {
           this.collector = null;
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
-          if ((line === "sensors" || line === "calibration" || line === "timing" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message)) void this.disconnect();
+          if (line === "save" || ((line === "storage" || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
           reject(err);
         },
         { idleMs, timeoutMs,
-          endMarker: line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
+          endMarker: line === "storage" ? "storage_end: 1" : (line === "diff all" || line === "dump all") ? "# config_end: 1" : line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
 
@@ -373,11 +373,12 @@ export class BobFlightCliClient {
   }
 
   async saveSettings(opts?: SendCommandOptions): Promise<void> {
-    const raw = await this.sendRaw("save", opts);
-    const parsed = parseSaveReply(raw);
-    if (!parsed.ok) {
-      throw new Error(`save failed: ${JSON.stringify(raw.trim())}`);
-    }
+    const before=parseStorage(await this.sendCommand("storage",opts));
+    if(before.backend!=="flash"||before.armed||before.benchActive||before.calibrationActive||before.flightEnabled)throw new Error("Controller flash save unavailable: disarm and stop bench motors; mock/RAM save is not durable");
+    const raw=await this.sendRaw("save",opts);
+    if(!isVerifiedFlashSave(raw))throw new Error(`Save was not verified: ${raw.trim()}`);
+    const after=parseStorage(await this.sendCommand("storage",opts));
+    if(after.backend!=="flash"||after.dirty||after.state!=="saved")throw new Error("Post-save verification failed");
   }
 
   /**

@@ -6,6 +6,7 @@
 !/POWER-BATTERY.md
 !/PORTS-MODES.md
 !/FLIGHT-MODES.md
+!/PERSISTENCE.md
 !/build-flight-modes.ps1
 !/build-ports-modes.ps1
 !/build-power-battery.ps1

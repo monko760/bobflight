@@ -2,7 +2,7 @@
 import type { CliCommand } from './types';
 export type ControlMode='angle'|'acro'|'horizon';
 export interface ModeRow {name:'ARM'|'ANGLE'|'ACRO'|'HORIZON';enabled:boolean;aux:number;minUs:number;maxUs:number;active:boolean}
-export interface ParsedModes {raw:string;apiVersion:1|2;calibrationActive:boolean;controlSource?:'manual'|'aux';requestedMode?:ControlMode;effectiveMode?:ControlMode;modeConflict?:boolean;armSemantics?:'preview'; persistence:'session';semantics:'control'|'preview'|'bench-control';flightEnabled:boolean;armed:boolean;benchActive:boolean;rxFresh:boolean;modes:ModeRow[];channels?:number[];source?:string}
+export interface ParsedModes {raw:string;apiVersion:1|2;calibrationActive:boolean;controlSource?:'manual'|'aux';requestedMode?:ControlMode;effectiveMode?:ControlMode;modeConflict?:boolean;armSemantics?:'preview'; persistence:'session'|'flash';semantics:'control'|'preview'|'bench-control';flightEnabled:boolean;armed:boolean;benchActive:boolean;rxFresh:boolean;modes:ModeRow[];channels?:number[];source?:string}
 export function uint(s:string,lo:number,hi:number):number {if(!/^(0|[1-9]\d*)$/.test(s))throw Error('Expected canonical unsigned integer');const n=Number(s);if(!Number.isSafeInteger(n)||n<lo||n>hi)throw Error('Integer outside supported bounds');return n;}
 export function bit(s:string):boolean {return uint(s,0,1)===1;}
 export function snapshot(raw:string,kind:string,rowKey:string,versions:number[]=[1]):{fields:Map<string,string>;rows:string[];apiVersion:number} {
@@ -14,7 +14,7 @@ export function snapshot(raw:string,kind:string,rowKey:string,versions:number[]=
 export function field(f:Map<string,string>,key:string):string{const x=f.get(key);if(x===undefined)throw Error(`Missing ${key}`);return x;}
 export function parseModes(raw:string):ParsedModes {
  const {fields:f,rows,apiVersion}=snapshot(raw,'modes','mode',[1,2]);
- if(field(f,'persistence')!=='session')throw Error('Unsupported persistence');
+ if(!['session','flash'].includes(field(f,'persistence')))throw Error('Unsupported persistence');
  const semantics=field(f,'semantics');
  if(apiVersion===2 ? semantics!=='bench-control' : semantics!=='control'&&semantics!=='preview')throw Error('Unsupported mode semantics');
  const rxFresh=bit(field(f,'rx_fresh'));
@@ -27,7 +27,7 @@ export function parseModes(raw:string):ParsedModes {
  });
  if(modes.length!==names.length||new Set(modes.map(m=>m.name)).size!==names.length)throw Error('Expected exactly one of each supported mode');
  let channels:number[]|undefined;if(f.has('channels')){channels=field(f,'channels').split(',').map(v=>uint(v,900,2100));if(channels.length!==16)throw Error('Expected 16 channels');}
- const base:ParsedModes={raw,apiVersion:apiVersion as 1|2,calibrationActive:false,persistence:'session',semantics:semantics as ParsedModes['semantics'],flightEnabled:bit(field(f,'flight_enabled')),armed:bit(field(f,'armed')),benchActive:bit(field(f,'bench_active')),rxFresh,modes,channels,source:f.get('source')};
+ const base:ParsedModes={raw,apiVersion:apiVersion as 1|2,calibrationActive:false,persistence:field(f,'persistence') as 'session'|'flash',semantics:semantics as ParsedModes['semantics'],flightEnabled:bit(field(f,'flight_enabled')),armed:bit(field(f,'armed')),benchActive:bit(field(f,'bench_active')),rxFresh,modes,channels,source:f.get('source')};
  if(apiVersion===2){
   const source=field(f,'control_source'),requested=field(f,'requested_mode'),effective=field(f,'effective_mode');
   if(source!=='manual'&&source!=='aux')throw Error('Invalid control source');

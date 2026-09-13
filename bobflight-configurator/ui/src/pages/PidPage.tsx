@@ -162,7 +162,7 @@ export function PidPage() {
         setErr(saveReply === "save failed" ? "save failed" : saveReply);
         return;
       }
-      setMsg("saved");
+      setMsg("Saved in demo memory only—not on a controller.");
       await load();
       return;
     }
@@ -173,7 +173,7 @@ export function PidPage() {
         await host.setSetting(key as SettingsKey, formatSettingValue(values[key]));
       }
       await host.saveSettings();
-      setMsg("saved");
+      setMsg("Saved to controller flash and verified.");
       await load();
     } catch (e) {
       setErr(settingsErrorMessage(e));

@@ -86,6 +86,13 @@ option(BOBFLIGHT_PROVE_RESET "Reset_Handler-only forever PA2 blink (never main);
 option(BOBFLIGHT_BOOT_LED_DIAGNOSTICS "Blocking startup LED patterns for bring-up; leave OFF for normal boots" OFF)
 add_compile_definitions(BOBFLIGHT_BOOT_LED_DIAGNOSTICS=$<BOOL:${BOBFLIGHT_BOOT_LED_DIAGNOSTICS}>)
 
+# API detection permits the independently developed four-row mode interface without
+# silently omitting ACRO/HORIZON or AUX/manual selection. On-disk row count is validated.
+file(STRINGS "${CMAKE_SOURCE_DIR}/src/sched/tasks.h" BF_CONTROL_SOURCE_DECL REGEX "bool control_source_set")
+if(BF_CONTROL_SOURCE_DECL)
+  add_compile_definitions(BOBFLIGHT_CONTROL_SOURCE_API=1)
+endif()
+
 set(BF_COMMON_SOURCES
   src/app/main.c
   src/app/init.c
@@ -106,6 +113,7 @@ set(BF_COMMON_SOURCES
   src/drivers/crsf.c
   src/drivers/cli.c
   src/drivers/persist.c
+  src/drivers/config_store.c
   src/drivers/power.c
   src/board/ir_load.c
 )
@@ -118,6 +126,14 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_config_store_test tests/host_config_store.c)
+  add_test(NAME config_store COMMAND bobflight_config_store_test)
+  add_executable(bobflight_persist_config_test tests/host_persist_config.c src/flight/config.c src/flight/mode_range.c)
+  target_link_libraries(bobflight_persist_config_test m)
+  add_test(NAME persist_config COMMAND bobflight_persist_config_test)
+  add_executable(bobflight_storage_cli_test src/flight/config.c tests/host_storage_cli.c)
+  target_link_libraries(bobflight_storage_cli_test m)
+  add_test(NAME storage_cli COMMAND bobflight_storage_cli_test)
   add_executable(bobflight_mode_range_test src/flight/mode_range.c tests/host_mode_range.c)
   target_link_libraries(bobflight_mode_range_test m)
   add_test(NAME mode_range COMMAND bobflight_mode_range_test)
@@ -347,6 +363,9 @@ else()
     BOBFLIGHT_HAVE_CMSIS=1
     BOBFLIGHT_BOARD_ID="${BOBFLIGHT_BOARD}"
     CFG_TUSB_MCU=OPT_MCU_STM32F7)
+  if(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv" AND BOBFLIGHT_TARGET_MCU STREQUAL "STM32F745")
+    target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_CONFIG_FLASH_F745=1)
+  endif()
   if(BOBFLIGHT_FLIGHT_ENABLE)
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_FLIGHT_ENABLE=1)
   endif()

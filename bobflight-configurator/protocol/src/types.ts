@@ -27,6 +27,7 @@ export type MotorPulsePercent = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 
 
 /** Exact FW CLI commands (lowercase; only explicitly listed arguments). */
 export type CliCommand =
+  | "storage" | "save" | "diff all" | "dump all"
   | "ports" | "modes"
   | `mode_range ${"ARM" | "ANGLE" | "ACRO" | "HORIZON"} ${0 | 1} ${number} ${number} ${number}`
   | `control_source ${"manual" | "aux"}`

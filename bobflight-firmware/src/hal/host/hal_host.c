@@ -296,19 +296,12 @@ bool hal_usb_cdc_connected(void)
     return true;
 }
 
-bool hal_flash_read(uint32_t offset, void *dst, size_t len)
-{
-    (void)offset;
-    if (dst && len) {
-        memset(dst, 0xff, len);
-    }
-    return false;
-}
-
-bool hal_flash_write(uint32_t offset, const void *src, size_t len)
-{
-    (void)offset;
-    (void)src;
-    (void)len;
-    return false;
-}
+/* Process-local flash model: only for host tests, never labeled hardware durable. */
+static uint8_t config_flash[2u*256u*1024u];
+static bool config_flash_ready;
+static void config_flash_init(void){if(!config_flash_ready){memset(config_flash,255,sizeof(config_flash));config_flash_ready=true;}}
+bool hal_flash_supported(void){return true;}
+const char *hal_flash_backend(void){return "host_sim";}
+bool hal_flash_erase_slot(unsigned slot){if(slot>=2)return false;config_flash_init();memset(config_flash+slot*256u*1024u,255,256u*1024u);return true;}
+bool hal_flash_read(uint32_t offset,void *dst,size_t len){if(!dst||offset>sizeof(config_flash)||len>sizeof(config_flash)-offset)return false;config_flash_init();memcpy(dst,config_flash+offset,len);return true;}
+bool hal_flash_write(uint32_t offset,const void *src,size_t len){if(!src||offset>sizeof(config_flash)||len>sizeof(config_flash)-offset)return false;config_flash_init();const uint8_t*p=src;for(size_t i=0;i<len;i++)if((config_flash[offset+i]&p[i])!=p[i])return false;for(size_t i=0;i<len;i++)config_flash[offset+i]&=p[i];return true;}

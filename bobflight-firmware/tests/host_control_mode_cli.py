@@ -11,7 +11,7 @@ assert 'control_mode [angle|acro|horizon]' in run(b'help\n')
 text=run(b'control_mode\ncontrol_mode acro\ncontrol_mode\ncontrol_mode angle\ncontrol_mode\n')
 assert modes(text)==['angle','acro','acro','angle','angle'],text
 assert text.count('control_mode_end: 1')==5
-assert 'control_mode_storage: ram-only' in text
+assert 'control_mode_storage: explicit-save' in text
 assert 'control_mode_experimental: yes' in text
 for bad in ['control_mode 2','control_mode ACRO','control_mode acro extra',
             'control_mode  acro','control_mode acro;arm','control_mode nan']:

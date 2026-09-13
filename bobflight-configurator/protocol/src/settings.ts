@@ -225,10 +225,10 @@ export function parseSetReply(raw: string): ParsedSetReply {
   return { ok: true, key: m[1], value: m[2], raw };
 }
 
-/** True when save reply is exactly `saved`. */
+/** True only for an explicitly verified controller flash acknowledgment. */
 export function parseSaveReply(raw: string): { ok: boolean; raw: string } {
   const text = raw.replace(/\r\n/g, "\n").trim();
-  return { ok: text === "saved", raw };
+  return { ok: text === "saved: flash verified", raw };
 }
 
 /** True when defaults reply is exactly `defaults restored`. */

@@ -41,12 +41,13 @@ static void cli_write_str(const char *s)
 #include "drivers/sensor_cli.h"
 #include "drivers/timing_cli.h"
 #include "drivers/ports_modes_cli.h"
+#include "drivers/storage_cli.h"
 
 static void cmd_control_mode(void)
 {
     cli_write_str("control_mode_version: 1\r\ncontrol_mode: ");
     cli_write_str(control_mode_name());
-    cli_write_str("\r\ncontrol_mode_storage: ram-only\r\n"
+    cli_write_str("\r\ncontrol_mode_storage: explicit-save\r\n"
                   "control_mode_experimental: yes\r\ncontrol_mode_end: 1\r\n");
 }
 
@@ -55,7 +56,7 @@ static void cmd_help(void)
     cli_write_str(
         "BobFlight CLI\r\n"
         "  help     - this text\r\n"
-        "  control_mode [angle|acro|horizon] - experimental RAM-only bench routing\r\n"
+        "  control_mode [angle|acro|horizon] - experimental bench routing (explicit save available)\r\n"
         "  control_source <manual|aux> - experimental bench AUX mode routing\r\n"
         "  version  - firmware version\r\n"
         "  status   - MCU, loops, arm, gyro, board\r\n"
@@ -66,15 +67,17 @@ static void cmd_help(void)
         "  power_config <divider> <mV/A or 0> <offset_mV> <cells or 0> <warn_V> <critical_V> <mAh> - until reboot\r\n"
         "  get      - get <key>\r\n"
         "  set      - set <key> <value>\r\n"
-        "  save     - persist config\r\n"
+        "  storage  - backend, dirty state and verified-save status\r\n"
+        "  save     - verify/write supported settings to controller flash\r\n"
+        "  diff all / dump all - export changed / all supported settings\r\n"
         "  defaults - restore defaults (no auto-save)\r\n"
         "  sensors / calibration - live samples / calibration diagnostics\r\n"
         "  calibrate_gyro - stationary bias calibration (RAM until reboot)\r\n"
         "  calibrate_accel <start|+x|-x|+y|-y|+z|-z|apply|cancel> - six-face calibration\r\n"
         "  calibration_cancel - cancel, retaining applied coefficients\r\n"
-        "  receiver_uart <1|2|3|4|6|7> - receiver port until reboot\r\n"
+        "  receiver_uart <1|2|3|4|6|7> - apply port; explicit save for persistence\r\n"
         "  receiver - CRSF diagnostics and 16 mapped controls\r\n"
-        "  receiver_map <AETR|TAER> - input order until reboot\r\n"
+        "  receiver_map <AETR|TAER> - apply input order; explicit save\r\n"
         "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n"
         "  motor_pulse <1..4> <0..35> - one-second adjustable props-off pulse\r\n"
         "  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n"
@@ -263,7 +266,13 @@ static void handle_line(char *line)
         return;
     }
 
-    if (strcmp(line, "help") == 0) {
+    if (strcmp(line, "storage") == 0) {
+        cmd_storage();
+    } else if (strcmp(line, "diff") == 0 || strcmp(line, "diff all") == 0) {
+        cmd_config_export(false);
+    } else if (strcmp(line, "dump") == 0 || strcmp(line, "dump all") == 0) {
+        cmd_config_export(true);
+    } else if (strcmp(line, "help") == 0) {
         cmd_help();
     } else if (strcmp(line, "version") == 0) {
         cmd_version();
@@ -316,9 +325,9 @@ static void handle_line(char *line)
             cmd_set(key, sp + 1);
         }
     } else if (strcmp(line, "save") == 0) {
-        cli_write_str(arming_state() != ARM_ARMED && persist_save() ? "saved\r\n" : "save failed\r\n");
+        cmd_save_config();
     } else if (strcmp(line, "defaults") == 0) {
-        if (arming_state() == ARM_ARMED) { cli_write_str("refused: armed\r\n"); return; }
+        if (arming_state() == ARM_ARMED || bench_motor_active()) { cli_write_str("refused: disarm and stop motors\r\n"); return; }
         config_defaults();
         cli_write_str("defaults restored\r\n");
     } else if (strcmp(line, "arm") == 0) {

@@ -1,3 +1,4 @@
+import {StoragePanel} from "../components/StoragePanel";
 /* SPDX-License-Identifier: Apache-2.0 */
 import {useEffect,useState} from 'react';
 import {parseModes,modeRangeCommand,controlSourceCommand,canEditModeRanges,canSelectControlSource,type ModeRow} from '../protocol';
@@ -25,17 +26,17 @@ export function ModesPage(){
     const row=v.modes.find(r=>r.name===m.name);
     if(!row||['enabled','aux','minUs','maxUs'].some(k=>row[k as keyof ModeRow]!==m[k as keyof ModeRow]))throw Error('Mode readback does not match request');
    });
-   if(result){setDrafts(old=>old?.map(x=>x.name===m.name?{...result.modes.find(r=>r.name===m.name)!}:x)??null);setReply(`${labels[m.name]} applied in RAM and verified by board readback.`);}
+   if(result){setDrafts(old=>old?.map(x=>x.name===m.name?{...result.modes.find(r=>r.name===m.name)!}:x)??null);setReply(`${labels[m.name]} applied and read back. Use Save to controller to retain it after power-off.`);}
   }catch(e){setLocalError(String(e));}
  }
  async function source(value:'manual'|'aux'){
   if(!sourceEditable)return;setReply('');setLocalError('');
   const result=await q.execute(controlSourceCommand(value),v=>{if(v.apiVersion!==2||v.controlSource!==value)throw Error('Control source readback does not match request');});
-  if(result)setReply(`${value==='aux'?'AUX switches':'Manual source'} applied in RAM and verified by board readback.`);
+  if(result)setReply(`${value==='aux'?'AUX switches':'Manual source'} applied and read back. Use Save to controller to retain it after power-off.`);
  }
  async function refresh(){const result=await q.execute();if(result){setDrafts(result.modes.map(m=>({...m})));setReply('');setLocalError('');}}
  return <div className="panel">
-  <h2>Modes</h2>
+  <h2>Modes</h2><StoragePanel revision={q.loadedAt} blocked={q.pending}/>
   <p>Angle, Acro and Level (Horizon) — experimental bench development. Remove propellers and keep motor power disconnected.</p>
   {!q.connected&&<p className="banner-warn">Connect your board first. No current board state is available.</p>}
   {(q.error||localError)&&<p role="alert" className="fail">{q.error||localError}</p>}
@@ -60,11 +61,11 @@ export function ModesPage(){
     <label>AUX <select aria-label={`${m.name} AUX`} value={m.aux} onChange={e=>edit(m.name,{aux:Number(e.target.value)})}>{Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>AUX{i+1}</option>)}</select></label>{' '}
     <label>Minimum <input aria-label={`${m.name} minimum`} type="number" min={900} max={2100} step={1} value={m.minUs} onChange={e=>edit(m.name,{minUs:e.target.valueAsNumber})}/></label>{' '}
     <label>Maximum <input aria-label={`${m.name} maximum`} type="number" min={900} max={2100} step={1} value={m.maxUs} onChange={e=>edit(m.name,{maxUs:e.target.valueAsNumber})}/></label>{' '}
-    <button disabled={!editable} onClick={()=>void apply(m)}>Apply {m.name==='HORIZON'?'Level (Horizon)':m.name} until reboot</button>
+    <button disabled={!editable} onClick={()=>void apply(m)}>Apply {m.name==='HORIZON'?'Level (Horizon)':m.name}</button>
    </fieldset>)}
   </>}
   <p>AUX1–12 use equivalent microseconds (900–2100), not measured PWM pulses. No match, stale receiver data or overlapping control ranges fall back to Angle. Refresh after moving a switch.</p>
-  <p>Settings are RAM-only and reset at reboot; Save does not persist this increment. Persistent controller configuration is still separate work. The attitude estimator and sensor qualification remain required—even in Acro/Horizon. Do not attempt flight or flips.</p>
+  <p>Apply updates the running configuration; Save to controller retains all mode ranges and manual/AUX selection after a power cycle. The attitude estimator and sensor qualification remain required—even in Acro/Horizon. Do not attempt flight or flips.</p>
   {reply&&<p role="status">{reply}</p>}
  </div>;
 }

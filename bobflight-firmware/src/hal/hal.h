@@ -136,7 +136,10 @@ size_t hal_usb_cdc_read(uint8_t *buf, size_t maxlen);
 size_t hal_usb_cdc_write(const uint8_t *buf, size_t len);
 bool   hal_usb_cdc_connected(void);
 
-/* ---- flash (params later) ---- */
+/* ---- configuration flash: offsets relative to the two reserved 256 KiB slots ---- */
+bool hal_flash_supported(void);
+const char *hal_flash_backend(void);
+bool hal_flash_erase_slot(unsigned slot);
 bool hal_flash_read(uint32_t offset, void *dst, size_t len);
 bool hal_flash_write(uint32_t offset, const void *src, size_t len);
 
