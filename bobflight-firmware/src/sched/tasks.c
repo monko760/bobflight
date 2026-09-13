@@ -16,7 +16,10 @@
 #include "flight/failsafe.h"
 #include "hal/hal.h"
 #include "flight/attitude.h"
+#include "flight/horizon.h"
+#include "flight/mode_range.h"
 #include <math.h>
+#include <stddef.h>
 static uint64_t last_sample;
 static float sample_dt=0.001f;
 /* PID uses its own invocation clock, never the latest gyro sample interval. */
@@ -28,21 +31,54 @@ static unsigned bench_motor;
 static bool bench_output_pending;
 bool bench_motor_active(void){return bench_motor != 0u || bench_output_pending;}
 static control_mode_t g_control_mode = CONTROL_MODE_ANGLE;
+static control_mode_t g_effective_mode = CONTROL_MODE_ANGLE;
+static bool g_control_aux;
+static const char *mode_name(control_mode_t mode) {
+    return mode == CONTROL_MODE_ACRO ? "acro" : mode == CONTROL_MODE_HORIZON ? "horizon" : "angle";
+}
 control_mode_t control_mode_get(void) { return g_control_mode; }
-const char *control_mode_name(void) {
-    return g_control_mode == CONTROL_MODE_ACRO ? "acro" : "angle";
+const char *control_mode_name(void) { return mode_name(g_control_mode); }
+const char *control_source_name(void) { return g_control_aux ? "aux" : "manual"; }
+const char *control_effective_name(void) { return mode_name(g_effective_mode); }
+static bool control_edit_allowed(void) {
+    return arming_state() != ARM_ARMED && !bench_motor_active() &&
+        !gyro_manual_calibration_active();
 }
 bool control_mode_set(control_mode_t mode) {
-    if (mode != CONTROL_MODE_ANGLE && mode != CONTROL_MODE_ACRO) return false;
-    if (arming_state() == ARM_ARMED || bench_motor_active() ||
-        gyro_manual_calibration_active()) return false;
+    if (mode != CONTROL_MODE_ANGLE && mode != CONTROL_MODE_ACRO && mode != CONTROL_MODE_HORIZON) return false;
+    if (!control_edit_allowed()) return false;
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    /* Acro routing has not been flight-qualified: bench builds only. */
-    if (mode == CONTROL_MODE_ACRO) return false;
+    if (mode != CONTROL_MODE_ANGLE) return false;
 #endif
     g_control_mode = mode;
     return true;
 }
+bool control_source_set(bool use_aux) {
+    if (!control_edit_allowed()) return false;
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    if (use_aux) return false;
+#endif
+    g_control_aux = use_aux;
+    return true;
+}
+static control_mode_t resolve_control_mode(bool *conflict) {
+    if(conflict)*conflict=false;
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    return CONTROL_MODE_ANGLE; /* Development routing cannot escape bench builds. */
+#else
+    if(!g_control_aux)return g_control_mode;
+    const bool angle=mode_range_is_active(MODE_ANGLE);
+    const bool acro=mode_range_is_active(MODE_ACRO);
+    const bool horizon=mode_range_is_active(MODE_HORIZON);
+    const unsigned matches=(unsigned)angle+(unsigned)acro+(unsigned)horizon;
+    if(conflict)*conflict=matches>1u;
+    if(matches!=1u)return CONTROL_MODE_ANGLE; /* no match, stale RX, or overlap */
+    return acro ? CONTROL_MODE_ACRO : horizon ? CONTROL_MODE_HORIZON : CONTROL_MODE_ANGLE;
+#endif
+}
+control_mode_t control_mode_requested(void) { return resolve_control_mode(NULL); }
+const char *control_requested_name(void) { return mode_name(control_mode_requested()); }
+bool control_mode_conflict(void) { bool conflict;resolve_control_mode(&conflict);return conflict; }
 static uint32_t bench_started;
 static unsigned bench_seq_step; /* 0 = single test; 1..4 = running sequence */
 static float bench_throttle = 0.08f;
@@ -112,8 +148,11 @@ void loop_pid(void)
         if(gyro_calibrated() && attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f && arming_try_arm())arm_low_seen=false;
     }
     /* Preserve the existing leveling override during staged failsafe. */
-    if (g_control_mode == CONTROL_MODE_ACRO && !fs_flying)
+    g_effective_mode = fs_flying ? CONTROL_MODE_ANGLE : control_mode_requested();
+    if (g_effective_mode == CONTROL_MODE_ACRO)
         rates_update(sticks,g_setpoint);
+    else if (g_effective_mode == CONTROL_MODE_HORIZON)
+        horizon_setpoint(sticks,g_setpoint);
     else
         attitude_setpoint(sticks,g_setpoint);
     if(arming_state()!=ARM_ARMED || sticks[3]<0.05f){

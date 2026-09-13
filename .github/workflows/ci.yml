@@ -88,6 +88,8 @@ jobs:
         run: npm --prefix protocol run test:sensors
       - name: Sensor UI safety tests
         run: npm --prefix ui run test:sensors
+      - name: Flight modes protocol and Modes tab safety
+        run: npm --prefix protocol run test:flight-modes
       - name: WebSerial smoke
         run: npm --prefix protocol run smoke:webserial
       - name: Flasher smoke

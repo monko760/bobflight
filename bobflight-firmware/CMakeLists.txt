@@ -97,6 +97,7 @@ set(BF_COMMON_SOURCES
   src/flight/arming.c
   src/flight/failsafe.c
   src/flight/rates.c
+  src/flight/horizon.c
   src/flight/config.c
   src/flight/mode_range.c
   src/drivers/gyro.c src/drivers/sensor_calibration.c
@@ -122,6 +123,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME mode_range COMMAND bobflight_mode_range_test)
   add_executable(bobflight_pid_elapsed_test src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c)
   target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/rates.c src/flight/config.c)
+  target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_pid_elapsed_test m)
   add_test(NAME pid_elapsed COMMAND bobflight_pid_elapsed_test)
   add_executable(bobflight_cycle_clock_test tests/host_cycle_clock.c)
@@ -253,6 +255,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c)
   target_compile_definitions(bobflight_bench_safety_test PRIVATE BOBFLIGHT_HOST=1)
   target_sources(bobflight_bench_safety_test PRIVATE src/flight/rates.c)
+  target_sources(bobflight_bench_safety_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_bench_safety_test m)
   add_executable(bobflight_dshot_timer_test tests/host_dshot_timer.c)
   target_compile_definitions(bobflight_dshot_timer_test PRIVATE BOBFLIGHT_HOST=1)
@@ -263,10 +266,17 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     add_test(NAME ${check} COMMAND bobflight_${check}_test)
   endforeach()
 
+  add_executable(bobflight_horizon_test src/flight/horizon.c src/flight/attitude.c
+    src/flight/rates.c src/flight/config.c tests/host_horizon.c)
+  target_link_libraries(bobflight_horizon_test m)
+  add_test(NAME horizon_blend COMMAND bobflight_horizon_test)
+  add_test(NAME flight_modes_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_flight_modes_cli.py $<TARGET_FILE:bobflight_host>)
   add_executable(bobflight_control_mode_test
     src/sched/tasks.c src/flight/pid.c src/flight/attitude.c
     src/flight/rates.c src/flight/config.c tests/host_control_mode.c)
   target_compile_definitions(bobflight_control_mode_test PRIVATE BOBFLIGHT_HOST=1)
+  target_sources(bobflight_control_mode_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_control_mode_test m)
   add_test(NAME control_mode_routing COMMAND bobflight_control_mode_test)
   add_executable(bobflight_control_mode_flight_guard_test
@@ -274,6 +284,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/rates.c src/flight/config.c tests/host_control_mode.c)
   target_compile_definitions(bobflight_control_mode_flight_guard_test PRIVATE
     BOBFLIGHT_HOST=1 BOBFLIGHT_FLIGHT_ENABLE=1)
+  target_sources(bobflight_control_mode_flight_guard_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_control_mode_flight_guard_test m)
   add_test(NAME control_mode_flight_guard COMMAND bobflight_control_mode_flight_guard_test)
   add_test(NAME control_mode_cli COMMAND ${Python3_EXECUTABLE}

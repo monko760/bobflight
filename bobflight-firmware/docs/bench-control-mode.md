@@ -1,5 +1,7 @@
 # Experimental bench control-mode routing
 
+> Historical increment. For current Angle/Acro/Level (Horizon) routing, API-2 semantics and safe installation checks, see [Flight modes](../../FLIGHT-MODES.md). Persistence remains a separate task.
+
 This connects the existing Acro rates mapper to the existing rate PID. It is **not flight qualification**, a completed Acro implementation, or an accelerometer correction. Flight arming remains disabled in the normal bench build. No PID gains are changed.
 
 ## CLI

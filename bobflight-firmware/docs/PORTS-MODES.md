@@ -1,5 +1,7 @@
 # Ports and Modes API 1 — bench preview
 
+> Historical increment. For current Angle/Acro/Level (Horizon) routing, API-2 semantics and safe installation checks, see [Flight modes](../../FLIGHT-MODES.md). Persistence remains a separate task.
+
 This increment adds firmware-backed port selection and session-only mode-range **previews**. It does not change the existing arming, PID, attitude, failsafe, or motor-control paths. The unverified control-loop edits from earlier drafts were removed. ARM/ANGLE range configuration does **not** select the actual arm switch or enable Acro/Angle switching in this build.
 
 ## Exact wire contract

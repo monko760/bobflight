@@ -29,6 +29,7 @@ arm_state_t arming_state(void){return arm;}
 void arming_disarm(void){arm=ARM_DISARMED;}
 bool arming_try_arm(void){return false;}
 const float *rx_channels(void){return rc;}
+bool rx_frame_fresh(void){return true;}
 void rx_poll(void){}
 void cli_poll(void){}
 void failsafe_tick(uint32_t t){(void)t;}

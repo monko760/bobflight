@@ -6,6 +6,7 @@
 #include <stdio.h>
 static float rc[16];static bool fresh=true,bench=false;static arm_state_t arm=ARM_DISARMED;
 const float *rx_channels(void){return rc;}bool rx_frame_fresh(void){return fresh;}bool bench_motor_active(void){return bench;}arm_state_t arming_state(void){return arm;}
+bool gyro_manual_calibration_active(void){return false;}
 int main(void){
  mode_range_init();assert(mode_range_get(MODE_ARM)->aux_channel==1);assert(!mode_range_is_active(MODE_ARM));rc[4]=1;assert(mode_range_is_active(MODE_ARM));
  assert(mode_range_set(MODE_ARM,true,12,1000,1500));rc[15]=-1;assert(mode_range_is_active(MODE_ARM));rc[15]=0;assert(mode_range_is_active(MODE_ARM));rc[15]=1;assert(!mode_range_is_active(MODE_ARM));

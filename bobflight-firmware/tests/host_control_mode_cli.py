@@ -7,7 +7,7 @@ def run(data):
                           timeout=10,check=True).stdout.decode()
 def modes(text):
     return [line.split(': ',1)[1] for line in text.splitlines() if line.startswith('control_mode: ')]
-assert 'control_mode [angle|acro]' in run(b'help\n')
+assert 'control_mode [angle|acro|horizon]' in run(b'help\n')
 text=run(b'control_mode\ncontrol_mode acro\ncontrol_mode\ncontrol_mode angle\ncontrol_mode\n')
 assert modes(text)==['angle','acro','acro','angle','angle'],text
 assert text.count('control_mode_end: 1')==5

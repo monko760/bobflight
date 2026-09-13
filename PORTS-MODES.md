@@ -1,5 +1,7 @@
 # Ports and Modes: bench configuration
 
+> Historical increment. For current Angle/Acro/Level (Horizon) routing, API-2 semantics and safe installation checks, see [Flight modes](FLIGHT-MODES.md). Persistence remains a separate task.
+
 This development increment replaces the configurator's disabled Ports/Modes placeholders with firmware-backed configuration and explicit readback. It does not make BobFlight flight-qualified.
 
 ## Supported scope

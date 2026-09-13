@@ -4,7 +4,7 @@ const {parsePorts,parseModes,modeRangeCommand,isModeRangeCommand,MockPortsModes,
 async function main(){
  const mock=new MockPortsModes();const initial=mock.handle('modes',false,false),ports=mock.handle('ports',false,false);
  assert.equal(parsePorts(ports).ports[0].id,0);assert.equal(parsePorts(ports).source,'mock');
- const m=parseModes(initial);assert.equal(m.modes[0].aux,1);assert.equal(m.modes[1].aux,2);assert.equal(m.semantics,'preview');
+ const m=parseModes(initial);assert.equal(m.modes[0].aux,1);assert.equal(m.modes[1].aux,2);assert.equal(m.semantics,'bench-control');
  const command=modeRangeCommand({...m.modes[0],aux:12,minUs:1100,maxUs:1450});assert.equal(command,'mode_range ARM 1 12 1100 1450');
  const updated=parseModes(mock.handle(command,false,false));assert.equal(updated.modes[0].aux,12);
  for(const bad of ['mode_range ARM 1 aux1 1100 1450','mode_range ARM 1 0 1100 1450','mode_range ARM 1 13 1100 1450','mode_range ARM 1 257 1100 1450','mode_range ARM 1 +1 1100 1450','mode_range ARM 1 01 1100 1450','mode_range ARM 1 1.0 1100 1450','mode_range ARM 1 1 899 1450','mode_range ARM 1 1 1100 2101','mode_range ARM 1 1 1500 1500','mode_range ARM 1 1 1100.5 1450','mode_range ARM 1 1 1100 1450\narm']){assert.equal(isModeRangeCommand(bad),false,bad);assert.match(mock.handle(bad,false,false),/refused/);}

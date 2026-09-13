@@ -55,12 +55,13 @@ static void cmd_help(void)
     cli_write_str(
         "BobFlight CLI\r\n"
         "  help     - this text\r\n"
-        "  control_mode [angle|acro] - experimental RAM-only bench routing\r\n"
+        "  control_mode [angle|acro|horizon] - experimental RAM-only bench routing\r\n"
+        "  control_source <manual|aux> - experimental bench AUX mode routing\r\n"
         "  version  - firmware version\r\n"
         "  status   - MCU, loops, arm, gyro, board\r\n"
         "  ports    - UART/USB pin mapping & roles\r\n"
         "  modes    - ARM & ANGLE mode ranges & active status\r\n"
-        "  mode_range <ARM|ANGLE> <0|1> <1..12> <min> <max> - configure mode range\r\n"
+        "  mode_range <ARM|ANGLE|ACRO|HORIZON> <0|1> <1..12> <min> <max> - configure mode range\r\n"
         "  power - battery readings and configuration\r\n"
         "  power_config <divider> <mV/A or 0> <offset_mV> <cells or 0> <warn_V> <critical_V> <mAh> - until reboot\r\n"
         "  get      - get <key>\r\n"
@@ -270,15 +271,20 @@ static void handle_line(char *line)
         /* Handled ports, modes, mode_range, or receiver_uart */
     } else if (strcmp(line, "timing") == 0) {
         cmd_timing();
+    } else if (strncmp(line, "control_source ", 15) == 0) {
+        const char *arg=line+15;
+        bool valid=strcmp(arg,"manual")==0 || strcmp(arg,"aux")==0;
+        if(valid && control_source_set(strcmp(arg,"aux")==0))cmd_modes();
+        else cli_write_str("control_source refused: manual|aux; disarm, stop motors and calibration; aux requires bench build\r\n");
     } else if (strcmp(line, "control_mode") == 0) {
         cmd_control_mode();
     } else if (strncmp(line, "control_mode ", 13) == 0) {
         const char *arg = line + 13;
-        bool valid = strcmp(arg, "angle") == 0 || strcmp(arg, "acro") == 0;
-        control_mode_t mode = strcmp(arg, "acro") == 0 ? CONTROL_MODE_ACRO : CONTROL_MODE_ANGLE;
+        bool valid = strcmp(arg, "angle") == 0 || strcmp(arg, "acro") == 0 || strcmp(arg, "horizon") == 0;
+        control_mode_t mode = strcmp(arg, "acro") == 0 ? CONTROL_MODE_ACRO : strcmp(arg, "horizon") == 0 ? CONTROL_MODE_HORIZON : CONTROL_MODE_ANGLE;
         if (valid && control_mode_set(mode)) cmd_control_mode();
-        else cli_write_str("control_mode refused: angle|acro; disarmed, motors stopped, "
-                           "no calibration; acro requires bench build\r\n");
+        else cli_write_str("control_mode refused: angle|acro|horizon; disarmed, motors stopped, "
+                           "no calibration; acro/horizon require bench build\r\n");
     } else if (strcmp(line, "status") == 0) {
         cmd_status();
     } else if (strcmp(line, "receiver") == 0) {
