@@ -31,34 +31,50 @@ static unsigned bench_motor;
 static bool bench_output_pending;
 static bool switch_enabled,switch_low,switch_running;
 static uint32_t switch_session_ms,switch_run_ms,switch_tick_ms;
+static const char *switch_status="disabled";
+const char *bench_switch_status(void){return switch_status;}
 bool bench_motor_active(void){return bench_motor != 0u || bench_output_pending || switch_enabled;}
-void bench_switch_stop(void){switch_enabled=false;switch_low=false;switch_running=false;}
+void bench_switch_stop(void){switch_enabled=false;switch_low=false;switch_running=false;switch_status="explicit-stop";}
+static const char *switch_blocker(const float *rc){
+    if(arming_state()==ARM_ARMED)return "flight-armed";
+    if(!hal_usb_cdc_connected())return "usb-disconnected";
+    if(!dshot_is_healthy())return "dshot-unhealthy";
+    if(gyro_manual_calibration_active())return "manual-calibration";
+    if(!rx_frame_fresh())return "receiver-stale";
+    if(!rc)return "receiver-missing";
+    if(!isfinite(rc[3])||rc[3]<0.f||rc[3]>0.05f)return "throttle-not-low";
+    if(!isfinite(rc[4])||rc[4]<-1.f||rc[4]>1.f)return "aux1-invalid";
+    return NULL;
+}
 bool bench_switch_start(void){
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    switch_status="flight-build-refused";
     return false;
 #else
     const float *rc=rx_channels();
-    if(arming_state()==ARM_ARMED || bench_motor_active() || !hal_usb_cdc_connected() ||
-       !dshot_is_healthy() || gyro_manual_calibration_active() || !rx_frame_fresh() || !rc ||
-       !isfinite(rc[3]) || rc[3]<0.f || rc[3]>0.05f || !isfinite(rc[4]) || rc[4]<-1.f || rc[4]>=0.f)return false;
+    if(bench_motor_active())return false; /* Do not overwrite an active session's state. */
+    const char *reason=switch_blocker(rc);
+    if(reason){switch_status=reason;return false;}
+    if(rc[4]>=0.f){switch_status="aux1-not-low";return false;}
     switch_enabled=true;switch_low=false;switch_running=false;
+    switch_status="waiting-for-low";
     switch_session_ms=switch_tick_ms=hal_millis();return true;
 #endif
 }
 static float bench_switch_output(void){
     if(!switch_enabled)return 0.f;
     uint32_t now=hal_millis();const float *rc=rx_channels();
-    bool unsafe=arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy() ||
-      gyro_manual_calibration_active() || !rx_frame_fresh() || !rc ||
-      (uint32_t)(now-switch_session_ms)>=60000u || (uint32_t)(now-switch_tick_ms)>20u;
+    const char *reason=switch_blocker(rc);
+    if(!reason&&(uint32_t)(now-switch_session_ms)>=60000u)reason="session-expired";
+    if(!reason&&(uint32_t)(now-switch_tick_ms)>20u)reason="mixer-gap-over-20ms";
     switch_tick_ms=now;
-    if(!unsafe)unsafe=!isfinite(rc[3]) || rc[3]<0.f || rc[3]>0.05f ||
-      !isfinite(rc[4]) || rc[4]<-1.f || rc[4]>1.f;
-    if(unsafe){bench_switch_stop();return 0.f;}
-    if(rc[4]<0.f){switch_low=true;switch_running=false;return 0.f;}
-    if(rc[4]<=0.5f){switch_low=false;switch_running=false;return 0.f;}
-    if(switch_low){switch_low=false;switch_running=true;switch_run_ms=now;}
-    if(switch_running && (uint32_t)(now-switch_run_ms)>=3000u)switch_running=false;
+    if(reason){bench_switch_stop();switch_status=reason;return 0.f;}
+    if(rc[4]<0.f){switch_low=true;switch_running=false;switch_status="waiting-for-high";return 0.f;}
+    /* Preserve a witnessed low through a middle position or radio ramp.
+     * Once consumed by a high edge it stays consumed until another low. */
+    if(rc[4]<=0.5f){switch_running=false;switch_status=switch_low?"waiting-for-high":"waiting-for-low";return 0.f;}
+    if(switch_low){switch_low=false;switch_running=true;switch_run_ms=now;switch_status="running-8-percent";}
+    if(switch_running && (uint32_t)(now-switch_run_ms)>=3000u){switch_running=false;switch_status="run-limit-return-switch-low";}
     return switch_running?0.08f:0.f;
 }
 static control_mode_t g_control_mode = CONTROL_MODE_ANGLE;

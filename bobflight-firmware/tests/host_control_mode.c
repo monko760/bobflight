@@ -97,8 +97,11 @@ int main(void){
     CHECK(!bench_motor_pulse(1,8));CHECK(!bench_motor_seq_start());
     CHECK(!mode_range_set(MODE_ARM,true,2,1751,2100));
     tick(1000);for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+    rc[4]=0;tick(1000);CHECK(motors[0]==0);
+    CHECK(strcmp(bench_switch_status(),"waiting-for-high")==0);
     rc[4]=1;tick(1000);CHECK(arm==ARM_DISARMED);
     for(unsigned i=0;i<4;i++)CHECK(NEAR(motors[i],0.08f));
+    CHECK(strcmp(bench_switch_status(),"running-8-percent")==0);
     for(unsigned i=0;i<3001;i++)tick(1000);
     for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
     tick(1000);CHECK(motors[0]==0); /* held-high cannot restart */
@@ -116,6 +119,8 @@ int main(void){
       tick(failure==6?21000:1000);
       for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
       CHECK(!bench_motor_active());
+      const char *reasons[]={"receiver-stale","usb-disconnected","dshot-unhealthy","manual-calibration","throttle-not-low","aux1-invalid","mixer-gap-over-20ms"};
+      CHECK(strcmp(bench_switch_status(),reasons[failure])==0);
     }
     fresh=true;healthy=true;usb=true;calibrating=false;rc[3]=0;rc[4]=-1;
     CHECK(bench_switch_start());tick(1000);rc[4]=1;tick(1000);

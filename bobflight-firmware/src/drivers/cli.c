@@ -296,6 +296,9 @@ static void handle_line(char *line)
                            "no calibration; acro/horizon require bench build\r\n");
     } else if (strcmp(line,"bench_switch")==0) {
         cli_write_str(bench_switch_start()?"AUX1 bench enabled: switch low then high; all motors 8%, 3 seconds max; session 60 seconds; bench_stop cancels\r\n":"bench_switch refused: bench build, USB, fresh RX, AUX1 low, throttle low, motors stopped, no calibration required\r\n");
+        cli_write_str("bench_switch_state: ");cli_write_str(bench_switch_status());cli_write_str("\r\n");
+    } else if (strcmp(line,"bench_status")==0) {
+        cli_write_str("bench_switch_state: ");cli_write_str(bench_switch_status());cli_write_str("\r\n");
     } else if (strcmp(line,"bench_stop")==0) {
         (void)bench_motor_test(0);cli_write_str("bench stopped\r\n");
     } else if (strcmp(line, "status") == 0) {
