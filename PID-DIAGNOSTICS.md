@@ -1,111 +1,93 @@
-# Zero-output rate/PID diagnostics — bench increment
+# Zero-output rate/PID diagnostics — freshness fix
 
-This adds an explicitly started, RAM-only **Acro/rate shadow PID**. It reports requested rates, measured gyro rates, error and computed correction. Its output never feeds the motor mixer or motor drivers. It does not arm, provide stabilization or make a board flight-ready. Angle/Horizon diagnostics and flat accelerometer calibration are separate work; neither is required for this increment.
+This is a RAM-only Acro/rate shadow PID. Its correction never enters the motor mixer or motor drivers. It does not arm, stabilize a craft or establish flight readiness. Production PID equations, gyro driver/filter, scheduler, arming, failsafe, persistence and bootloader implementation are unchanged. Accelerometer qualification and Angle/Horizon diagnostics are separate work; six-face calibration is not required for this gyro-only check.
 
-The existing PID/rate configuration remains persistent through the existing `save` mechanism on supported hardware. Diagnostic sessions, samples and integrator state are deliberately not persistent and never auto-restart. This patch does not expand F722 flash support.
+## What changes in piddiag2
 
-## Source and local Windows build
+A short MPU6000 DATA_RDY wait can return the last still-recent hardware sample without advancing its sensor sequence. Previously that reset the entire diagnostic PID history. Now:
 
-Use the reviewed `feat/pid-diagnostics-zero-output` branch, or main after that PR is merged. Preserve local edits; do not force-reset or auto-stash.
+- A duplicate sample produces `active: yes`, `valid: no`, `reason: waiting-new-sample`, zero public vectors/dt, and `sample_age_us: -1`. It increments `waits`, NOT `resets`, and does not advance the computed `sample_seq` or computation timestamp.
+- Private integrator/derivative state survives a bounded wait. The next genuinely fresh sample uses the elapsed time since the previous computation: a one-slot wait at 1kHz normally gives about 2000us, not 1000us.
+- Zero/backwards time, elapsed computation time >=20000us, stale input, nonfinite values and existing safety guards still clear/reset or stop diagnostics. Waiting/priming does not evade producer-stall checks. The session still expires after 60 seconds and never auto-restarts.
 
-From the existing repository, first inspect:
+Telemetry stays API1 with the same CLI commands and terminator. Additive fields are `waits`, `last_reset_reason`, `reset_dt_invalid`, `reset_gyro_stale`, `reset_guard`, `reset_other`. Reasons persist after recovery until another actual reset or a successful new start. `reset_gyro_stale` includes producer/diagnostic staleness; `reset_other` includes nonfinite/config faults, explicit stop and session expiry. `resets` remains total resets, not board reboots. A successful NEW start clears session counters. Rate/error vectors use six significant digits (possibly exponent notation) to keep even large finite values inside the existing 1024-byte CLI response buffer. Correction remains six-decimal text, not a motor percentage.
+
+No change to existing `save`/nonvolatile PID, rates or configuration storage. F722 flash storage support is not added. Diagnostic sessions/counters/history remain RAM-only.
+
+## Owner-PC build — preserve the old worktree/cache
+
+Use the reviewed `fix/pid-diagnostic-freshness` PR head, or main after that PR merges. The existing PR30 configurator accepts these additive CLI fields; no production frontend change is required for this firmware fix. Do not force-reset, erase a build cache or bypass compiler checks.
+
+Run in PowerShell. This creates a separate worktree without disturbing edits in the original repository and uses its existing compiler tools. Stop if the destination already exists.
 
 ```powershell
+$ErrorActionPreference = "Stop"
 Set-Location "C:\Users\Monko\BF ChatGPt"
-git status --short
-git branch --show-current
+git fetch origin fix/pid-diagnostic-freshness
+if ($LASTEXITCODE -ne 0) { throw "Fetch failed." }
+$clean = "C:\Users\Monko\BF PID Freshness"
+if (Test-Path -LiteralPath $clean) { throw "Destination exists; preserve it and stop." }
+git worktree add --detach $clean origin/fix/pid-diagnostic-freshness
+if ($LASTEXITCODE -ne 0) { throw "Worktree creation failed." }
+Set-Location $clean
+git log -1 --oneline
 ```
 
-If clean, fetch and create an isolated local worktree (stop if the destination already exists):
+Check that revision against the reviewed PR head before continuing:
 
 ```powershell
-git fetch origin feat/pid-diagnostics-zero-output
-if ($LASTEXITCODE -ne 0) { throw "Fetch failed." }
-git worktree add --detach "..\BF PID Diagnostics" origin/feat/pid-diagnostics-zero-output
-if ($LASTEXITCODE -ne 0) { throw "Worktree creation failed." }
-Set-Location "C:\Users\Monko\BF PID Diagnostics"
-git log -1 --oneline
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build-bootloader-bench.ps1 -Board kakute_f7_hdv
 if ($LASTEXITCODE -ne 0) { throw "Build failed. Do not use an older HEX." }
+Get-FileHash -Algorithm SHA256 -LiteralPath ".\bobflight-kakute_f7_hdv-bootloader-bench.hex"
 ```
 
-Compare the source revision to the reviewed PR head. Require a successful image validator and matching copied-file SHA256. Expected Holybro version: `0.2.0-prototype-switchbench2-bl1-calstore1-piddiag1`. Expected HEX: `bobflight-kakute_f7_hdv-bootloader-bench.hex` in this new worktree. Flight enable and relaxed acceleration remain OFF. This script builds on the owner's PC; it never flashes a controller.
+Require successful image bounds/version validation and matching source/copied-file SHA256. Expected Holybro version: `0.2.0-prototype-switchbench2-bl1-calstore1-piddiag2`. Expected file: `C:\Users\Monko\BF PID Freshness\bobflight-kakute_f7_hdv-bootloader-bench.hex`. The script never flashes. Flight enable and relaxed acceleration stay OFF. A source test pass is not an installed or independently validated MCU image.
 
-Then run each configurator command separately, stopping on the first failure:
+## Install and preserve configuration
 
-```powershell
-Set-Location "C:\Users\Monko\BF PID Diagnostics\bobflight-configurator"
-npm.cmd ci
-npm.cmd run typecheck
-npm.cmd --prefix protocol run test:pid-diagnostics
-npm.cmd --prefix protocol run test:timing
-npm.cmd --prefix protocol run test:bootloader
-npm.cmd run build
-```
+Props removed, flight battery disconnected, USB only. Keep `version`, `status`, `storage`, `diff all` and `dump all` locally. The previous physical report showed `dirty: 1`: inspect the current settings before doing anything that loses RAM. Use `save` ONLY if they are the settings intended to keep; require successful readback (`dirty: 0`, no error). Do not use `bl discard` merely to bypass this decision. Do not import a Betaflight dump into BobFlight.
 
-Do not use `npm audit fix --force`; dependency remediation is separate. Stop any old Vite instance. Serve only the built UI, not the affected Vite development server:
+Follow `BOOTLOADER.md`: stopped diagnostics, disarmed, no motor bench/calibration activity, then guarded `bl`. Confirm actual STM32 DFU recognition, not just serial disconnect. Flash only the validated target-specific HEX without mass erase and require programmer completion/verification. Reconnect normally; verify exact piddiag2 version, target, restored settings and healthy calibrated gyro. Gyro bias is deliberately RAM-only; if needed, hold still for gyro calibration, not six-face capture. Independent ROM recovery remains necessary if firmware/USB cannot start.
 
-```powershell
-python -m http.server 5173 --bind 127.0.0.1 --directory .\ui\dist
-```
+## First check — only about ten seconds
 
-Open `http://127.0.0.1:5173` in Chrome/Edge. Leave that terminal running. Use a separate terminal for other commands. Stop and report a Python/port error rather than switching to an unreviewed server setup.
+Do this first; don't combine receiver, timeout, timing and DFU tests into one long sequence. Stay in the CLI.
 
-## Install
+1. `pid_diag start` — priming/invalid is normal initially.
+2. Keep still for about 10 seconds; run `pid_diag` and retain the ENTIRE response.
+3. `pid_diag stop` — before the 60-second expiry. Require inactive/invalid and cleared outputs.
 
-Remove every propeller. Disconnect the flight battery; use USB power only. Read `version`, `status`, `storage`; keep local `diff all` and `dump all` backups of the installed BobFlight configuration. Never restore a Betaflight dump into BobFlight.
+The running response should normally show `valid: yes`, `source: zero`, `mode: acro`, `motor_output: disabled`, advancing computed sequence, fresh age, plausible positive dt, zero setpoints and near-zero gyro/error. `waits` may increase; **`resets` should remain zero with `last_reset_reason: none` during this simple healthy run**. A captured `waiting-new-sample` frame is explicitly invalid with cleared outputs; read one more snapshot rather than treating it as a fresh valid result. Intermittent 2ms dt is expected after one wait. Explicit stop then adds one reset and records its reason.
 
-Use the established `BOOTLOADER.md` procedure. Software `bl` requires functioning normal firmware/USB and refuses active calibration, armed/motor states and unsaved configuration. `bl discard` explicitly discards unsaved RAM settings; do not use it merely to bypass a refusal. Do not mass erase. Flash only the validated Holybro HEX; verify the programmer reports completion and verification. Reconnect normally and confirm the version above, board identity and restored settings. Independent ROM recovery must remain available; software BL cannot rescue firmware that fails to start.
+Keep an unexpected refusal, increasing resets, stale-valid/nonfinite output or failure to stop for inspection. Don't adjust gains, relax thresholds, add battery power, recalibrate the accelerometer or repeatedly flash to make the test pass.
 
-## Test 1 — gyro only, no receiver required
+## Separate follow-up checks
 
-Stay in the CLI; do not open other live polling tabs during the timing comparison. Confirm `status` is disarmed and no motor bench session is running. `sensors` must show a healthy, fresh, calibrated gyro. **Accelerometer calibration is not required.** If needed, cancel the old manual calibration with `calibration_cancel`, then run `calibrate_gyro` and keep the board still until `calibration` reports completion. Do not repeat six-face calibration for this test.
+Once the short check passes, perform each as its own manageable checkpoint:
 
-```text
-timing
-pid_diag start
-pid_diag
-```
+- **Movement and timing:** keep both complete `timing` reports from the SAME boot. Take baseline, start a bounded session, read a snapshot while gently rotating one axis, stop BEFORE timeout, then take the second timing report. Error equals demand minus measured rate; I/D history means instantaneous correction sign is not always opposite one sample. Compare delta skips/overruns; cumulative maxima are not timing distributions or evidence of causation. Do not poll other live tabs during this comparison.
+- **Timeout and disconnect:** separately start/wait65s/read to confirm expiry; then start another session and unplug/reconnect USB to confirm no automatic restart. Configuration must be intentionally saved first. A stop response AFTER expiry does not prove interruption of an active session.
+- **Receiver and bootloader:** RX is OPTIONAL and only if the receiver can be powered without flight battery/ESC power. With fresh mapped channels/throttle low, `pid_diag start rx` reports existing configured rates; loss must invalidate/reset and never present stale demand as live. After diagnostics stop, separately verify guarded `bl` enters actual STM32 DFU and return to normal firmware without reflashing, confirming version, inactive diagnostics and saved settings.
 
-The initial frame may be priming. Subsequent snapshots must identify `mode: acro`, `source: zero`, `active: yes`, `valid: yes` and `motor_output: disabled`, with advancing `sample_seq`, recent `sample_age_us` and a sensible measured `dt_us` near the 1 kHz loop interval. Zero source sets all requested rates to zero, not receiver input.
-
-Gently rotate the board about one axis while reading another `pid_diag` snapshot. Compare the numeric axis rate with its error: error equals demand minus rate. From a fresh/reset session, positive gyro movement against zero demand should produce an opposing correction. Integral/derivative history and saturation mean the correction need not always have the opposite sign of one instantaneous sample; repeat from a stopped/restarted session rather than assuming a motor mapping from that number. The values are PID-axis calculations, not motor percentages, thrust predictions or proof of physical control stability.
-
-```text
-pid_diag stop
-pid_diag
-```
-
-Require inactive/invalid diagnostic state. No motor should move at any time. A diagnostic session expires after 60 seconds; restart explicitly for another test. Never use `bench_switch`, `motor_test`, motor pulses or an arming command as part of this acceptance test.
-
-## Test 2 — optional live receiver demand
-
-Only if the receiver is powered safely without ESC/flight battery power, verify fresh `receiver` frames and correctly mapped channels. Keep throttle low. Then:
-
-```text
-pid_diag start rx
-pid_diag
-```
-
-Read `source: rx` and rate demands that track roll/pitch/yaw sticks using the existing configured rate mapping. This remains a rate-only diagnostic even if the ordinary flight-mode configuration says Angle/Horizon. It does not change that stored selection. Receiver loss must clear validity/reset the shadow state; stale demand must not remain presented as live. Restore receiver data and start a new session explicitly if it stopped. No receiver is needed for Test 1; do not add flight battery power just to complete Test 2.
-
-## Timing, termination and bootloader regression
-
-Take a baseline `timing`, exercise one bounded diagnostic session, stop it, then take another `timing` without reboot. Keep both complete reports. Compare incremental skipped slots and cycle overruns over that same interval, not maxima/counters from different boots. Host timing tests are not physical deadline measurements; report any deterioration rather than declaring jitter fixed.
-
-Check explicit stop, timeout and USB disconnect separately. After reconnect, the session must not have restarted. Calibration or motor activity must invalidate/stop diagnostics rather than share their state. Do not intentionally run motors to test mutual exclusion on hardware: that path is covered by host tests.
-
-After diagnostics are stopped and ordinary bootloader guards are satisfied, verify `bl` enters actual STM32 DFU, then return to normal firmware by the established restart procedure without reflashing. Confirm expected version, inactive diagnostics and unchanged saved configuration. Serial disconnect alone does not prove DFU.
+Never use arming, `bench_switch`, motor pulses or `motor_test` as part of this acceptance. Mutual exclusion is covered in native regression, not by intentionally driving motors during this test.
 
 ## Stop and recovery
 
-Stop for unexpected motor activity, wrong target/version, stale data shown valid, nonfinite values, failure to expire/stop, lost configuration, new USB failures or worsened timing. Disconnect power immediately for unintended motor activity. Preserve command replies and programmer logs; do not raise output limits, relax calibration, force erase or repeatedly reflash. Use the last known-good target-specific image and established independent ROM recovery if normal firmware/USB does not start. No flight acceptance is claimed by these tests.
+Stop for unexpected motor activity, wrong target/version, lost configuration, stale/nonfinite valid data, failure to stop/expire, new USB faults or worsening timing. Disconnect power immediately for unintended motor activity. Preserve command responses/programmer logs. Do not increase outputs, force erase or repeatedly reflash. If firmware USB cannot start, use established independent ROM recovery and the last known-good target-specific image. No flight acceptance is claimed.
+
+## Source validation
+
+The native real-MPU6000-driver regression uses deterministic fake SPI/time, not real hardware. Across 5000 scheduler attempts with 50 DATA_RDY waits, piddiag1 reproduces 50 resets; this version requires 4949 fresh computations, 50 waits and zero spurious resets. It compares independent PID outputs with the unchanged original equation/state integration across waits and checks active stop. Actual serialized priming/running/waiting/resumed/stopped responses are consumed byte-by-byte by the configurator's real response collector. Other regressions cover exact timestep boundaries, repeated waits, stale producer during waiting/priming, wrap, safety guards, nonfinite values, retained reset causes, original-state isolation, unchanged configuration and bounded responses.
+
+Software checks do not measure physical deadline jitter or explain every reset in the original device log. Use the PR's final validation record for completed commands/results and CI state; MCU compilation and the physical short check remain owner-PC tasks.
 
 
-## Source validation for this increment
+### Local validation record — September 13, 2026
 
-Before publication, 50/50 native host tests passed separately for dummy, Kakute F7 HDV and TMOTORF7V2 (150 passes). New tests cover original-equation numerical equivalence, independent production/shadow PID state, fresh gyro sequences, measured timestep boundaries, stale/invalid/reset behavior, bounded sessions and flight-build refusal. A real task-cascade test uses fake sensor/receiver/motor IO to exercise the actual diagnostic hook while gravity is 0.82 g; rate diagnostics still operate while the existing disarmed cascade sends only zero motor frames. Motor mutual exclusion is tested with mocked output only.
+Parent-verified 51/51 native tests on each of `dummy`, `kakute_f7_hdv` and `tmotor_f7_v2` (153 passes), including the new real-driver regression. The same test compiled against immutable `piddiag1` reproduces 50resets; the patched source yields 0 spurious resets with 50waits/4949computations over5000attempts. Axes are 0/1/2=roll/pitch/yaw; loops use zero-based indexing.
 
-Both configurator typechecks, all 19 existing/new one-line configurator CI commands, production UI build and the real native firmware Ports/Modes, storage/export and PID framing contracts passed. Firmware framing checks assert truthful no-IMU refusal, complete responses below 1024 bytes, unchanged configuration exports and disarmed state. The compiled diagnostic object has no motor/mixer-write, arming-write, production-PID or persistence-save references. Production PID, arming, failsafe, estimator, sensor-calibration, gyro, persistence and bootloader implementations are unchanged; the task scheduler definition is unchanged. The task body adds only the isolated diagnostic update hook.
+All 19 configurator CI commands passed in a clean dependency installation, including both typechecks, PID/timing/bootloader/sensor/motor/mode regressions and the production build. Actual native firmware-to-configurator Ports/Modes, storage/export and expanded PID framing contracts passed. The five emitted real PID frames were 408, 424, 422, 425, 426 bytes, all below 1024; CR-only line termination is accepted by the existing collector when CRLF is split byte-by-byte.
 
-These are software regressions, not physical 1 kHz timing, physical DFU recovery, control stability or flight acceptance. No MCU image was built or flashed by the parent assistant; build it on the owner PC as above. The repository's pre-existing GitHub CI cross-build is a separate check. Known pre-existing PID indentation warnings may also appear when that same original equation is compiled into the isolated diagnostic state namespace. Flat accelerometer calibration/persistence improvements are not included in this PR.
+The bounded independent review identified waiting/priming producer-stall coverage and fixed-point telemetry-size risks. Parent added the stale-history guard for all primed states, bounded rate/error formatting and regressions. Zero elapsed on a duplicate is deliberately treated as invalid timing, consistent with the existing strict timestep policy; the diagnostic runs in the 1kHz task, not a free-running sub-microsecond poller. That conservative policy is explicitly tested.
+
+Production source diff audit: only `pid_diag.c/h` changed. The object has no motor-write, mixer-write, arming-write, production-PID or persistence-save reference. Original PID, isolatedcore wrapper, gyro/filter, tasks/scheduler, arming, failsafe, flash/persistence and bootloader sources are byte-for-byte unchanged. MCU image construction/installation and physical timing, short-check, RX, disconnect and DFU recovery on `piddiag2` are NOT established by these native tests. Existing GitHub CI runs independently; check its current result before installation.

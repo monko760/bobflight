@@ -76,7 +76,7 @@ jobs:
       - name: Firmware to configurator Ports and Modes contract
         run: |
           cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract -DBOBFLIGHT_BOARD=kakute_f7_hdv -DBOBFLIGHT_FLIGHT_ENABLE=OFF
-          cmake --build ../bobflight-firmware/build-contract --target bobflight_host -j 4
+          cmake --build ../bobflight-firmware/build-contract --target bobflight_host bobflight_pid_mpu_freshness_test -j 4
           node ../.github/scripts/ports-modes-contract.cjs
       - name: Firmware to configurator persistent storage and exports
         run: node ../.github/scripts/storage-contract.cjs

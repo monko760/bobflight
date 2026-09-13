@@ -35,6 +35,13 @@ typedef struct {
     float correction[3];
     uint32_t reset_count;
     uint32_t session_age_ms;
+    /* Additive fields for API v1 extension */
+    uint32_t wait_count;
+    const char *last_reset_reason;
+    uint32_t reset_dt_invalid;
+    uint32_t reset_gyro_stale;
+    uint32_t reset_guard;
+    uint32_t reset_other;
 } pid_diag_snapshot_t;
 
 void pid_diag_init(void);
