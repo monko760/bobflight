@@ -10,6 +10,7 @@
 #include "drivers/rx.h"
 #include "drivers/cli.h"
 #include "flight/pid.h"
+#include "flight/pid_diag.h"
 #include "flight/mixer.h"
 #include "flight/rates.h"
 #include "flight/arming.h"
@@ -172,6 +173,8 @@ void loop_filter(void)
 void loop_pid(void)
 {
     const uint64_t pid_now=hal_micros();
+    /* Independent bench state only; never feeds g_pid, mixer, or arming. */
+    pid_diag_update(pid_now, g_gyro_filt);
     const bool pid_first=!have_pid_time;
     const uint64_t pid_elapsed=pid_first?0:pid_now-last_pid_us;
     /* Match pid_set_dt's strict <20ms domain; never reuse stale dt on error. */

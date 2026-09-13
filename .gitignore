@@ -58,3 +58,5 @@ __pycache__/
 
 # Calibration persistence acceptance guide.
 !/CALIBRATION-PERSISTENCE.md
+
+!PID-DIAGNOSTICS.md

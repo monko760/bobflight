@@ -226,6 +226,7 @@ export class MockBobFlightHost implements BobFlightHost {
   private handle(cmd: CliCommand): string {
     if(cmd === "bl" || cmd === "bl discard") return "bl unavailable: mock transport has no ROM bootloader\r\n";
     const pm=this.modesPorts.handle(cmd,this.armed,this.bench.active);if(pm!==null)return pm;
+    if(cmd === "pid_diag" || cmd.startsWith("pid_diag "))return "pid_diag_available: no\r\nreason: mock-no-hardware\r\nmotor_output: disabled\r\npid_diag_end: 1\r\n";
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;

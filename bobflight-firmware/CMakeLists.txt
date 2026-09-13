@@ -109,6 +109,7 @@ set(BF_COMMON_SOURCES
   src/sched/scheduler.c
   src/sched/tasks.c
   src/flight/pid.c
+  src/flight/pid_diag.c src/flight/pid_diag_core.c
   src/flight/attitude.c
   src/flight/mixer.c
   src/flight/arming.c
@@ -136,6 +137,20 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_pid_diag_task_test tests/host_pid_diag_task.c
+    src/sched/tasks.c src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c
+    src/flight/mixer.c src/flight/attitude.c src/flight/config.c src/flight/rates.c
+    src/flight/mode_range.c src/flight/horizon.c)
+  target_compile_definitions(bobflight_pid_diag_task_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_pid_diag_task_test m)
+  add_test(NAME pid_diag_task COMMAND bobflight_pid_diag_task_test)
+  foreach(diag_variant normal flight_guard)
+    add_executable(bobflight_pid_diag_${diag_variant}_test tests/host_pid_diag.c
+      src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c src/flight/config.c src/flight/rates.c)
+    target_link_libraries(bobflight_pid_diag_${diag_variant}_test m)
+    add_test(NAME pid_diag_${diag_variant} COMMAND bobflight_pid_diag_${diag_variant}_test)
+  endforeach()
+  target_compile_definitions(bobflight_pid_diag_flight_guard_test PRIVATE BOBFLIGHT_FLIGHT_ENABLE=1)
   add_executable(bobflight_config_store_test tests/host_config_store.c)
   add_executable(bobflight_flash_watchdog_test tests/host_flash_watchdog.c)
   target_include_directories(bobflight_flash_watchdog_test PRIVATE src)
@@ -335,6 +350,9 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME control_mode_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_control_mode_cli.py $<TARGET_FILE:bobflight_host>)
 
+  foreach(task_test pid_elapsed bench_safety control_mode control_mode_flight_guard)
+    target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)
+  endforeach()
   add_executable(bobflight_cascade_inject_test
     src/flight/pid.c
   src/flight/attitude.c

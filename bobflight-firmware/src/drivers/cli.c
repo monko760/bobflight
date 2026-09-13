@@ -43,6 +43,7 @@ static void cli_write_str(const char *s)
 #include "drivers/ports_modes_cli.h"
 #include "drivers/storage_cli.h"
 #include "drivers/bootloader_cli.h"
+#include "drivers/pid_diag_cli.h"
 
 static void cmd_control_mode(void)
 {
@@ -85,6 +86,7 @@ static void cmd_help(void)
         "  dshot [300|600] - show or switch DShot bit rate\r\n"
         "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
         "  disarm   - disarm\r\n"
+        "  pid_diag [status|start|start rx|stop] - 60s zero-output rate/PID diagnostic\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
         "  bl / BL  - ST ROM bootloader; bl discard explicitly loses unsaved RAM changes\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
@@ -281,6 +283,8 @@ static void handle_line(char *line)
         cmd_help();
     } else if (strcmp(line, "version") == 0) {
         cmd_version();
+    } else if (cmd_pid_diag_command(line)) {
+        /* Diagnostic response is framed and never sends motor output. */
     } else if (cmd_ports_modes_command(line)) {
         /* Handled ports, modes, mode_range, or receiver_uart */
     } else if (strcmp(line, "timing") == 0) {
