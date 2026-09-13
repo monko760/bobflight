@@ -7,6 +7,8 @@
 #include "flight/arming.h"
 #include "flight/attitude.h"
 #include "flight/config.h"
+#include "flight/mode_range.h"
+#include "flight/horizon.h"
 #include "flight/failsafe.h"
 #include "flight/pid.h"
 #include "flight/mixer.h"
@@ -21,7 +23,7 @@
 
 static uint64_t now;
 static arm_state_t arm=ARM_DISARMED;
-static bool healthy=true, calibrating, override;
+static bool healthy=true, calibrating, override, fresh=true;
 static float rc[16], gyro[3], accel[3]={0,0.5f,0.8660254f};
 static float motors[4];
 static pid_axis_out_t captured;
@@ -38,6 +40,7 @@ void gyro_filter(const float in[3],float out[3]){memcpy(out,in,sizeof(gyro));}
 const float *gyro_accel_g(void){return accel;}
 bool gyro_calibrated(void){return true;}
 const float *rx_channels(void){return rc;}
+bool rx_frame_fresh(void){return fresh;}
 void rx_poll(void){}
 void cli_poll(void){}
 void failsafe_tick(uint32_t t){(void)t;}
@@ -59,7 +62,7 @@ static bool prime(control_mode_t mode){
     arm=ARM_DISARMED;override=false;healthy=true;calibrating=false;
     bench_motor_test(0);loop_mixer_dshot();
     attitude_init();rc[4]=0;rc[3]=0.4f;
-    if(!control_mode_set(mode))return false;
+    if(!control_source_set(false) || !control_mode_set(mode))return false;
     tick(1000);arm=ARM_ARMED;tick(1000); /* actual task primes; mock arm only */
     return true;
 }
@@ -73,9 +76,14 @@ static bool configure(void){
 }
 #endif
 int main(void){
+    mode_range_init();
     CHECK(control_mode_get()==CONTROL_MODE_ANGLE);
     CHECK(strcmp(control_mode_name(),"angle")==0);
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    CHECK(!control_mode_set(CONTROL_MODE_HORIZON));
+    CHECK(!control_source_set(true));
+    CHECK(control_source_set(false));
+    CHECK(control_mode_requested()==CONTROL_MODE_ANGLE);
     CHECK(!control_mode_set(CONTROL_MODE_ACRO));
     CHECK(control_mode_get()==CONTROL_MODE_ANGLE);
     CHECK(control_mode_set(CONTROL_MODE_ANGLE));
@@ -87,11 +95,12 @@ int main(void){
     CHECK(!control_mode_set((control_mode_t)-1));
     CHECK(control_mode_get()==CONTROL_MODE_ANGLE);
     CHECK(control_mode_set(CONTROL_MODE_ACRO));CHECK(arm==ARM_DISARMED);
-    arm=ARM_ARMED;CHECK(!control_mode_set(CONTROL_MODE_ANGLE));arm=ARM_DISARMED;
-    calibrating=true;CHECK(!control_mode_set(CONTROL_MODE_ANGLE));calibrating=false;
+    arm=ARM_ARMED;CHECK(!control_mode_set(CONTROL_MODE_ANGLE));CHECK(!control_source_set(true));arm=ARM_DISARMED;
+    calibrating=true;CHECK(!control_mode_set(CONTROL_MODE_ANGLE));
+    CHECK(!control_source_set(true));CHECK(!mode_range_set(MODE_HORIZON,true,2,1301,1700));calibrating=false;
     CHECK(bench_motor_pulse(1,10));CHECK(!control_mode_set(CONTROL_MODE_ANGLE));
     loop_mixer_dshot();CHECK(bench_motor_test(0));
-    CHECK(bench_motor_active());CHECK(!control_mode_set(CONTROL_MODE_ANGLE));
+    CHECK(bench_motor_active());CHECK(!control_mode_set(CONTROL_MODE_ANGLE));CHECK(!control_source_set(true));
     loop_mixer_dshot();CHECK(control_mode_set(CONTROL_MODE_ANGLE));
 
     /* Acro ignores tilt in setpoints; exact expo=0 shaped rates: 100,-50,50 dps. */
@@ -113,6 +122,44 @@ int main(void){
     CHECK(NEAR(captured.pitch,0.001f*(desired[1]-gyro[1])));
     CHECK(NEAR(captured.yaw,-0.001f*gyro[2]));
     override=false;tick(1000);CHECK(NEAR(captured.roll,0.09f));
+
+    /* Horizon routing uses production blending and preserves rate-feedback units. */
+    rc[0]=0.55f;rc[1]=-0.2f;rc[2]=0.51f;
+    CHECK(prime(CONTROL_MODE_HORIZON));tick(1000);horizon_setpoint(rc,desired);
+    CHECK(NEAR(captured.roll,0.001f*(desired[0]-gyro[0])));
+    CHECK(NEAR(captured.pitch,0.001f*(desired[1]-gyro[1])));
+    CHECK(NEAR(captured.yaw,0.001f*(desired[2]-gyro[2])));
+    CHECK(strcmp(control_effective_name(),"horizon")==0);
+    override=true;tick(1000);attitude_setpoint(neutral,desired);
+    CHECK(strcmp(control_effective_name(),"angle")==0);
+    CHECK(NEAR(captured.roll,0.001f*(desired[0]-gyro[0])));override=false;
+
+    /* AUX switch routing is explicit opt-in, ARM range is not an arm assignment. */
+    arm=ARM_DISARMED;loop_mixer_dshot();
+    CHECK(mode_range_set(MODE_ANGLE,true,2,900,1300));
+    CHECK(mode_range_set(MODE_HORIZON,true,2,1301,1700));
+    CHECK(mode_range_set(MODE_ACRO,true,2,1701,2100));
+    CHECK(control_source_set(true));CHECK(arm==ARM_DISARMED);
+    rc[5]=1;CHECK(control_mode_requested()==CONTROL_MODE_ACRO);CHECK(!control_mode_conflict());
+    tick(1000);arm=ARM_ARMED;tick(1000);tick(1000);
+    CHECK(strcmp(control_effective_name(),"acro")==0);
+    rc[5]=0;tick(1000);CHECK(strcmp(control_effective_name(),"horizon")==0);
+    rc[5]=-1;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);
+    rc[5]=1;fresh=false;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);fresh=true;
+    rc[5]=NAN;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);
+    rc[5]=2;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);
+    rc[5]=1;override=true;tick(1000);
+    CHECK(control_mode_requested()==CONTROL_MODE_ACRO);CHECK(strcmp(control_effective_name(),"angle")==0);override=false;
+    arm=ARM_DISARMED;loop_mixer_dshot();
+    CHECK(mode_range_set(MODE_ANGLE,true,2,900,2100));
+    CHECK(control_mode_conflict());CHECK(control_mode_requested()==CONTROL_MODE_ANGLE);
+    CHECK(mode_range_set(MODE_ANGLE,false,2,900,2100));
+    CHECK(mode_range_set(MODE_ACRO,false,2,1701,2100));
+    CHECK(!control_mode_conflict());CHECK(control_mode_requested()==CONTROL_MODE_ANGLE);
+    CHECK(mode_range_set(MODE_ARM,true,2,900,2100));
+    CHECK(mode_range_is_active(MODE_ARM));tick(1000);CHECK(arm==ARM_DISARMED);
+    mode_range_reset();CHECK(!mode_range_get(MODE_ACRO)->enabled);CHECK(!mode_range_get(MODE_HORIZON)->enabled);
+    CHECK(control_source_set(false));
 
     /* Real PID I integration follows measured invocation time at dividers 1/2/4/8. */
     memset(gyro,0,sizeof(gyro));rc[0]=1;rc[1]=rc[2]=0;

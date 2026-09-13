@@ -15,7 +15,9 @@ extern "C" {
 typedef enum {
     MODE_ARM = 0,
     MODE_ANGLE = 1,
-    MODE_COUNT = 2
+    MODE_ACRO = 2,
+    MODE_HORIZON = 3,
+    MODE_COUNT = 4
 } mode_id_t;
 
 typedef struct {

@@ -1,4 +1,4 @@
-import { isModeRangeCommand } from "./parse-modes";
+import { isModeRangeCommand, isControlSourceCommand } from "./parse-modes";
 /*
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
@@ -265,7 +265,7 @@ export class BobFlightCliClient {
     cmd: CliCommand,
     opts?: SendCommandOptions
   ): Promise<string> {
-    if (!isModeRangeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5]))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd)) {
+    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5]))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);
@@ -296,11 +296,11 @@ export class BobFlightCliClient {
           this.collector = null;
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
-          if ((line === "sensors" || line === "calibration" || line === "timing" || line === "ports" || line === "modes" || line.startsWith("mode_range ")) && /terminator missing/.test(err.message)) void this.disconnect();
+          if ((line === "sensors" || line === "calibration" || line === "timing" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message)) void this.disconnect();
           reject(err);
         },
         { idleMs, timeoutMs,
-          endMarker: line === "ports" ? "ports_end: 1" : (line === "modes" || line.startsWith("mode_range ")) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
+          endMarker: line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
 

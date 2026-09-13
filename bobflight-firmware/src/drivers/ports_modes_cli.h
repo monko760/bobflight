@@ -87,61 +87,27 @@ static void cmd_ports(void)
 
 static void cmd_modes(void)
 {
-    char buf[512];
-    bool is_armed = (arming_state() == ARM_ARMED);
-    bool is_bench = bench_motor_active();
-    bool fresh = rx_frame_fresh();
-
+    char buf[640];
     unsigned flight_enabled = 0;
-#if defined(BOBFLIGHT_MCU) && defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
     flight_enabled = 1;
 #endif
-
-    int n = snprintf(buf, sizeof(buf),
-        "modes_api: 1\r\n"
-        "persistence: session\r\n"
-        "semantics: preview\r\n"
-        "flight_enabled: %u\r\n"
-        "armed: %u\r\n"
-        "bench_active: %u\r\n"
-        "rx_fresh: %u\r\n",
-        flight_enabled, is_armed ? 1 : 0, is_bench ? 1 : 0, fresh ? 1 : 0);
-    if (n < 0 || (size_t)n >= sizeof(buf)) {
-        cli_write_str("modes response failed: overflow\r\n");
-        return;
-    }
+    int n=snprintf(buf,sizeof(buf),
+        "modes_api: 2\r\npersistence: session\r\nsemantics: bench-control\r\n"
+        "flight_enabled: %u\r\narmed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nrx_fresh: %u\r\n"
+        "arm_semantics: preview\r\ncontrol_source: %s\r\nrequested_mode: %s\r\neffective_mode: %s\r\nmode_conflict: %u\r\n",
+        flight_enabled,arming_state()==ARM_ARMED,bench_motor_active(),gyro_manual_calibration_active(),rx_frame_fresh(),
+        control_source_name(),control_requested_name(),control_effective_name(),control_mode_conflict());
+    if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("modes response failed: overflow\r\n");return;}
     cli_write_str(buf);
-
-    /* Mode rows */
-    const mode_config_t *arm_cfg = mode_range_get(MODE_ARM);
-    const mode_config_t *angle_cfg = mode_range_get(MODE_ANGLE);
-
-    if (arm_cfg) {
-        n = snprintf(buf, sizeof(buf),
-            "mode: ARM,%u,%u,%u,%u,%u\r\n",
-            arm_cfg->enabled ? 1 : 0,
-            (unsigned)arm_cfg->aux_channel,
-            (unsigned)arm_cfg->min_us,
-            (unsigned)arm_cfg->max_us,
-            mode_range_is_active(MODE_ARM) ? 1 : 0);
-        if (n > 0 && (size_t)n < sizeof(buf)) {
-            cli_write_str(buf);
-        }
+    const char *names[MODE_COUNT]={"ARM","ANGLE","ACRO","HORIZON"};
+    for(unsigned i=0;i<MODE_COUNT;i++){
+        const mode_config_t *cfg=mode_range_get((mode_id_t)i);
+        n=snprintf(buf,sizeof(buf),"mode: %s,%u,%u,%u,%u,%u\r\n",names[i],cfg->enabled,
+            (unsigned)cfg->aux_channel,(unsigned)cfg->min_us,(unsigned)cfg->max_us,mode_range_is_active((mode_id_t)i));
+        if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("modes response failed: overflow\r\n");return;}
+        cli_write_str(buf);
     }
-
-    if (angle_cfg) {
-        n = snprintf(buf, sizeof(buf),
-            "mode: ANGLE,%u,%u,%u,%u,%u\r\n",
-            angle_cfg->enabled ? 1 : 0,
-            (unsigned)angle_cfg->aux_channel,
-            (unsigned)angle_cfg->min_us,
-            (unsigned)angle_cfg->max_us,
-            mode_range_is_active(MODE_ANGLE) ? 1 : 0);
-        if (n > 0 && (size_t)n < sizeof(buf)) {
-            cli_write_str(buf);
-        }
-    }
-
     cli_write_str("modes_end: 1\r\n");
 }
 
@@ -205,6 +171,10 @@ static void cmd_mode_range_handle(const char *line)
         mode = MODE_ARM;
     } else if (strcmp(tokens[1], "ANGLE") == 0) {
         mode = MODE_ANGLE;
+    } else if (strcmp(tokens[1], "ACRO") == 0) {
+        mode = MODE_ACRO;
+    } else if (strcmp(tokens[1], "HORIZON") == 0) {
+        mode = MODE_HORIZON;
     } else {
         cli_write_str("mode_range refused: invalid mode\r\n");
         return;

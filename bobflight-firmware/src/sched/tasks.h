@@ -17,11 +17,18 @@ extern "C" {
 /* Experimental RAM-only setpoint routing; never changes arming permission. */
 typedef enum {
     CONTROL_MODE_ANGLE = 0,
-    CONTROL_MODE_ACRO = 1
+    CONTROL_MODE_ACRO = 1,
+    CONTROL_MODE_HORIZON = 2
 } control_mode_t;
 control_mode_t control_mode_get(void);
 const char *control_mode_name(void);
 bool control_mode_set(control_mode_t mode);
+bool control_source_set(bool use_aux);
+const char *control_source_name(void);
+control_mode_t control_mode_requested(void);
+const char *control_requested_name(void);
+const char *control_effective_name(void);
+bool control_mode_conflict(void);
 
 void loop_gyro(void);
 void loop_filter(void);

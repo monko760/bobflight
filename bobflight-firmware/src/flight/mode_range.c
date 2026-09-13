@@ -5,6 +5,7 @@
 #include "flight/mode_range.h"
 #include "flight/arming.h"
 #include "drivers/rx.h"
+#include "drivers/gyro.h"
 #include "sched/tasks.h"
 
 #include <math.h>
@@ -14,6 +15,8 @@ static mode_config_t g_modes[MODE_COUNT];
 
 void mode_range_reset(void)
 {
+    memset(g_modes, 0, sizeof(g_modes));
+    for(unsigned i=0;i<MODE_COUNT;i++) g_modes[i]=(mode_config_t){false,2,900,2100};
     /* Defaults: ARM on AUX1 high (1751..2100); ANGLE on AUX2 full range (900..2100) */
     g_modes[MODE_ARM].enabled = true;
     g_modes[MODE_ARM].aux_channel = 1;
@@ -45,7 +48,7 @@ bool mode_range_set(mode_id_t mode, bool enabled, uint8_t aux, uint16_t min_us, 
     if ((int)mode < 0 || mode >= MODE_COUNT) {
         return false;
     }
-    if (arming_state() == ARM_ARMED || bench_motor_active()) {
+    if (arming_state() == ARM_ARMED || bench_motor_active() || gyro_manual_calibration_active()) {
         return false;
     }
     if (aux < 1 || aux > 12) {
@@ -63,7 +66,7 @@ bool mode_range_set(mode_id_t mode, bool enabled, uint8_t aux, uint16_t min_us, 
     g_modes[mode].min_us = min_us;
     g_modes[mode].max_us = max_us;
 
-    /* Preview configuration never changes the control-loop arming latch. */
+    /* ARM remains preview-only; control ranges require explicit AUX source opt-in. */
     return true;
 }
 
