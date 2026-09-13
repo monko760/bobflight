@@ -33,6 +33,8 @@ export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "calibrate_accel +x", "calibrate_accel -x", "calibrate_accel +y",
   "calibrate_accel -y", "calibrate_accel +z", "calibrate_accel -z",
   "arm",
+  "bench_switch",
+  "bench_stop",
   "disarm",
   "reboot",
 ] as const;

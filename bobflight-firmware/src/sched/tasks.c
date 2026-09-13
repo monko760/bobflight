@@ -29,7 +29,38 @@ static bool sample_ok,arm_low_seen;
 static unsigned bench_motor;
 /* Remain busy until a cascade has actually submitted the stop frame. */
 static bool bench_output_pending;
-bool bench_motor_active(void){return bench_motor != 0u || bench_output_pending;}
+static bool switch_enabled,switch_low,switch_running;
+static uint32_t switch_session_ms,switch_run_ms,switch_tick_ms;
+bool bench_motor_active(void){return bench_motor != 0u || bench_output_pending || switch_enabled;}
+void bench_switch_stop(void){switch_enabled=false;switch_low=false;switch_running=false;}
+bool bench_switch_start(void){
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    return false;
+#else
+    const float *rc=rx_channels();
+    if(arming_state()==ARM_ARMED || bench_motor_active() || !hal_usb_cdc_connected() ||
+       !dshot_is_healthy() || gyro_manual_calibration_active() || !rx_frame_fresh() || !rc ||
+       !isfinite(rc[3]) || rc[3]<0.f || rc[3]>0.05f || !isfinite(rc[4]) || rc[4]<-1.f || rc[4]>=0.f)return false;
+    switch_enabled=true;switch_low=false;switch_running=false;
+    switch_session_ms=switch_tick_ms=hal_millis();return true;
+#endif
+}
+static float bench_switch_output(void){
+    if(!switch_enabled)return 0.f;
+    uint32_t now=hal_millis();const float *rc=rx_channels();
+    bool unsafe=arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy() ||
+      gyro_manual_calibration_active() || !rx_frame_fresh() || !rc ||
+      (uint32_t)(now-switch_session_ms)>=60000u || (uint32_t)(now-switch_tick_ms)>20u;
+    switch_tick_ms=now;
+    if(!unsafe)unsafe=!isfinite(rc[3]) || rc[3]<0.f || rc[3]>0.05f ||
+      !isfinite(rc[4]) || rc[4]<-1.f || rc[4]>1.f;
+    if(unsafe){bench_switch_stop();return 0.f;}
+    if(rc[4]<0.f){switch_low=true;switch_running=false;return 0.f;}
+    if(rc[4]<=0.5f){switch_low=false;switch_running=false;return 0.f;}
+    if(switch_low){switch_low=false;switch_running=true;switch_run_ms=now;}
+    if(switch_running && (uint32_t)(now-switch_run_ms)>=3000u)switch_running=false;
+    return switch_running?0.08f:0.f;
+}
 static control_mode_t g_control_mode = CONTROL_MODE_ANGLE;
 static control_mode_t g_effective_mode = CONTROL_MODE_ANGLE;
 static bool g_control_aux;
@@ -84,17 +115,19 @@ static unsigned bench_seq_step; /* 0 = single test; 1..4 = running sequence */
 static float bench_throttle = 0.08f;
 bool bench_motor_pulse(unsigned motor, unsigned percent){
     if(motor<1u || motor>4u || percent>BENCH_PULSE_MAX_PERCENT)return false;
-    if(percent==0u){bench_motor=0;bench_seq_step=0;return true;}
+    if(percent==0u){bench_motor=0;bench_seq_step=0;bench_switch_stop();return true;}
+    if(switch_enabled)return false;
     if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy() || gyro_manual_calibration_active())return false;
     bench_seq_step=0;bench_motor=motor;bench_throttle=(float)percent/100.f;
     bench_started=hal_millis();return true;
 }
 bool bench_motor_test(unsigned motor){
-    if(motor==0u){bench_motor=0;bench_seq_step=0;return true;}
+    if(motor==0u){bench_motor=0;bench_seq_step=0;bench_switch_stop();return true;}
     return bench_motor_pulse(motor,8u);
 }
 
 bool bench_motor_seq_start(void){
+    if(switch_enabled)return false;
     if(arming_state()==ARM_ARMED || !hal_usb_cdc_connected() || !dshot_is_healthy() || gyro_manual_calibration_active())return false;
     bench_seq_step=1;bench_motor=1;bench_throttle=0.08f;bench_started=hal_millis();return true;
 }
@@ -194,6 +227,9 @@ void loop_mixer_dshot(void)
             else {bench_motor=0;bench_seq_step=0;}
         }
     }
+    const bool switch_was_enabled=switch_enabled;
+    const float switch_output=bench_switch_output();
+    if(switch_was_enabled)for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)g_motors[i]=switch_output;
     dshot_write(g_motors);
     bench_output_pending=false;
     for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)
