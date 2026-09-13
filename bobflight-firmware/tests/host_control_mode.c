@@ -23,22 +23,22 @@
 
 static uint64_t now;
 static arm_state_t arm=ARM_DISARMED;
-static bool healthy=true, calibrating, override, fresh=true;
+static bool healthy=true, calibrating, override, fresh=true,usb=true,gyro_ok=true;
 static float rc[16], gyro[3], accel[3]={0,0.5f,0.8660254f};
 static float motors[4];
 static pid_axis_out_t captured;
 uint64_t hal_micros(void){return now;}
 uint32_t hal_millis(void){return (uint32_t)(now/1000u);}
-bool hal_usb_cdc_connected(void){return true;}
+bool hal_usb_cdc_connected(void){return usb;}
 arm_state_t arming_state(void){return arm;}
 void arming_disarm(void){arm=ARM_DISARMED;}
 bool arming_try_arm(void){return false;}
 void gyro_calibration_tick(void){}
 bool gyro_manual_calibration_active(void){return calibrating;}
-bool gyro_sample(float out[3]){memcpy(out,gyro,sizeof(gyro));return true;}
+bool gyro_sample(float out[3]){memcpy(out,gyro,sizeof(gyro));return gyro_ok;}
 void gyro_filter(const float in[3],float out[3]){memcpy(out,in,sizeof(gyro));}
 const float *gyro_accel_g(void){return accel;}
-bool gyro_calibrated(void){return true;}
+bool gyro_calibrated(void){return gyro_ok;}
 const float *rx_channels(void){return rc;}
 bool rx_frame_fresh(void){return fresh;}
 void rx_poll(void){}
@@ -80,6 +80,7 @@ int main(void){
     CHECK(control_mode_get()==CONTROL_MODE_ANGLE);
     CHECK(strcmp(control_mode_name(),"angle")==0);
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    CHECK(!bench_switch_start());
     CHECK(!control_mode_set(CONTROL_MODE_HORIZON));
     CHECK(!control_source_set(true));
     CHECK(control_source_set(false));
@@ -90,6 +91,39 @@ int main(void){
     CHECK(arm==ARM_DISARMED);
     puts("PASS: experimental Acro refused in flight-enabled build");return 0;
 #else
+    /* Real mixer/DShot endpoint: no gyro required, flight stays disarmed. */
+    gyro_ok=false;rc[3]=0;rc[4]=1;CHECK(!bench_switch_start());
+    rc[4]=-1;CHECK(bench_switch_start());CHECK(bench_motor_active());
+    CHECK(!bench_motor_pulse(1,8));CHECK(!bench_motor_seq_start());
+    CHECK(!mode_range_set(MODE_ARM,true,2,1751,2100));
+    tick(1000);for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+    rc[4]=1;tick(1000);CHECK(arm==ARM_DISARMED);
+    for(unsigned i=0;i<4;i++)CHECK(NEAR(motors[i],0.08f));
+    for(unsigned i=0;i<3001;i++)tick(1000);
+    for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+    tick(1000);CHECK(motors[0]==0); /* held-high cannot restart */
+    rc[4]=-1;tick(1000);rc[4]=1;tick(1000);CHECK(motors[0]>0);
+    rc[4]=-1;tick(1000);CHECK(motors[0]==0);bench_switch_stop();tick(1000);
+    for(unsigned failure=0;failure<7;failure++){
+      fresh=true;healthy=true;usb=true;calibrating=false;rc[3]=0;rc[4]=-1;
+      CHECK(bench_switch_start());tick(1000);rc[4]=1;tick(1000);CHECK(motors[0]>0);
+      if(failure==0)fresh=false;
+      if(failure==1)usb=false;
+      if(failure==2)healthy=false;
+      if(failure==3)calibrating=true;
+      if(failure==4)rc[3]=0.2f;
+      if(failure==5)rc[4]=NAN;
+      tick(failure==6?21000:1000);
+      for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+      CHECK(!bench_motor_active());
+    }
+    fresh=true;healthy=true;usb=true;calibrating=false;rc[3]=0;rc[4]=-1;
+    CHECK(bench_switch_start());tick(1000);rc[4]=1;tick(1000);
+    CHECK(bench_motor_test(0));CHECK(bench_motor_active());tick(1000);CHECK(!bench_motor_active());
+    rc[4]=-1;CHECK(bench_switch_start());
+    for(unsigned i=0;i<60001;i++)tick(1000);
+    CHECK(!bench_motor_active());
+    gyro_ok=true;
     CHECK(configure());
     CHECK(!control_mode_set((control_mode_t)99));
     CHECK(!control_mode_set((control_mode_t)-1));

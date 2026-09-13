@@ -294,6 +294,10 @@ static void handle_line(char *line)
         if (valid && control_mode_set(mode)) cmd_control_mode();
         else cli_write_str("control_mode refused: angle|acro|horizon; disarmed, motors stopped, "
                            "no calibration; acro/horizon require bench build\r\n");
+    } else if (strcmp(line,"bench_switch")==0) {
+        cli_write_str(bench_switch_start()?"AUX1 bench enabled: switch low then high; all motors 8%, 3 seconds max; session 60 seconds; bench_stop cancels\r\n":"bench_switch refused: bench build, USB, fresh RX, AUX1 low, throttle low, motors stopped, no calibration required\r\n");
+    } else if (strcmp(line,"bench_stop")==0) {
+        (void)bench_motor_test(0);cli_write_str("bench stopped\r\n");
     } else if (strcmp(line, "status") == 0) {
         cmd_status();
     } else if (strcmp(line, "receiver") == 0) {
@@ -337,6 +341,7 @@ static void handle_line(char *line)
             cli_write_str("arm refused (gyro unhealthy or failsafe)\r\n");
         }
     } else if (strcmp(line, "disarm") == 0) {
+        (void)bench_motor_test(0);
         arming_disarm();
         cli_write_str("disarmed\r\n");
     } else if (cmd_sensor_command(line)) {

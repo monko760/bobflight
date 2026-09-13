@@ -10,7 +10,7 @@
 #define BOBFLIGHT_VERSION_MAJOR 0
 #define BOBFLIGHT_VERSION_MINOR 2
 #define BOBFLIGHT_VERSION_PATCH 0
-#define BOBFLIGHT_VERSION_STRING "0.2.0-prototype-persist2"
+#define BOBFLIGHT_VERSION_STRING "0.2.0-prototype-switchbench1"
 
 #define BOBFLIGHT_PRODUCT_NAME "BobFlight"
 

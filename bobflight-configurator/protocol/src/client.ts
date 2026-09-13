@@ -44,7 +44,7 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "receiver_map TAER",
   "timing",
   "power",
-  "arm",
+  "arm", "bench_switch", "bench_stop",
   "disarm",
   "reboot",
   "calibrate_gyro", "sensors", "calibration", "calibration_cancel",

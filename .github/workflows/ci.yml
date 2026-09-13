@@ -84,6 +84,8 @@ jobs:
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
         run: node ui/scripts/test-mode-receiver.cjs
+      - name: Receiver switch bench CLI guards
+        run: node ui/scripts/test-switch-bench.cjs
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
       - name: Timing protocol tests

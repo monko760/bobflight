@@ -23,6 +23,7 @@ export function CliPage() {
 
   function parseCommand(raw: string): CliCommand | null {
     const verb = raw.trim().toLowerCase().split(/\s+/)[0] ?? "";
+    if ((verb === 'bench_switch' || verb === 'bench_stop') && raw.trim() !== verb) return null;
     if ((ALLOWED_CLI_COMMANDS as readonly string[]).includes(verb)) {
       return verb as CliCommand;
     }
@@ -43,7 +44,7 @@ export function CliPage() {
       );
       return;
     }
-    if (cmd === "arm" || cmd === "disarm" || cmd === "reboot") {
+    if (cmd === "arm" || cmd === "disarm" || cmd === "reboot" || cmd === "bench_switch") {
       setPending(cmd);
       return;
     }
@@ -70,6 +71,7 @@ export function CliPage() {
   return (
     <div className="panel">
       <h2>CLI</h2>
+      <p>Props-off switch test: remove all propellers, connect USB and ESC power, put throttle and AUX1 low, then send <code>bench_switch</code>. AUX1 high runs all four motors at 8% for up to three seconds. AUX1 low stops them. Send <code>bench_stop</code> to cancel. Receiver/USB loss or raised throttle cancels the session; it also expires after 60 seconds. Flight remains disarmed and gyro readiness is not required.</p>
       <p className="muted">
         Exact commands only: {ALLOWED_CLI_COMMANDS.join(", ")}. Arm / disarm /
         reboot always ask for confirmation.
@@ -109,9 +111,9 @@ export function CliPage() {
         <ConfirmDialog
           open
           title={`Confirm ${pending}`}
-          message={`Send the exact CLI command '${pending}'?`}
+          message={pending === 'bench_switch' ? 'Confirm all propellers are removed. This enables AUX1 to spin all four motors at 8% for up to three seconds. Keep throttle low. This is a bench test, not flight arming.' : `Send the exact CLI command '${pending}'?`}
           confirmLabel={`Send ${pending}`}
-          danger={pending === "arm" || pending === "reboot"}
+          danger={pending === "arm" || pending === "reboot" || pending === "bench_switch"}
           onCancel={() => setPending(null)}
           onConfirm={() => void send(pending)}
         />

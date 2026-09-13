@@ -41,6 +41,8 @@ export type CliCommand =
   | "power"
   | `power_config ${number} ${number} ${number} ${number} ${number} ${number} ${number}`
   | "arm"
+  | "bench_switch"
+  | "bench_stop"
   | "disarm"
   | "reboot"
   | "sensors"
