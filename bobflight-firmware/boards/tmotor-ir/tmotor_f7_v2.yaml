@@ -1,0 +1,33 @@
+# Aircraft mounting rotation and motor reordering are NOT generic target defaults.
+# Resource pins matched user Betaflight 4.4.0 TMOTORF7V2 readback on 2026-09-13.
+# MCU F722 and MPU6000 detection reported; this is not BobFlight hardware validation.
+# TMOTORF7V2 / STM32F722RE sensor-bring-up target; NOT TMOTORF7 or TMVELOXF7.
+# Factual wiring reference (no upstream implementation copied):
+# https://github.com/betaflight/unified-targets/blob/7f1abbf7844d3299ecf2ed4cca4680dc95a941b5/configs/default/TMTR-TMOTORF7V2.config
+# Multiple IMU revisions exist. This initial image expects MPU6000-class hardware.
+# HSE 8 MHz is the STM32F7X2 target default, not a crystal measurement on Robert's board.
+# No physical verification implied. Motors, ADC and flash writes are NOT ported here.
+board_id: tmotor_f7_v2
+status: bf-derived
+family: STM32F722
+hse_mhz: 8
+led0_pin: PC14
+vbat_pin: PC2
+current_pin: PC3
+chip: MPU6000
+spi_bus: 1
+cs_pin: PA4
+exti_pin: PC4
+sck_pin: PA5
+miso_pin: PA6
+mosi_pin: PA7
+gyro_align: CW0_DEG
+motors:
+  - {index: 1, pin: PB0, timer: TIM3, channel: 3}
+  - {index: 2, pin: PB1, timer: TIM3, channel: 4}
+  - {index: 3, pin: PB4, timer: TIM3, channel: 1}
+  - {index: 4, pin: PB5, timer: TIM3, channel: 2}
+serial_rx:
+  uart: 2
+  pins: {tx: PA2, rx: PA3}
+  protocol_default: CRSF

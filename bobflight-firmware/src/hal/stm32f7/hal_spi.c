@@ -1,18 +1,21 @@
 /* SPDX-License-Identifier: Apache-2.0
- * STM32F745 SPI4, RM0385: 8-bit, software NSS, bounded full-duplex transfer. */
+ * STM32F745 SPI4 / STM32F722 SPI1, RM0385/RM0431: 8-bit, software NSS, bounded full-duplex transfer. */
 #include "hal_f7_priv.h"
 #include "board/board.h"
+#include "gyro_spi_map.h"
 typedef struct { volatile uint32_t CR1, CR2, SR, DR; } spi_regs_t;
 struct hal_spi_bus { spi_regs_t *r; bool open; };
 static hal_spi_bus_t bus;
 hal_spi_bus_t *hal_spi_open_cfg(const hal_spi_cfg_t *cfg) {
     const board_t *b=board_get();
-    if (!board_mmio_permitted() || !cfg || cfg->bus_index!=4 || !cfg->hz || cfg->bits!=8) return 0;
+    uintptr_t base; uint32_t enable;
+    if (!board_mmio_permitted() || !cfg || !cfg->hz || cfg->bits!=8 || cfg->cpol>1 || cfg->cpha>1 ||
+        !gyro_spi_map(b,cfg->bus_index,&base,&enable)) return 0;
     hal_gpio_cfg_t af={HAL_GPIO_AF,HAL_GPIO_PULL_NONE,HAL_GPIO_SPEED_VERYHIGH,5};
     if (!hal_gpio_configure(b->gyro_sck_pin,&af) || !hal_gpio_configure(b->gyro_miso_pin,&af) || !hal_gpio_configure(b->gyro_mosi_pin,&af)) return 0;
     hal_gpio_init(b->gyro_cs_pin,HAL_GPIO_OUT); hal_gpio_write(b->gyro_cs_pin,true);
-    HAL_F7_RCC->APB2ENR |= 1u<<13; (void)HAL_F7_RCC->APB2ENR;
-    bus.r=(spi_regs_t*)0x40013400u; bus.r->CR1=0;
+    HAL_F7_RCC->APB2ENR |= enable; (void)HAL_F7_RCC->APB2ENR;
+    bus.r=(spi_regs_t*)base; bus.r->CR1=0;
     unsigned br=0; uint32_t clock=hal_f7_pclk(true)/2;
     while (clock>cfg->hz && br<7) {br++; clock/=2;}
     bus.r->CR2=(7u<<8)|(1u<<12); /* DS=8, RXNE at 8 bits */

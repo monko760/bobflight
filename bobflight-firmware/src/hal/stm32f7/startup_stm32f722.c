@@ -53,29 +53,38 @@ static void early_nop_busywait(volatile uint32_t n)
  * Earliest PA2 setup — crude GPIOA MMIO only (IR-assumed led0 = PA2).
  * No board_* / no HAL.
  */
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#define EARLY_LED_GPIO_BASE 0x40020800u /* GPIOC */
+#define EARLY_LED_PORT 2u
+#define EARLY_LED_PIN 14u
+#else
+#define EARLY_LED_GPIO_BASE 0x40020000u /* Kakute GPIOA */
+#define EARLY_LED_PORT 0u
+#define EARLY_LED_PIN 2u
+#endif
 static void early_pa2_setup(void)
 {
     volatile uint32_t *rcc_ahb1enr = (volatile uint32_t *)0x40023830u; /* RCC->AHB1ENR */
-    volatile uint32_t *gpioa_moder = (volatile uint32_t *)0x40020000u; /* GPIOA->MODER */
+    volatile uint32_t *gpioa_moder = (volatile uint32_t *)EARLY_LED_GPIO_BASE; /* GPIOA->MODER */
 
-    *rcc_ahb1enr |= (1u << 0); /* GPIOAEN */
+    *rcc_ahb1enr |= (1u << EARLY_LED_PORT); /* GPIOAEN */
     (void)*rcc_ahb1enr;        /* sync delay */
     /* PA2 output: MODER[5:4] = 01 */
-    *gpioa_moder = (*gpioa_moder & ~(3u << 4)) | (1u << 4);
+    *gpioa_moder = (*gpioa_moder & ~(3u << (2u*EARLY_LED_PIN))) | (1u << (2u*EARLY_LED_PIN));
 }
 
 #if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
 /** Crude PA2 short pulse (main-entry / pre-board diagnostic only). */
 void boot_pa2_crude_short_pulse(void)
 {
-    volatile uint32_t *gpioa_odr = (volatile uint32_t *)0x40020014u; /* GPIOA->ODR */
+    volatile uint32_t *gpioa_odr = (volatile uint32_t *)(EARLY_LED_GPIO_BASE+0x14u); /* GPIOA->ODR */
 
     early_pa2_setup();
-    *gpioa_odr |= (1u << 2);
+    *gpioa_odr |= (1u << EARLY_LED_PIN);
     early_nop_busywait(800000u); /* ~50–80 ms @ HSI ~16 MHz */
-    *gpioa_odr &= ~(1u << 2);
+    *gpioa_odr &= ~(1u << EARLY_LED_PIN);
     early_nop_busywait(400000u);
-    *gpioa_odr |= (1u << 2); /* leave on — known state */
+    *gpioa_odr |= (1u << EARLY_LED_PIN); /* leave on — known state */
 }
 
 #endif
@@ -89,7 +98,7 @@ void boot_pa2_crude_short_pulse(void)
  */
 void HardFault_Handler(void)
 {
-    volatile uint32_t *gpioa_odr = (volatile uint32_t *)0x40020014u;
+    volatile uint32_t *gpioa_odr = (volatile uint32_t *)(EARLY_LED_GPIO_BASE+0x14u);
     uint8_t n = g_boot_crumb;
     unsigned i;
     unsigned count;
@@ -98,9 +107,9 @@ void HardFault_Handler(void)
 
     if (n == 0u) {
         /* Special long (~1 s) — fault before main crumb was set. */
-        *gpioa_odr |= (1u << 2);
+        *gpioa_odr |= (1u << EARLY_LED_PIN);
         early_nop_busywait(10000000u);
-        *gpioa_odr &= ~(1u << 2);
+        *gpioa_odr &= ~(1u << EARLY_LED_PIN);
         early_nop_busywait(2000000u);
     } else {
         count = (unsigned)n;
@@ -108,17 +117,17 @@ void HardFault_Handler(void)
             count = 15u; /* sanity clamp */
         }
         for (i = 0; i < count; i++) {
-            *gpioa_odr |= (1u << 2);
+            *gpioa_odr |= (1u << EARLY_LED_PIN);
             early_nop_busywait(2000000u); /* ~200 ms half @ HSI */
-            *gpioa_odr &= ~(1u << 2);
+            *gpioa_odr &= ~(1u << EARLY_LED_PIN);
             early_nop_busywait(2000000u);
         }
     }
 
     for (;;) {
-        *gpioa_odr |= (1u << 2);
+        *gpioa_odr |= (1u << EARLY_LED_PIN);
         early_nop_busywait(400000u); /* ~20–25 Hz half @ HSI ~16 MHz */
-        *gpioa_odr &= ~(1u << 2);
+        *gpioa_odr &= ~(1u << EARLY_LED_PIN);
         early_nop_busywait(400000u);
     }
 }
@@ -131,18 +140,18 @@ void HardFault_Handler(void)
  */
 static void early_pa2_blink(void)
 {
-    volatile uint32_t *gpioa_odr = (volatile uint32_t *)0x40020014u; /* GPIOA->ODR */
+    volatile uint32_t *gpioa_odr = (volatile uint32_t *)(EARLY_LED_GPIO_BASE+0x14u); /* GPIOA->ODR */
     unsigned i;
 
     early_pa2_setup();
 
     for (i = 0; i < 3u; i++) {
-        *gpioa_odr |= (1u << 2);
+        *gpioa_odr |= (1u << EARLY_LED_PIN);
         early_nop_busywait(2500000u); /* ~250 ms half @ HSI ~16 MHz */
-        *gpioa_odr &= ~(1u << 2);
+        *gpioa_odr &= ~(1u << EARLY_LED_PIN);
         early_nop_busywait(2500000u);
     }
-    *gpioa_odr |= (1u << 2); /* leave on — known state after Reset prove-out */
+    *gpioa_odr |= (1u << EARLY_LED_PIN); /* leave on — known state after Reset prove-out */
 }
 #endif
 
@@ -153,13 +162,13 @@ static void early_pa2_blink(void)
  */
 static void prove_reset_pa2_forever(void)
 {
-    volatile uint32_t *gpioa_odr = (volatile uint32_t *)0x40020014u; /* GPIOA->ODR */
+    volatile uint32_t *gpioa_odr = (volatile uint32_t *)(EARLY_LED_GPIO_BASE+0x14u); /* GPIOA->ODR */
 
     early_pa2_setup();
     for (;;) {
-        *gpioa_odr |= (1u << 2);
+        *gpioa_odr |= (1u << EARLY_LED_PIN);
         early_nop_busywait(800000u); /* ~half period @ HSI ~16 MHz → ~5–10 Hz */
-        *gpioa_odr &= ~(1u << 2);
+        *gpioa_odr &= ~(1u << EARLY_LED_PIN);
         early_nop_busywait(800000u);
     }
 }

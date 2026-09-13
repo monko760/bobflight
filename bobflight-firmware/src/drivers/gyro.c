@@ -175,6 +175,14 @@ static bool probe_and_configure(const char *chip_str)
 {
     uint8_t id;
     g_kind = GYRO_CHIP_NONE;
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+    /* Initial target intentionally supports the MPU6000 revision only.
+     * Other TMOTORF7V2 revisions must not silently use another driver's setup. */
+    id=gyro_whoami_inv();
+    if(id!=0x68u)return false;
+    g_kind=GYRO_CHIP_MPU6K;
+    return configure_mpu6k();
+#endif
 
     /* MULTI / unknown: try public IDs in order MPU → ICM → BMI. */
     if (!chip_str || chip_str[0] == '\0' ||

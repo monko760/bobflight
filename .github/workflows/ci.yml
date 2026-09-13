@@ -10,7 +10,7 @@ jobs:
   firmware-host:
     strategy:
       matrix:
-        board: [dummy, kakute_f7_hdv]
+        board: [dummy, kakute_f7_hdv, tmotor_f7_v2]
     name: Firmware — host build + tests (${{ matrix.board }})
     runs-on: ubuntu-latest
     defaults:

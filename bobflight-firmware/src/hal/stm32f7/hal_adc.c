@@ -4,6 +4,7 @@
  */
 #include "hal/stm32f7/hal_f7_priv.h"
 #include "board/board.h"
+#include <string.h>
 typedef struct {
     volatile uint32_t SR, CR1, CR2, SMPR1, SMPR2, JOFR[4], HTR, LTR;
     volatile uint32_t SQR1, SQR2, SQR3, JSQR, JDR[4], DR;
@@ -18,7 +19,7 @@ static uint16_t vbat;
 void hal_power_adc_init(hal_pin_t voltage, hal_pin_t current) {
     enabled=false; phase=0;
     /* Only audited F745 PC3/IN13 and PC2/IN12 mappings are supported. */
-    if (!board_mmio_permitted() || voltage!=HAL_PIN_PACK(2,3) || current!=HAL_PIN_PACK(2,2)) return;
+    if (!board_mmio_permitted() || strcmp(board_get()->board_id,"kakute_f7_hdv") || voltage!=HAL_PIN_PACK(2,3) || current!=HAL_PIN_PACK(2,2)) return;
     hal_f7_rcc_gpio_enable(2);
     hal_f7_gpio_regs_t *gpio=hal_f7_gpio(2);
     gpio->MODER |= (3u<<6)|(3u<<4);
