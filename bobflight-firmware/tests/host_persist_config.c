@@ -31,8 +31,10 @@ const char *crsf_map(void){return map;}
 bool crsf_set_map(const char *m){if(strcmp(m,"AETR")&&strcmp(m,"TAER"))return false;map=!strcmp(m,"TAER")?"TAER":"AETR";return true;}
 void failsafe_reset_rx_link(void){freshness_resets++;}
 void rx_init(void){rx_resets++;}
-bool rx_frame_fresh(void){return false;}
-const float *rx_channels(void){static float channels[16];return channels;}
+static bool restored_fresh;
+bool rx_frame_fresh(void){return restored_fresh;}
+static float restored_rc[16];
+const float *rx_channels(void){return restored_rc;}
 bool config_store_supported(void){return supported;}
 const char *config_store_backend(void){return supported?"host_sim":"unsupported";}
 uint32_t config_store_generation(void){return generation;}
@@ -54,6 +56,7 @@ config_store_result_t config_store_save_v2(uint32_t id,const void*p,size_t n){re
 int main(void){
  persist_init();assert(!persist_load());assert(!strcmp(persist_state(),"defaults"));assert(persist_dirty());
  assert(config_set_key("rate_max_roll",777));assert(board_select_rx_uart(1));assert(crsf_set_map("TAER"));assert(mode_range_set(MODE_ANGLE,false,12,1100,1450));
+ assert(mode_range_set(MODE_ARM,true,11,1200,1500));
  assert(control_mode_set(CONTROL_MODE_ACRO));
 #if defined(BOBFLIGHT_CONTROL_SOURCE_API)
  assert(mode_range_set(MODE_ACRO,true,5,1300,1600));assert(mode_range_set(MODE_HORIZON,true,6,1600,1900));assert(control_source_set(true));
@@ -65,6 +68,12 @@ int main(void){
  aux_source=false;
 #endif
  persist_init();assert(!strcmp(map,"AETR"));assert(mode_range_get(MODE_ANGLE)->aux_channel==2);assert(persist_load());
+ assert(mode_range_get(MODE_ARM)->aux_channel==11);
+ assert(mode_range_get(MODE_ARM)->min_us==1200 && mode_range_get(MODE_ARM)->max_us==1500);
+ restored_rc[14]=-.5f;restored_rc[4]=1;bool arm_request=false;
+ assert(!mode_range_arm_input(&arm_request)); // Restore alone cannot fabricate a fresh switch.
+ restored_fresh=true;assert(mode_range_arm_input(&arm_request)&&arm_request); // Restored AUX11, not AUX1.
+ restored_rc[14]=1;assert(mode_range_arm_input(&arm_request)&&!arm_request);restored_fresh=false;
  float v;assert(config_get_key("rate_max_roll",&v)&&v==777);assert(board.rx_uart==1&&!strcmp(map,"TAER"));assert(mode_range_get(MODE_ANGLE)->aux_channel==12);assert(!persist_dirty());assert(rx_resets==1&&freshness_resets==1);assert(manual_mode==CONTROL_MODE_ACRO);
 #if defined(BOBFLIGHT_CONTROL_SOURCE_API)
  assert(aux_source);assert(mode_range_get(MODE_ACRO)->aux_channel==5);assert(mode_range_get(MODE_HORIZON)->aux_channel==6);

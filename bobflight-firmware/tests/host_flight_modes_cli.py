@@ -6,7 +6,7 @@ def run(commands):
  return p.stdout.decode()
 def snapshots(text):return re.findall(r'modes_api: 2\r?\n[\s\S]*?modes_end: 1',text)
 def verify(text):
- assert 'arm_semantics: preview' in text
+ assert 'arm_semantics: configured' in text
  assert 'semantics: bench-control' in text
  assert 'flight_enabled: 0' in text
  assert 'calibration_active: 0' in text

@@ -27,7 +27,7 @@
 #include <math.h>
 #define REQUIRE(c) do { if(!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c);exit(1); } } while(0)
 static uint64_t now;
-static bool gyro_ok=true,usb=true;
+static bool gyro_ok=true,usb=true,cal_active=false,cal_ready=true;
 static float gyro_vec[3],accel[3]={0,0,1};
 static board_t board;
 struct hal_tim_dma {unsigned index;};
@@ -59,8 +59,8 @@ static void feed(const uint8_t *b,size_t n){REQUIRE(used+n<=sizeof(wire));memcpy
 void cli_poll(void){}
 void pid_diag_update(uint64_t t,const float g[3]){(void)t;(void)g;}
 void gyro_calibration_tick(void){}
-bool gyro_manual_calibration_active(void){return false;}
-bool gyro_calibrated(void){return true;}
+bool gyro_manual_calibration_active(void){return cal_active;}
+bool gyro_calibrated(void){return cal_ready;}
 bool gyro_is_healthy(void){return gyro_ok;}
 bool gyro_sample(float g[3]){memcpy(g,gyro_vec,sizeof(gyro_vec));return gyro_ok;}
 void gyro_filter(const float in[3],float out[3]){memcpy(out,in,sizeof(gyro_vec));}
@@ -68,6 +68,9 @@ const float *gyro_accel_g(void){return accel;}
 static unsigned encode(float x){return x<=0?0:48+(unsigned)(x*1999);}
 static bool all(unsigned x){for(unsigned i=0;i<4;i++)if(accepted[i]!=x)return false;return true;}
 static void controls(float throttle,float aux){float c[16]={0};c[3]=throttle;c[4]=aux;rx_stub_set_channels(c,16,true);}
+static void controls_at(float throttle,unsigned aux,float value){
+ float c[16]={0};c[3]=throttle;c[4]=-1;c[3+aux]=value;rx_stub_set_channels(c,16,true);
+}
 static void step(void){now+=1000;scheduler_run();}
 static void setup(bool wrap){
  now=wrap?((uint64_t)UINT32_MAX-100)*1000:1000000;
@@ -90,7 +93,80 @@ static void rcframe(uint8_t f[26]){
 }
 int main(int argc,char **argv){
  REQUIRE(argc==2);const char *name=argv[1];setup(!strcmp(name,"drop-wrap"));
- if(!strcmp(name,"boot")){
+ if(!strcmp(name,"arm-aux12-output")){
+  REQUIRE(mode_range_set(MODE_ARM,true,12,1751,2100));
+  controls_at(0,12,-1);step();controls_at(0,12,1);step();REQUIRE(arming_state()==ARM_ARMED);
+  for(unsigned j=0;j<4;j++){controls_at(.4f,12,1);step();REQUIRE(arming_state()==ARM_ARMED&&all(encode(.4f)));REQUIRE(mode_range_is_active(MODE_ARM));}
+  controls_at(.4f,12,0);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+ }else if(!strcmp(name,"arm-start-active")){
+  REQUIRE(mode_range_set(MODE_ARM,true,7,1751,2100));
+  controls_at(0,7,1);step();step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+  controls_at(0,7,0);step();controls_at(0,7,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-edit-edge")||!strcmp(name,"arm-aba-edge")){
+  controls(0,-1);step();REQUIRE(mode_range_set(MODE_ARM,true,12,1751,2100));
+  unsigned aux=12;
+  if(!strcmp(name,"arm-aba-edge")){REQUIRE(mode_range_set(MODE_ARM,true,1,1751,2100));aux=1;}
+  controls_at(0,aux,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+  controls_at(0,aux,-1);step();controls_at(0,aux,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-disabled")){
+  controls(0,-1);step();REQUIRE(mode_range_set(MODE_ARM,false,1,1751,2100));
+  controls(0,-1);step();REQUIRE(mode_range_set(MODE_ARM,true,1,1751,2100));
+  controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+ }else if(!strcmp(name,"arm-stale-edge")){
+  controls(0,-1);step();age_to(251);controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+  controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-throttle-edge")){
+  controls(0,-1);step();controls(.4f,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+  controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-bench-edge")){
+  controls(0,-1);step();REQUIRE(bench_motor_pulse(1,8));controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  REQUIRE(bench_motor_test(0));step();controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+  controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-calibration-edge")){
+  controls(0,-1);step();cal_active=true;controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  cal_active=false;controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+  controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-tilt-edge")){
+  accel[1]=.5f;accel[2]=.8660254f;controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  accel[1]=0;accel[2]=1;
+  for(unsigned j=0;j<1000;j++){controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);}
+  REQUIRE(fabsf(attitude_degrees()[0])<20.f);controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-uncalibrated-edge")){
+  controls(0,-1);step();cal_ready=false;controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  cal_ready=true;controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-health-edge")){
+  controls(0,-1);step();gyro_ok=false;controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  gyro_ok=true;controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"arm-middle-range")){
+  REQUIRE(mode_range_set(MODE_ARM,true,4,1400,1600));
+  controls_at(0,4,-1);step();controls_at(0,4,0);step();REQUIRE(arming_state()==ARM_ARMED);
+  controls_at(.4f,4,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+ }else if(!strcmp(name,"arm-inclusive-boundaries")){
+  REQUIRE(mode_range_set(MODE_ARM,true,5,1000,1500));
+  controls_at(0,5,.002f);step();REQUIRE(arming_state()==ARM_DISARMED);
+  controls_at(0,5,0);step();REQUIRE(arming_state()==ARM_ARMED); //1500 inclusive
+  controls_at(0,5,.002f);step();REQUIRE(arming_state()==ARM_DISARMED);
+  controls_at(0,5,-1);step();REQUIRE(arming_state()==ARM_ARMED); //1000 inclusive
+ }else if(!strcmp(name,"arm-always-active")){
+  REQUIRE(mode_range_set(MODE_ARM,true,1,900,2100));
+  controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+ }else if(!strcmp(name,"arm-custom-land")){
+  REQUIRE(mode_range_set(MODE_ARM,true,12,1751,2100));failsafe_set_action(FAILSAFE_ACTION_LAND);
+  controls_at(0,12,-1);step();controls_at(0,12,1);step();controls_at(.8f,12,1);step();
+  age_to(251);REQUIRE(arming_state()==ARM_ARMED&&all(encode(.35f)));
+  controls_at(.8f,12,-1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+ }else if(!strcmp(name,"arm-custom-hold")){
+  REQUIRE(mode_range_set(MODE_ARM,true,12,1751,2100));failsafe_set_hold_ms(1000);
+  controls_at(0,12,-1);step();controls_at(0,12,1);step();controls_at(.4f,12,1);step();
+  age_to(251);REQUIRE(failsafe_stage()==FAILSAFE_STAGE_HOLD&&arming_state()==ARM_ARMED&&all(encode(.4f)));
+  controls_at(.4f,12,-1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+ }else if(!strcmp(name,"arm-config-independent-source")){
+  REQUIRE(control_source_set(true));REQUIRE(control_mode_set(CONTROL_MODE_ACRO));
+  REQUIRE(mode_range_set(MODE_ARM,true,9,1751,2100));controls_at(0,9,-1);step();controls_at(0,9,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"boot")){
   for(unsigned i=0;i<300;i++){step();}REQUIRE(failsafe_active());REQUIRE(arming_state()==ARM_DISARMED&&all(0));
   controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
  }else if(!strcmp(name,"drop")||!strcmp(name,"drop-wrap")){
@@ -115,6 +191,8 @@ int main(int argc,char **argv){
    for(unsigned i=0;i<2999;i++){step();}REQUIRE(arming_state()==ARM_ARMED);
    step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
    puts("LAND timer: armed at procedure+2999ms; stop at +3000ms.");
+   controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
+   controls(0,-1);step();controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
   }
  }else if(!strcmp(name,"bad-traffic")){
   start();unsigned count=rx_frame_count();uint8_t bad[26],other[4]={0xc8,2,0x14,0};rcframe(bad);bad[25]^=1;other[3]=crsf_crc8(other+2,1);

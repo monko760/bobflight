@@ -40,7 +40,7 @@ const flight=spawnSync(binary,[],{input:'control_source aux\nmode_range HORIZON 
 assert.equal(flight.status,0,flight.stderr);
 const flightSnapshots=[...flight.stdout.matchAll(/modes_api: 2\r?\n[\s\S]*?modes_end: 1\r?\n/g)].map(m=>parseModes(m[0]));
 assert.equal(flightSnapshots.length,6);
-for(const m of flightSnapshots){assert.equal(m.modes.length,4);assert.equal(m.armed,false);assert.equal(m.flightEnabled,false);assert.match(m.raw,/arm_semantics: preview/);}
+for(const m of flightSnapshots){assert.equal(m.modes.length,4);assert.equal(m.armed,false);assert.equal(m.flightEnabled,false);assert.match(m.raw,/arm_semantics: configured/);}
 assert.equal(row(flightSnapshots[2],'ACRO').enabled,true);assert.equal(row(flightSnapshots[2],'HORIZON').enabled,true);
 assert.match(flightSnapshots[0].raw,/control_source: aux/);assert.match(flightSnapshots[0].raw,/requested_mode: angle/);
 assert.match(flightSnapshots[5].raw,/control_source: manual/);assert.match(flightSnapshots[5].raw,/requested_mode: horizon/);

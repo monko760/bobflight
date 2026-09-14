@@ -1,6 +1,6 @@
 # Angle, Acro and Level (Horizon): bench development increment
 
-**Not flight-qualified. Do not arm or attempt flight using this increment.** Arming behavior, the actual AUX1 arm latch and flight-ready status remain unchanged. ARM in Modes is still a range preview, not an arming assignment. The existing accelerometer discrepancy and estimator limitations remain open.
+**Not flight-qualified. Do not arm or attempt flight using this increment.** The configured ARM range now feeds guarded arm/disarm input; the bench lockout and flight-enable restrictions remain. See [configured ARM integration](CONFIGURED-ARM.md). The existing accelerometer discrepancy and estimator limitations remain open.
 
 ## Three control modes
 
@@ -17,13 +17,13 @@ Horizon combines two **degrees/second rate demands before the existing inner PID
 - Boot: manual source, Angle. New Acro/Horizon ranges are disabled; existing ARM/ANGLE range defaults are preserved.
 - `control_mode angle|acro|horizon` sets the manual selection only. It does not turn off AUX selection. `control_source manual|aux` explicitly chooses the source and returns a full Modes snapshot.
 - With AUX enabled, exactly one matching control-mode range selects that mode. No match, stale/invalid receiver data, or more than one match falls back to Angle. Overlap is reported as a conflict, not resolved with a hidden priority.
-- The existing staged failsafe leveling override takes precedence over all modes. Failsafe timers, throttle policy and actual arming latch are unchanged.
+- The existing staged failsafe leveling override takes precedence over all modes. Failsafe timers and throttle policy are unchanged; ARM switch input follows the separately documented configured range.
 - Configuration edits/source/manual-mode changes require disarmed state, no active/pending motor output and no manual calibration. Automatic AUX resolution is evaluated in the controller task; software tests use mocked arming to exercise it.
 - In `BOBFLIGHT_FLIGHT_ENABLE=1` builds, non-Angle manual selection and AUX-source activation are refused, and resolution is forced to Angle. This patch does not enable that build option.
 
 All modes still depend on the current attitude estimator's loop-health gates, including pitch-singularity rejection. Acro/Horizon here are **not unrestricted gyro-only aerobatic flight support**. Disarmed firmware resets the PID as before; changing a Modes-tab indicator does not prove active physical PID operation. Mode transition transients and hardware response are not yet qualified.
 
-The Modes response is API 2, with four rows, explicit ARM-preview semantics, selected source, requested mode, last controller-pass effective mode and conflict indication. The UI treats these as timestamped snapshots, not live flight telemetry. Requested and effective values can differ until the next task pass or during failsafe. Old API-1 firmware remains a two-row preview in the new UI and cannot enable the new AUX source. Older configurators should reject the new API rather than misrepresent its semantics.
+The Modes response is API 2, with four rows, explicit ARM semantics (`configured` on current firmware, `preview` on older firmware), selected source, requested mode, last controller-pass effective mode and conflict indication. The UI treats these as timestamped snapshots, not live flight telemetry. Requested and effective values can differ until the next task pass or during failsafe. Old API-1 firmware remains a two-row preview in the new UI and cannot enable the new AUX source. Older configurators should reject the new API rather than misrepresent its semantics.
 
 Apply updates runtime configuration. This persistence increment adds explicit verified Save for all four mode ranges, the manual mode and manual/AUX source. See [Persistent configuration](PERSISTENCE.md) for supported hardware, installation, power-cycle tests and limitations.
 
@@ -50,7 +50,7 @@ Apply updates runtime configuration. This persistence increment adds explicit ve
 
 ## Post-update checks: props off, no motor power
 
-1. Reconnect USB. `status` must still report disarmed and bench-only. In Modes, verify ARM remains explicitly preview-only and Angle, Acro, Level (Horizon) are listed. Fresh boot source/requested mode must be Manual/Angle; Acro and Horizon ranges disabled. If these do not match, stop and verify matching firmware/UI revisions.
+1. Reconnect USB. `status` must still report disarmed and bench-only. In Modes, verify ARM displays configured-switch semantics on current firmware (preview-only on older firmware) and Angle, Acro, Level (Horizon) are listed. Fresh boot source/requested mode must be Manual/Angle; Acro and Horizon ranges disabled. If these do not match, stop and verify matching firmware/UI revisions.
 2. With a connected receiver and three-position switch on AUX2, configure **non-overlapping** enabled ranges: Angle 900–1300, Level (Horizon) 1301–1700, Acro 1701–2100. Each Apply must be confirmed by board readback. Explicitly select AUX source. Keep the separate actual arm switch low; never attempt arming. Refresh after moving the switch: requested/effective mode should follow Angle → Horizon → Acro, with a fresh receiver indication.
 3. Test fallbacks without starting motors: create overlapping ranges, refresh and verify conflict with Angle fallback; restore non-overlapping ranges. Turn off the transmitter and refresh to verify stale receiver and Angle fallback. Return the transmitter, switch source to Manual, and set `control_mode angle`. Save the desired source/manual mode and ranges, remove all board power, reconnect and verify restoration. Without Save, a reboot restores the previous stored configuration, or defaults when no valid record exists.
 

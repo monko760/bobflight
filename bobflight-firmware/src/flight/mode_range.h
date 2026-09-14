@@ -32,6 +32,10 @@ void mode_range_reset(void);
 const mode_config_t *mode_range_get(mode_id_t mode);
 bool mode_range_set(mode_id_t mode, bool enabled, uint8_t aux, uint16_t min_us, uint16_t max_us);
 bool mode_range_is_active(mode_id_t mode);
+/* Returns input validity separately from the active range match. */
+bool mode_range_arm_input(bool *active);
+/* Invalidates cached switch edges after ARM edits/reset, including A->B->A. */
+uint32_t mode_range_arm_revision(void);
 
 #ifdef __cplusplus
 }

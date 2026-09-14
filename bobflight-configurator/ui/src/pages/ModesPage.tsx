@@ -16,6 +16,8 @@ export function ModesPage(){
  const q=useConfigSnapshot('modes',parseModes),s=q.connected?q.snapshot:null;
  const [drafts,setDrafts]=useState<ModeRow[]|null>(null),[reply,setReply]=useState(''),[localError,setLocalError]=useState('');
  useEffect(()=>{if(!q.connected){setDrafts(null);setReply('');setLocalError('');}else if(s&&drafts===null)setDrafts(s.modes.map(m=>({...m})));},[s,q.connected,drafts]);
+ const configuredArm=s?.armSemantics==='configured';
+ const label=(name:ModeRow['name'])=>name==='ARM'&&configuredArm?'ARM — configured switch':labels[name];
  const editable=canEditModeRanges(s,q.connected,q.pending);
  const sourceEditable=canSelectControlSource(s,q.connected,q.pending);
  function edit(name:string,patch:Partial<ModeRow>){setReply('');setDrafts(old=>old?.map(m=>m.name===name?{...m,...patch}:m)??null);}
@@ -27,7 +29,7 @@ export function ModesPage(){
     const row=v.modes.find(r=>r.name===m.name);
     if(!row||['enabled','aux','minUs','maxUs'].some(k=>row[k as keyof ModeRow]!==m[k as keyof ModeRow]))throw Error('Mode readback does not match request');
    });
-   if(result){setDrafts(old=>old?.map(x=>x.name===m.name?{...result.modes.find(r=>r.name===m.name)!}:x)??null);setReply(`${labels[m.name]} applied and read back. Use Save to controller to retain it after power-off.`);}
+   if(result){setDrafts(old=>old?.map(x=>x.name===m.name?{...result.modes.find(r=>r.name===m.name)!}:x)??null);setReply(`${label(m.name)} applied and read back. Use Save to controller to retain it after power-off.`);}
   }catch(e){setLocalError(String(e));}
  }
  async function source(value:'manual'|'aux'){
@@ -44,7 +46,7 @@ export function ModesPage(){
   <button disabled={!q.connected||q.pending} onClick={()=>void refresh()}>Refresh modes and discard drafts</button>
   <ModeReceiver drafts={drafts??[]} editable={editable} onAssign={(name,aux)=>edit(name,{aux})}/>
   {s&&<>
-   <p className="banner-warn">{s.apiVersion===2?'Control ranges route bench setpoints only after explicit AUX selection. ARM remains preview-only.':'Legacy firmware: ARM and ANGLE are previews only; update both firmware and configurator for three-mode routing.'} {s.flightEnabled?'Firmware reports flight enabled; experimental mode-source changes are disabled here.':'Flight disabled in this firmware.'} Not flight-qualified.</p>
+   <p className="banner-warn">{s.apiVersion===2?(configuredArm?'ARM range feeds the guarded arm switch. A fresh inactive-to-active transition is required; configuration alone never arms. Control-mode ranges remain bench-only.':'Control ranges route bench setpoints only after explicit AUX selection. ARM remains preview-only.'):'Legacy firmware: ARM and ANGLE are previews only; update both firmware and configurator for three-mode routing.'} {s.flightEnabled?'Firmware reports flight enabled; experimental mode-source changes are disabled here.':'Flight disabled in this firmware.'} Not flight-qualified.</p>
    {s.source==='mock'&&<p>DEMO — no radio or motor hardware. Switch activity is not simulated.</p>}
    <p>Last snapshot: {new Date(q.loadedAt).toLocaleTimeString()}. Armed: {s.armed?'yes':'no'}; motor bench: {s.benchActive?'active':'inactive'}; calibration: {s.apiVersion===1?'not reported':s.calibrationActive?'active':'inactive'}; receiver fresh: {s.rxFresh?'yes':'no'}. These are snapshots, not continuously updated indicators.</p>
    {s.apiVersion===2&&<fieldset disabled={!sourceEditable}>
@@ -57,7 +59,7 @@ export function ModesPage(){
    {s.modeConflict&&<p role="alert" className="banner-warn">Conflicting control ranges: Angle fallback. Remove the overlap and refresh before further bench checks.</p>}
    {s.controlSource==='aux'&&!s.rxFresh&&<p className="banner-warn">Receiver data is stale or unavailable. AUX selection falls back to Angle.</p>}
    {drafts?.map(m=><fieldset key={m.name} disabled={!editable}>
-    <legend>{labels[m.name]}</legend><p>{descriptions[m.name]}</p>
+    <legend>{label(m.name)}</legend><p>{m.name==='ARM'&&configuredArm?'This range assigns the arm switch independently of manual/AUX control-mode selection. Outside the range disarms with a fresh receiver frame. Disabled or invalid input blocks arming; all existing health, low-throttle, failsafe and firmware lockout checks still apply.':descriptions[m.name]}</p>
     <p>Range matched at snapshot: {s.modes.find(r=>r.name===m.name)?.active?'yes':'no'} — not proof of arming or active physical control.</p>
     <label><input type="checkbox" checked={m.enabled} onChange={e=>edit(m.name,{enabled:e.target.checked})}/> Enabled</label>{' '}
     <label>AUX <select aria-label={`${m.name} AUX`} value={m.aux} onChange={e=>edit(m.name,{aux:Number(e.target.value)})}>{Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>AUX{i+1}</option>)}</select></label>{' '}

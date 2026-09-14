@@ -27,6 +27,7 @@ static float sample_dt=0.001f;
 static uint64_t last_pid_us;
 static bool have_pid_time;
 static bool sample_ok,arm_low_seen;
+static uint32_t arm_revision_seen;
 static unsigned bench_motor;
 /* Remain busy until a cascade has actually submitted the stop frame. */
 static bool bench_output_pending;
@@ -191,11 +192,26 @@ void loop_pid(void)
     /* Failsafe owns RX-loss disarm timing (staged); cascade keeps flying
      * level commands from failsafe_command_override() while the window runs. */
     const bool fs_flying = failsafe_command_override(sticks);
+    bool arm_requested = false;
+    const bool arm_input_valid = mode_range_arm_input(&arm_requested);
+    const uint32_t arm_revision = mode_range_arm_revision();
+    if (arm_revision != arm_revision_seen) {
+        arm_low_seen = false;
+        arm_revision_seen = arm_revision;
+        /* Normal configuration setters refuse edits while armed. */
+        if (arming_state() == ARM_ARMED) arming_disarm();
+    }
     if(!sample_ok || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
     else if(fs_flying) {arm_low_seen=false;}
-    else if(rc[4]<0.f) {arming_disarm();arm_low_seen=true;}
-    else if(rc[4]>0.5f && arm_low_seen && arming_state()!=ARM_ARMED) {
-        arm_low_seen=false; /* Every arm attempt requires a new low-to-high switch edge. */
+    /* HOLD/LAND above owns stale-link output. Otherwise an invalid input must
+     * not create the inactive witness needed for a later arm request. */
+    else if(!arm_input_valid || gyro_manual_calibration_active() ||
+            (arming_state()!=ARM_ARMED && bench_motor_active())) {
+        arming_disarm();arm_low_seen=false;
+    }
+    else if(!arm_requested) {arming_disarm();arm_low_seen=true;}
+    else if(arm_low_seen && arming_state()!=ARM_ARMED) {
+        arm_low_seen=false; /* Every attempt requires a fresh valid inactive-to-active range edge. */
         const float *angles=attitude_degrees();
         if(gyro_calibrated() && attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f && arming_try_arm())arm_low_seen=false;
     }

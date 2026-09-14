@@ -6,6 +6,7 @@ const P=require('../dist');
 const {parseModes,MockPortsModes,isControlSourceCommand,controlSourceCommand,canEditModeRanges,canSelectControlSource,ResponseCollector,BobFlightCliClient,MockTransportFactory}=P;
 async function main(){
  const mock=new MockPortsModes(),raw=mock.handle('modes',false,false),s=parseModes(raw);
+ const configured=parseModes(raw.replace('arm_semantics: preview','arm_semantics: configured'));assert.equal(configured.armSemantics,'configured');
  assert.equal(s.apiVersion,2);assert.equal(s.modes.length,4);assert.equal(s.armSemantics,'preview');assert.equal(s.requestedMode,'angle');assert.equal(s.controlSource,'manual');
  const legacy=['modes_api: 1','persistence: session','semantics: preview','flight_enabled: 0','armed: 0','bench_active: 0','rx_fresh: 0','mode: ARM,1,1,1751,2100,0','mode: ANGLE,1,2,900,2100,0','modes_end: 1',''].join('\r\n');
  const old=parseModes(legacy);assert.equal(old.apiVersion,1);assert.equal(old.modes.length,2);assert.equal(canSelectControlSource(old,true,false),false);
@@ -39,6 +40,7 @@ async function main(){
  }
  function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return [];return [tree,...nodes(tree.props?.children)];}
  function text(t){return Array.isArray(t)?t.map(text).join(''):t&&typeof t==='object'?text(t.props?.children):String(t??'');}
+ const wired=page(configured);assert.match(text(wired.tree),/ARM — configured switch/);assert.doesNotMatch(text(wired.tree),/ARM remains preview-only/);assert.match(text(wired.tree),/configuration alone never arms/);assert.deepEqual(wired.calls,[]);
  const ready=page(s);
  const storage=nodes(ready.tree).find(n=>typeof n.type==='function'&&n.type.name==='StoragePanel');
  assert(storage,'ModesPage must include the real imported StoragePanel');
