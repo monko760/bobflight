@@ -12,12 +12,25 @@ static inline bool bench_parse_pulse(const char *s, unsigned *motor, unsigned *p
     if(!s || !motor || !percent || s[0]<'1' || s[0]>'4' || s[1]!=' ')return false;
     const char *p=s+2;
     if(p[0]<'0' || p[0]>'9')return false;
-    unsigned value=(unsigned)(p[0]-'0');
-    if(p[1]!='\0') {
-        if(p[0]=='0' || p[1]<'0' || p[1]>'9' || p[2]!='\0')return false;
-        value=value*10u+(unsigned)(p[1]-'0');
+    unsigned value=0;
+    if(p[0]=='0') {
+        if(p[1]!='\0')return false;
+        value=0;
+    } else {
+        value=(unsigned)(p[0]-'0');
+        if(p[1]!='\0') {
+            if(p[1]<'0' || p[1]>'9')return false;
+            value=value*10u+(unsigned)(p[1]-'0');
+            if(p[2]!='\0') {
+                if(p[0]=='1' && p[1]=='0' && p[2]=='0' && p[3]=='\0') {
+                    value=100u;
+                } else {
+                    return false;
+                }
+            }
+        }
     }
-    if(value>35u)return false;
+    if(value>100u)return false;
     *motor=(unsigned)(s[0]-'0');*percent=value;return true;
 }
 #endif

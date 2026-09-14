@@ -7,7 +7,7 @@ export class MockMotorBench {
   reset(): void { this.rate = 300; this.until = 0; }
   get active(): boolean { return this.now() < this.until; }
   disconnect(): void { this.until = 0; }
-  get help(): string { return "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n  motor_pulse <1..4> <0..35> - one-second adjustable props-off pulse\r\n  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n  dshot [300|600] - show or switch DShot bit rate\r\n"; }
+  get help(): string { return "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n  motor_pulse <1..4> <0..100> - one-second adjustable props-off pulse\r\n  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n  dshot [300|600] - show or switch DShot bit rate\r\n"; }
   handle(line: string, armed: boolean): string | null {
     if (line === "dshot") return `dshot: ${this.rate} kbps\r\n`;
     if (line.startsWith("dshot ")) {
@@ -22,7 +22,7 @@ export class MockMotorBench {
       return "sequence running: RR FR RL FL, 1s each - watch spin direction\r\n";
     }
     if (line.startsWith("motor_pulse ")) {
-      const match = /^motor_pulse [1-4] ([0-9]|[12][0-9]|3[0-5])$/.exec(line);
+      const match = /^motor_pulse [1-4] ([0-9]|[1-9][0-9]|100)$(?![\s\S])/.exec(line);
       if (!match) return "motor pulse refused\r\n";
       const percent = Number(match[1]);
       if (percent !== 0 && (armed || !this.ready)) return "motor pulse refused\r\n";

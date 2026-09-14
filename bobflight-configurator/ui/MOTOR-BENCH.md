@@ -6,15 +6,16 @@ The older `ee46b2b` bench HEX can still perform fixed 8% tests but cannot use
 adjustable pulses. This is not a flight-qualification or hardware-validation
 result. Do not flash a development artifact as flight firmware.
 
+Older firmware advertising `<0..35>` still rejects requests above 35%; a newer UI does not bypass that firmware limit. Update firmware and configurator together to use the full range.
+
 ## Controls
 
 - Top view, front at the top: M4 front-left, M2 front-right, M3 rear-left,
-  M1 rear-right. Each slider prepares an integer **0–35% command** (initially
+  M1 rear-right. Each slider prepares an integer **0–100% command** (initially
   zero). Moving a slider does NOT send a USB command or start a motor. Press
   the explicit Test button for a one-second pulse at that selected value.
-  It is a normalized command, **not measured power or RPM**. The initial bench
-  cap is not a guarantee of harmless output; props MUST be removed.
-- `motor_pulse <1..4> <0..35>` enforces motor, percent and one-second duration
+  It is a normalized command, **not measured power or RPM**. Full command can spin motors extremely fast; props MUST be removed and the frame secured.
+- `motor_pulse <1..4> <0..100>` enforces motor, percent and one-second duration
   in firmware, not just in HTML. Zero stops ALL bench tests. Any nonzero pulse
   cancels an existing sequence and requests only the selected motor. Bad,
   non-integer, negative, extra or overflow input is refused, not clamped.
@@ -108,8 +109,8 @@ Protocol tests cover exact allowlisted commands,
 injection/invalid argument rejection, transport responses and mock time windows.
 Both new suites run in CI in addition to existing firmware/configurator checks.
 
-Firmware regression coverage includes all 144 motor/percent combinations
-(motors 1–4, integer percent 0–35), 999/1000 ms cutoff, uint32 clock wrap,
+Firmware regression coverage includes all 404 motor/percent combinations
+(motors 1–4, integer percent 0–100), 999/1000 ms cutoff, uint32 clock wrap,
 USB/health/arm gates, zero stop, sequence cancellation and legacy 8% restoration.
 A real host-CLI stdin test also covers help discovery, unavailable outputs,
 overflow/embedded-NUL line discard and clean recovery. Native timer/DMA and

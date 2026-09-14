@@ -39,8 +39,8 @@ void loop_mixer_dshot(void);
 void bg_rx_poll(void);
 void bg_cli_poll(void);
 void bg_failsafe_tick(void);
-#define BENCH_PULSE_MAX_PERCENT 35u
-/** One-second adjustable pulse; valid motor 1..4, integer percent 0..35.
+#define BENCH_PULSE_MAX_PERCENT 100u
+/** One-second adjustable pulse; valid motor 1..4, integer percent 0..100.
  * Zero stops all bench output. Does not arm flight. */
 bool bench_motor_pulse(unsigned motor, unsigned percent);
 bool bench_motor_test(unsigned motor);
