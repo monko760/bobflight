@@ -41,6 +41,9 @@ uint32_t persist_generation(void){return 7;}
 bool persist_save(void){writes++;return saved;}
 const char *persist_accel_storage(void){return "not-calibrated";}
 void gyro_calibration_info(gyro_calibration_info_t*c){memset(c,0,sizeof(*c));for(unsigned i=0;i<3;i++)c->accel_scale[i]=1.f;}
+#include "drivers/power.h"
+const power_config_t *power_config(void){static const power_config_t p={11,0,0,0,3.5f,3.3f,0};return &p;}
+unsigned dshot_speed_kbps(void){return 300;}
 #include "drivers/storage_cli.h"
 int main(void){
  config_init();board.rx_uart=BOARD_GENERATED_RX_UART;strcpy(board.board_id,"dummy");

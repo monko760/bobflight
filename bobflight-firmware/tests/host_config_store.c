@@ -19,6 +19,26 @@ bool hal_flash_write(uint32_t off,const void *src,size_t n){if(off>sizeof(flash)
  for(size_t i=0;i<n;i++){if(write_budget==0)return false;if(write_budget>0)write_budget--;assert((flash[off+i]&p[i])==p[i]);flash[off+i]&=p[i];writes++;}return true;}
 #include "../src/drivers/config_store.c"
 int main(void){
+ /* Upgrade either supported old schema; every interrupted write retains an old or new record. */
+ for(unsigned schema=1;schema<=2;schema++){
+  uint8_t old3[160],new3[160],out3[160];memset(old3,17,sizeof(old3));memset(new3,34,sizeof(new3));
+  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
+  assert((schema==1?config_store_save(19,old3,96):config_store_save_v2(19,old3,128))==CONFIG_STORE_OK);
+  assert(config_store_load_v3(19,out3,160)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==schema);
+  for(unsigned j=schema==1?96:128;j<160;j++)assert(out3[j]==0);
+  memcpy(baseline,flash,sizeof(flash));
+  for(int cut=0;cut<=224;cut++){
+   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
+   config_store_result_t r=config_store_save_v3(19,new3,160);write_budget=-1;
+   assert(config_store_load_v3(19,out3,160)==CONFIG_STORE_OK);
+   if(r==CONFIG_STORE_OK)assert(!memcmp(out3,new3,160)&&config_store_loaded_schema()==3);
+   else assert((!memcmp(out3,old3,schema==1?96:128)&&config_store_loaded_schema()==schema)||(!memcmp(out3,new3,160)&&config_store_loaded_schema()==3));
+  }
+  assert(config_store_save_v2(19,old3,128)==CONFIG_STORE_INVALID);
+  unsigned saved_erases=erases;assert(config_store_save_v3(19,new3,160)==CONFIG_STORE_OK&&erases==saved_erases);
+ }
+ puts("PASS schema1/2 -> schema3 migration, 450 write-cut cases, zero extension, no-wear save, downgrade protection");
+
  uint8_t old[128],next[128],out[128];memset(old,17,128);memset(next,34,128);memset(flash,255,sizeof(flash));
  assert(config_store_load(19,out,128)==CONFIG_STORE_EMPTY);assert(config_store_save(19,old,128)==CONFIG_STORE_OK);assert(config_store_generation()==1);assert(config_store_load(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,old,128));
  unsigned e=erases,w=writes;assert(config_store_save(19,old,128)==CONFIG_STORE_OK);assert(erases==e&&writes==w);memcpy(baseline,flash,sizeof(flash));

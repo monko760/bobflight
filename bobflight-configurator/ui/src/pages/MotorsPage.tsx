@@ -1,3 +1,4 @@
+import {StoragePanel} from "../components/StoragePanel";
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useState } from "react";
 import { useHost } from "../hooks/useHost";
@@ -53,6 +54,7 @@ export function MotorsPage() {
   const readiness = state.status?.motor_output && / ready$/.test(state.status.motor_output) ? "Ready (driver reports)" : "Unavailable / unknown";
   const rate = state.rate ? `DShot${state.rate}` : "Unknown";
   return <section className="panel motor-bench" aria-labelledby="motor-title">
+    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={state.busy||state.stopping}/>
     <div className="motor-heading">
       <div><p className="motor-eyebrow">PROPS-OFF WORKBENCH</p><h2 id="motor-title">Motor tests</h2><p className="muted">Verify wiring and rotation, one motor at a time. These controls do not arm the aircraft.</p></div>
       <button className="danger motor-stop" disabled={!state.connected} onClick={() => void controller.stop()}>{state.stopping ? "Stop requested…" : "Stop all motor tests"}</button>
@@ -97,7 +99,7 @@ export function MotorsPage() {
         <section className="motor-option-panel"><h3>DShot bit rate</h3>
           <p>Current: <strong>{rate}</strong></p>
           <div className="row">{([300, 600] as const).map(value => <button key={value} aria-pressed={state.rate === value} disabled={disabled || !capability?.dshot || state.rate === value} onClick={() => void controller.setRate(value)}>DShot{value}</button>)}</div>
-          <p className="muted">Choose only a rate your ESC supports. Changes are read back from the controller and last until reboot. Motors must be stationary before switching.</p>
+          <p className="muted">Choose only a rate your ESC supports. Changes are read back from the controller then retained after reboot with Save to controller. Motors must be stationary before switching.</p>
           {capability && !capability.dshot && <p className="banner-warn">Rate selection is unavailable on this firmware. No rate is assumed.</p>}
         </section>
         <section className="motor-option-panel"><h3>Motor pole count</h3>

@@ -1,3 +1,4 @@
+import {StoragePanel} from "../components/StoragePanel";
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useState } from "react";
 import { useSensorTelemetry } from "../hooks/useSensorTelemetry";
@@ -100,6 +101,7 @@ export function SensorsPage() {
   return (
     <div className="panel">
       <h2>Live Sensors & Calibration</h2>
+      <StoragePanel requiredScope="accel_calibration" blocked={pending||!fresh} revision={snapshot?.accel_calibrated?1:0}/>
       <p>
         Move the quad gently. Gyro measures rotation speed; acceleration includes gravity.
       </p>
@@ -361,7 +363,7 @@ export function SensorsPage() {
           </li>
           <li>
             <strong>Apply, then Save:</strong> On schema-2 Holybro firmware, successful six-face Apply
-            updates RAM; switch to CLI and run <code>save</code>, then <code>storage</code>.
+            updates RAM; use Save to controller above, then Refresh storage.
             Verify <code>flash-verified</code> calibration after a full power cycle. Gyro bias is
             recalibrated at startup, not saved. Older firmware and the T-Motor diagnostic target
             remain RAM-only. Raw measurements and incomplete candidates are never saved.

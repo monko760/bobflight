@@ -19,7 +19,7 @@ void power_init(void) {
 }
 const power_state_t *power_state(void) { return &state; }
 const power_config_t *power_config(void) { return &cfg; }
-bool power_configure(const power_config_t *c) {
+bool power_config_valid(const power_config_t *c) {
     if (!c || !isfinite(c->voltage_scale) || c->voltage_scale < 1 || c->voltage_scale > 30 ||
         !isfinite(c->current_mv_per_amp) || c->current_mv_per_amp < 0 || c->current_mv_per_amp > 1000 ||
         (c->current_mv_per_amp > 0 && c->current_mv_per_amp < 1) ||
@@ -27,6 +27,10 @@ bool power_configure(const power_config_t *c) {
         c->cells > 6 || !isfinite(c->warning_cell_v) || !isfinite(c->critical_cell_v) ||
         c->critical_cell_v < 2.5f || c->warning_cell_v > 4.3f ||
         c->critical_cell_v >= c->warning_cell_v || c->capacity_mah > 50000) return false;
+    return true;
+}
+bool power_configure(const power_config_t *c) {
+    if (!power_config_valid(c)) return false;
     cfg = *c;
     /* A scale change starts a new measurement session; do not mix units. */
     memset(&state, 0, sizeof(state)); sampled = false;
