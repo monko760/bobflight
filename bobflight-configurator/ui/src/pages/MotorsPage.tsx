@@ -72,7 +72,7 @@ export function MotorsPage() {
     </fieldset>
     <p className="motor-gate" role="status">{reason ?? (state.busy ? "Communicating with controller…" : "Ready for an explicit test request.")}</p>
     {capability && !capability.individual && <p className="banner-warn">This firmware does not advertise motor_test. Install the tested BobFlight bench firmware before using these controls.</p>}
-    <p className="muted">Sliders prepare a command only—they never start a motor by themselves. This first slider version is capped at {MAX_PULSE_PERCENT}% and requires an explicit one-second test; no continuous throttle or master slider.</p>
+    <p className="muted">Sliders prepare a command only—they never start a motor by themselves. The full 0–{MAX_PULSE_PERCENT}% command range requires an explicit one-second test. Full command can spin a motor extremely fast: remove all props and secure the frame. No continuous throttle or master slider.</p>
     {capability && !capability.pulse && <p className="banner-warn">Adjustable sliders need firmware with motor_pulse support. Your current firmware can still use the fixed 8% tests below. Updating only this configurator does not add firmware support.</p>}
     <div className="motor-workspace">
       <div className="motor-map" aria-label="Motor positions viewed from above; front at the top">
@@ -85,7 +85,7 @@ export function MotorsPage() {
             aria-valuetext={`${state.pulsePercent[motor]} percent command; not RPM or measured power`}
             disabled={!state.connected || !capability?.pulse || !state.visible || state.actionPending || state.stopping || remaining > 0 || (!!state.testLabel && !state.stationary)}
             onChange={e => controller.setPulsePercent(motor, Number(e.target.value))} />
-          <div className="motor-slider-scale"><span>0%</span><span>{MAX_PULSE_PERCENT}% bench cap</span></div>
+          <div className="motor-slider-scale"><span>0%</span><span>{MAX_PULSE_PERCENT}% command</span></div>
           {capability?.pulse
             ? <button disabled={disabled || state.pulsePercent[motor] === 0} onClick={() => void controller.pulse(motor)}>Test M{motor} · {state.pulsePercent[motor]}% · 1s</button>
             : <button disabled={disabled || !capability?.individual} onClick={() => void controller.start(motor)}>Test M{motor} · fixed 8% · 1s</button>}

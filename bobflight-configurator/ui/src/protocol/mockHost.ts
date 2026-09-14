@@ -155,7 +155,8 @@ export class MockBobFlightHost implements BobFlightHost {
   }
 
   async sendCommand(cmd: CliCommand): Promise<string> {
-    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[12][0-9]|3[0-5])|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
+    if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
+    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100)|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     if (this.status !== "connected") {

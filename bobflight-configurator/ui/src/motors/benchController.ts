@@ -5,7 +5,7 @@
 import type { BobFlightHost, CliCommand, ParsedStatus, MotorPulsePercent } from "../protocol/types";
 
 export const STATUS_MAX_AGE_MS = 1500;
-export const MAX_PULSE_PERCENT = 35;
+export const MAX_PULSE_PERCENT = 100;
 export type MotorNumber = 1 | 2 | 3 | 4;
 const zeroSliders = (): Record<MotorNumber, MotorPulsePercent> => ({ 1: 0, 2: 0, 3: 0, 4: 0 });
 export function isPulsePercent(value: number): value is MotorPulsePercent {

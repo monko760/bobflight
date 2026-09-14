@@ -19,7 +19,7 @@ class FakeHost {
   commandWait: Promise<string> | null = null;
   rate = 300;
   refuse = "";
-  help = "  motor_pulse <1..4> <0..35>\n  motor_test <0..4>\n  motor_seq - sequence\n  dshot [300|600]";
+  help = "  motor_pulse <1..4> <0..100>\n  motor_test <0..4>\n  motor_seq - sequence\n  dshot [300|600]";
   getConnectionStatus() { return this.connection; }
   async getStatus() { this.commands.push("status"); return this.statusWait ? this.statusWait : { ...this.status }; }
   async sendCommand(cmd: CliCommand) {
@@ -164,7 +164,7 @@ async function main() {
     await Promise.all([poll,rejected]);assert.equal(stopped,false);
   });
   await test("sliders start at zero and moving them sends no command", async () => {
-    const { c, host }=await setup(); assert.equal(MAX_PULSE_PERCENT,35);
+    const { c, host }=await setup(); assert.equal(MAX_PULSE_PERCENT,100);
     assert.deepEqual(c.state.pulsePercent,{1:0,2:0,3:0,4:0});
     assert.equal(c.setPulsePercent(1,8),true);assert.equal(c.setPulsePercent(2,12),true);
     assert.equal(c.setPulsePercent(4,20),true);assert.deepEqual(host.commands,[]);
@@ -172,7 +172,7 @@ async function main() {
   });
   await test("sliders reject nonintegers, nonfinite and out-of-range values without clamping", async () => {
     const { c, host }=await setup();
-    for(const percent of [-1,0.1,1.5,20.1,36,100,NaN,Infinity,-Infinity]) assert.equal(c.setPulsePercent(1,percent),false);
+    for(const percent of [-1,0.1,1.5,20.1,101,1000,NaN,Infinity,-Infinity]) assert.equal(c.setPulsePercent(1,percent),false);
     assert.equal(c.state.pulsePercent[1],0);assert.deepEqual(host.commands,[]);
   });
   await test("prepared command is sent only by explicit test, with preflight, cap and pulse lock", async () => {
@@ -218,10 +218,27 @@ async function main() {
     host.commands=[];assert.equal(c.setPulsePercent(1,20),false);await c.pulse(1);assert.deepEqual(host.commands,[]);
     await c.start(1);assert.equal(host.commands.at(-1),"motor_test 1");
   });
-  await test("35% cap is accepted, 36% refused, and only an explicit Test sends 35%", async () => {
-    const {c,host}=await setup();assert.equal(c.setPulsePercent(4,35),true);
-    assert.equal(c.setPulsePercent(4,36),false);assert.deepEqual(host.commands,[]);
-    await c.pulse(4);assert.equal(host.commands.at(-1),"motor_pulse 4 35");
+  await test("100% is accepted, 101% refused, and only an explicit Test sends 100%", async () => {
+    const {c,host}=await setup();assert.equal(c.setPulsePercent(4,100),true);
+    assert.equal(c.setPulsePercent(4,101),false);assert.deepEqual(host.commands,[]);
+    await c.pulse(4);assert.equal(host.commands.at(-1),"motor_pulse 4 100");
+  });
+  await test("all 404 motor/percent setpoints prepare without sending or starting", async () => {
+    const {c,host}=await setup();
+    for(const motor of [1,2,3,4] as const) for(let percent=0;percent<=100;percent++) {
+      assert.equal(c.setPulsePercent(motor,percent),true);
+      assert.equal(c.state.pulsePercent[motor],percent);
+    }
+    assert.deepEqual(host.commands,[]);
+  });
+  await test("old 35-percent firmware refusal never causes retry or fallback", async () => {
+    const {c,host}=await setup();
+    host.help="  motor_pulse <1..4> <0..35>";
+    host.refuse="motor_pulse 1 100";
+    assert.equal(c.setPulsePercent(1,100),true);await c.pulse(1);
+    assert.match(c.state.error,/refused/);assert.equal(c.state.propsOff,false);
+    assert.equal(c.state.pulsePercent[1],0);
+    assert.equal(host.commands.filter(x=>x.startsWith("motor_pulse")).length,1);
   });
   await test("motor poles default to 14, accept even values and persist without USB", () => {
     const map=new Map<string,string>();const storage={getItem:(k:string)=>map.get(k)??null,setItem:(k:string,v:string)=>{map.set(k,v);}};

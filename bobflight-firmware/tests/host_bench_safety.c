@@ -58,9 +58,9 @@ int main(void){
     reset();
     CHECK(!bench_motor_active());
     calibrating=true;
-    CHECK(!bench_motor_pulse(1,35));CHECK(!bench_motor_seq_start());
+    CHECK(!bench_motor_pulse(1,100));CHECK(!bench_motor_seq_start());
     CHECK(bench_motor_test(0));CHECK(bench_motor_pulse(1,0));
-    calibrating=false;CHECK(bench_motor_pulse(1,35));loop_mixer_dshot();
+    calibrating=false;CHECK(bench_motor_pulse(1,100));loop_mixer_dshot();
     calibrating=true;loop_mixer_dshot();CHECK(output(0));CHECK(!bench_motor_active());
     reset();
     /* A single test replaces a sequence and must not advance to another motor. */
@@ -96,39 +96,42 @@ int main(void){
     now=UINT32_MAX-500u;CHECK(bench_motor_test(3));loop_mixer_dshot();CHECK(output(3));
     now+=999u;loop_mixer_dshot();CHECK(output(3));
     now++;loop_mixer_dshot();CHECK(output(0));CHECK(!bench_motor_active());
-    /* Full valid range, motor numbers 1..4 -> output array indexes 0..3. */
-    CHECK(BENCH_PULSE_MAX_PERCENT==35u);
-    for(unsigned m=1;m<=4;m++)for(unsigned percent=0;percent<=35;percent++){
+    /* Full valid range 0..100%, motor numbers 1..4 -> output array indexes 0..3. */
+    CHECK(BENCH_PULSE_MAX_PERCENT==100u);
+    for(unsigned m=1;m<=4;m++)for(unsigned percent=0;percent<=100;percent++){
         reset();now=123;CHECK(bench_motor_pulse(m,percent));loop_mixer_dshot();CHECK(level(m,percent));
         now+=999;loop_mixer_dshot();CHECK(level(m,percent));
         now++;loop_mixer_dshot();CHECK(output(0));CHECK(!bench_motor_active());
         char args[16];unsigned pm=99,pp=99;snprintf(args,sizeof(args),"%u %u",m,percent);
         CHECK(bench_parse_pulse(args,&pm,&pp));CHECK(pm==m && pp==percent);
     }
+    /* Preserve checks for prior interior values 35 and 36 */
+    reset();now=100;CHECK(bench_motor_pulse(1,35));loop_mixer_dshot();CHECK(level(1,35));
+    reset();now=100;CHECK(bench_motor_pulse(1,36));loop_mixer_dshot();CHECK(level(1,36));
     reset();now=100;CHECK(bench_motor_seq_start());loop_mixer_dshot();
-    CHECK(bench_motor_pulse(4,35));loop_mixer_dshot();CHECK(level(4,35));
-    CHECK(!bench_motor_pulse(1,36));CHECK(!bench_motor_pulse(0,8));CHECK(!bench_motor_pulse(5,0));
-    CHECK(!bench_motor_pulse(1,UINT32_MAX));loop_mixer_dshot();CHECK(level(4,35));
+    CHECK(bench_motor_pulse(4,100));loop_mixer_dshot();CHECK(level(4,100));
+    CHECK(!bench_motor_pulse(1,101));CHECK(!bench_motor_pulse(0,8));CHECK(!bench_motor_pulse(5,0));
+    CHECK(!bench_motor_pulse(1,UINT32_MAX));loop_mixer_dshot();CHECK(level(4,100));
     now+=1000;loop_mixer_dshot();CHECK(output(0));now+=3000;loop_mixer_dshot();CHECK(output(0));
     /* Sequence and legacy test restore their fixed 8%, not the last slider level. */
     CHECK(bench_motor_seq_start());loop_mixer_dshot();CHECK(output(1));
-    CHECK(bench_motor_pulse(2,35));loop_mixer_dshot();CHECK(level(2,35));
+    CHECK(bench_motor_pulse(2,100));loop_mixer_dshot();CHECK(level(2,100));
     CHECK(bench_motor_test(3));loop_mixer_dshot();CHECK(output(3));
     CHECK(bench_motor_pulse(1,0));CHECK(bench_motor_active());loop_mixer_dshot();CHECK(output(0));CHECK(!bench_motor_active());
     reset();usb=false;CHECK(!bench_motor_pulse(1,1));CHECK(bench_motor_pulse(1,0));
-    reset();healthy=false;CHECK(!bench_motor_pulse(1,35));CHECK(bench_motor_pulse(1,0));
-    reset();arm=ARM_ARMED;CHECK(!bench_motor_pulse(1,35));CHECK(bench_motor_pulse(1,0));
-    reset();CHECK(bench_motor_pulse(1,35));loop_mixer_dshot();usb=false;loop_mixer_dshot();CHECK(output(0));
+    reset();healthy=false;CHECK(!bench_motor_pulse(1,100));CHECK(bench_motor_pulse(1,0));
+    reset();arm=ARM_ARMED;CHECK(!bench_motor_pulse(1,100));CHECK(bench_motor_pulse(1,0));
+    reset();CHECK(bench_motor_pulse(1,100));loop_mixer_dshot();usb=false;loop_mixer_dshot();CHECK(output(0));
     usb=true;loop_mixer_dshot();CHECK(output(0));CHECK(!bench_motor_active());
-    reset();CHECK(bench_motor_pulse(1,35));loop_mixer_dshot();healthy=false;loop_mixer_dshot();CHECK(output(0));
-    reset();now=UINT32_MAX-500u;CHECK(bench_motor_pulse(2,35));loop_mixer_dshot();CHECK(level(2,35));
-    now+=999u;loop_mixer_dshot();CHECK(level(2,35));now++;loop_mixer_dshot();CHECK(output(0));
-    const char *bad[]={"", "1", "1 ", "0 8", "5 8", "1 -1", "1 +8", "1 36", "1 035", "1 8.0", "1 1e1", "1 NaN", "1 8 extra", "1 4294967296", "1 35\nmotor_seq", "1  8", "1\t8"};
+    reset();CHECK(bench_motor_pulse(1,100));loop_mixer_dshot();healthy=false;loop_mixer_dshot();CHECK(output(0));
+    reset();now=UINT32_MAX-500u;CHECK(bench_motor_pulse(2,100));loop_mixer_dshot();CHECK(level(2,100));
+    now+=999u;loop_mixer_dshot();CHECK(level(2,100));now++;loop_mixer_dshot();CHECK(output(0));
+    const char *bad[]={"", "1", "1 ", "0 8", "5 8", "1 -1", "1 +8", "1 101", "1 035", "1 0100", "1 8.0", "1 100.0", "1 1e1", "1 NaN", "1 8 extra", "1 4294967296", "1 100\nmotor_seq", "1  8", "1\t8"};
     for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);i++){
         unsigned m=99,p=99;CHECK(!bench_parse_pulse(bad[i],&m,&p));CHECK(m==99 && p==99);
     }
     unsigned parsed;CHECK(!bench_parse_motor("4294967297",&parsed));CHECK(!bench_parse_motor("-1",&parsed));
     CHECK(bench_parse_motor("0",&parsed) && parsed==0);CHECK(bench_parse_motor("4",&parsed) && parsed==4);
-    puts("PASS: bench cancellation, stop lock, sequence gaps, disconnect, health, arm gate, rollover, adjustable 0..35% range and strict parsing");
+    puts("PASS: bench cancellation, stop lock, sequence gaps, disconnect, health, arm gate, rollover, adjustable 0..100% range and strict parsing");
     return 0;
 }

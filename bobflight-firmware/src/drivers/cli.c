@@ -81,7 +81,7 @@ static void cmd_help(void)
         "  receiver - CRSF diagnostics and 16 mapped controls\r\n"
         "  receiver_map <AETR|TAER> - apply input order; explicit save\r\n"
         "  motor_test <0..4> - 0 stop; one-second 8% props-off pulse\r\n"
-        "  motor_pulse <1..4> <0..35> - one-second adjustable props-off pulse\r\n"
+        "  motor_pulse <1..4> <0..100> - one-second adjustable props-off pulse\r\n"
         "  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n"
         "  dshot [300|600] - show or switch DShot bit rate\r\n"
         "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
