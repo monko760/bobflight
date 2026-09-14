@@ -7,7 +7,7 @@ This development increment replaces the configurator's disabled Ports/Modes plac
 ## Supported scope
 
 - **Ports:** firmware-reported USB/UART inventory, pin labels and the current CRSF receiver assignment. USB remains the fixed CLI connection. Only UARTs advertised as selectable by this firmware can be selected; GPS, MSP, VTX and general-purpose telemetry roles are not implemented.
-- **Modes:** ARM and ANGLE AUX range previews, receiver freshness, and range-match information. This build explicitly reports `semantics: preview`: edits do not alter arming or select Acro/Angle control. Existing control-loop behavior is unchanged.
+- **Modes:** Current firmware exposes four rows and `semantics: bench-control`. [Configured ARM](CONFIGURED-ARM.md) assigns guarded receiver arm/disarm input; Angle/Acro/Horizon routing remains separately restricted. The bench lockout stays enabled. Older firmware may still report preview-only semantics.
 - **Apply then Save:** UART and mode edits initially change RAM. On a supported flash backend, explicit verified Save persists them; otherwise they remain session-only. Changes are refused while armed or while bench motor activity is present. See [persistent storage, backups and installation tests](PERSISTENCE.md).
 
 Read [firmware API and mode behavior](bobflight-firmware/docs/PORTS-MODES.md) for the implemented commands, defaults and safety semantics.

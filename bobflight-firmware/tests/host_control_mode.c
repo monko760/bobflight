@@ -63,7 +63,7 @@ static bool prime(control_mode_t mode){
     bench_motor_test(0);loop_mixer_dshot();
     attitude_init();rc[4]=0;rc[3]=0.4f;
     if(!control_source_set(false) || !control_mode_set(mode))return false;
-    tick(1000);arm=ARM_ARMED;tick(1000); /* actual task primes; mock arm only */
+    tick(1000);rc[4]=1;arm=ARM_ARMED;tick(1000); /* actual task primes; mock arm only */
     return true;
 }
 static bool configure(void){
@@ -180,7 +180,7 @@ int main(void){
     CHECK(mode_range_set(MODE_ACRO,true,2,1701,2100));
     CHECK(control_source_set(true));CHECK(arm==ARM_DISARMED);
     rc[5]=1;CHECK(control_mode_requested()==CONTROL_MODE_ACRO);CHECK(!control_mode_conflict());
-    tick(1000);arm=ARM_ARMED;tick(1000);tick(1000);
+    tick(1000);rc[4]=1;arm=ARM_ARMED;tick(1000);tick(1000);
     CHECK(strcmp(control_effective_name(),"acro")==0);
     rc[5]=0;tick(1000);CHECK(strcmp(control_effective_name(),"horizon")==0);
     rc[5]=-1;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);

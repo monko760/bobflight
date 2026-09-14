@@ -2,7 +2,7 @@
 import type { CliCommand } from './types';
 export type ControlMode='angle'|'acro'|'horizon';
 export interface ModeRow {name:'ARM'|'ANGLE'|'ACRO'|'HORIZON';enabled:boolean;aux:number;minUs:number;maxUs:number;active:boolean}
-export interface ParsedModes {raw:string;apiVersion:1|2;calibrationActive:boolean;controlSource?:'manual'|'aux';requestedMode?:ControlMode;effectiveMode?:ControlMode;modeConflict?:boolean;armSemantics?:'preview'; persistence:'session'|'flash';semantics:'control'|'preview'|'bench-control';flightEnabled:boolean;armed:boolean;benchActive:boolean;rxFresh:boolean;modes:ModeRow[];channels?:number[];source?:string}
+export interface ParsedModes {raw:string;apiVersion:1|2;calibrationActive:boolean;controlSource?:'manual'|'aux';requestedMode?:ControlMode;effectiveMode?:ControlMode;modeConflict?:boolean;armSemantics?:'preview'|'configured'; persistence:'session'|'flash';semantics:'control'|'preview'|'bench-control';flightEnabled:boolean;armed:boolean;benchActive:boolean;rxFresh:boolean;modes:ModeRow[];channels?:number[];source?:string}
 export function uint(s:string,lo:number,hi:number):number {if(!/^(0|[1-9]\d*)$/.test(s))throw Error('Expected canonical unsigned integer');const n=Number(s);if(!Number.isSafeInteger(n)||n<lo||n>hi)throw Error('Integer outside supported bounds');return n;}
 export function bit(s:string):boolean {return uint(s,0,1)===1;}
 export function snapshot(raw:string,kind:string,rowKey:string,versions:number[]=[1]):{fields:Map<string,string>;rows:string[];apiVersion:number} {
@@ -32,7 +32,8 @@ export function parseModes(raw:string):ParsedModes {
   const source=field(f,'control_source'),requested=field(f,'requested_mode'),effective=field(f,'effective_mode');
   if(source!=='manual'&&source!=='aux')throw Error('Invalid control source');
   if(!['angle','acro','horizon'].includes(requested)||!['angle','acro','horizon'].includes(effective))throw Error('Invalid control mode');
-  if(field(f,'arm_semantics')!=='preview')throw Error('ARM must remain preview-only');
+  const armSemantics=field(f,'arm_semantics');
+  if(armSemantics!=='preview'&&armSemantics!=='configured')throw Error('Unsupported ARM semantics');
   const conflict=bit(field(f,'mode_conflict')),matches=modes.filter(m=>m.name!=='ARM'&&m.active);
   if(conflict!==(source==='aux'&&matches.length>1))throw Error('Contradictory conflict indication');
   if(source==='aux'){
@@ -40,7 +41,7 @@ export function parseModes(raw:string):ParsedModes {
    if(requested!==expected)throw Error('Contradictory AUX selection');
   }
   if(base.flightEnabled&&(source!=='manual'||requested!=='angle'||effective!=='angle'))throw Error('Experimental routing cannot be flight-enabled');
-  return {...base,calibrationActive:bit(field(f,'calibration_active')),armSemantics:'preview',controlSource:source,requestedMode:requested as ControlMode,effectiveMode:effective as ControlMode,modeConflict:conflict};
+  return {...base,calibrationActive:bit(field(f,'calibration_active')),armSemantics,controlSource:source,requestedMode:requested as ControlMode,effectiveMode:effective as ControlMode,modeConflict:conflict};
  }
  return base;
 }

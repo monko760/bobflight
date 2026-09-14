@@ -6,6 +6,7 @@
 #include "sched/tasks.h"
 #include "drivers/bench_parse.h"
 #include "flight/arming.h"
+#include "flight/mode_range.h"
 #include "flight/failsafe.h"
 #include "drivers/gyro.h"
 #include "drivers/dshot.h"
@@ -53,10 +54,11 @@ void mixer_update(const pid_axis_out_t *p,float t,float out[4]){(void)p;for(unsi
 static void sample(uint64_t delta,bool pid){now+=delta;loop_gyro();loop_filter();if(pid)loop_pid();}
 static void prime(void){
  arm=ARM_DISARMED;rc[3]=0;rc[4]=0;sample(1000,true);
- arm=ARM_ARMED;rc[3]=0.4f;sample(1000,true);
+ arm=ARM_ARMED;rc[4]=1;rc[3]=0.4f;sample(1000,true);
  updates=sets=0;
 }
 int main(void){
+ mode_range_init(); /* Match production initialization before mocking armed state. */
  /* Exercise the real task entrypoints with fake arm/PID endpoints, not flight. */
  for(unsigned div=1;div<=8;div*=2){
   prime();CHECK(updates==0);

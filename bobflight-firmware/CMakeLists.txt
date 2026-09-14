@@ -150,7 +150,11 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_failsafe_integration_test m)
   foreach(fs_case boot drop drop-wrap bad-traffic repeated-valid land-throttle
       land-disarm land-timer gyro-fault nonfinite-sensor scheduler-gap
-      dma-failure direct-disarm usb-flight-path)
+      dma-failure direct-disarm usb-flight-path
+      arm-aux12-output arm-start-active arm-edit-edge arm-aba-edge arm-disabled
+      arm-stale-edge arm-throttle-edge arm-bench-edge arm-calibration-edge arm-health-edge
+      arm-middle-range arm-inclusive-boundaries arm-always-active arm-custom-land
+      arm-custom-hold arm-config-independent-source arm-tilt-edge arm-uncalibrated-edge)
     add_test(NAME failsafe_integration_${fs_case}
       COMMAND bobflight_failsafe_integration_test ${fs_case})
   endforeach()

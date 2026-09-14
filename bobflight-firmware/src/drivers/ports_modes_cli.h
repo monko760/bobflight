@@ -95,7 +95,7 @@ static void cmd_modes(void)
     int n=snprintf(buf,sizeof(buf),
         "modes_api: 2\r\npersistence: %s\r\nsemantics: bench-control\r\n"
         "flight_enabled: %u\r\narmed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nrx_fresh: %u\r\n"
-        "arm_semantics: preview\r\ncontrol_source: %s\r\nrequested_mode: %s\r\neffective_mode: %s\r\nmode_conflict: %u\r\n",
+        "arm_semantics: configured\r\ncontrol_source: %s\r\nrequested_mode: %s\r\neffective_mode: %s\r\nmode_conflict: %u\r\n",
         strcmp(persist_backend(), "flash")==0?"flash":"session",flight_enabled,arming_state()==ARM_ARMED,bench_motor_active(),gyro_manual_calibration_active(),rx_frame_fresh(),
         control_source_name(),control_requested_name(),control_effective_name(),control_mode_conflict());
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("modes response failed: overflow\r\n");return;}
