@@ -176,12 +176,12 @@ static void cmd_receiver(void)
         "age_ms: %ld\r\nframes: %lu\r\ncrc_errors: %lu\r\nstream_resets: %lu\r\n"
         "armed: %u\r\nbench_active: %u\r\nfailsafe: %u\r\n"
         "channels: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\r\n"
-        "persistence: ram\r\nreceiver_end: 1\r\n",
+        "persistence: %s\r\nreceiver_end: 1\r\n",
         b?b->rx_uart:0,crsf_map(),link,age==UINT32_MAX?-1L:(long)(age>2147483647u?2147483647u:age),
         (unsigned long)rx_frame_count(),(unsigned long)crsf_crc_errors(),(unsigned long)crsf_stream_resets(),
         arming_state()==ARM_ARMED,bench_motor_active(),failsafe_active(),
         (double)ch[0],(double)ch[1],(double)ch[2],(double)ch[3],(double)ch[4],(double)ch[5],(double)ch[6],(double)ch[7],
-        (double)ch[8],(double)ch[9],(double)ch[10],(double)ch[11],(double)ch[12],(double)ch[13],(double)ch[14],(double)ch[15]);
+        (double)ch[8],(double)ch[9],(double)ch[10],(double)ch[11],(double)ch[12],(double)ch[13],(double)ch[14],(double)ch[15],persist_backend());
     cli_write_str(buf);
 }
 
@@ -196,11 +196,11 @@ static void cmd_power(void)
         "voltage: %.3f\r\namps: %.3f\r\nconsumed_mah: %.3f\r\nwarning: %s\r\n"
         "voltage_scale: %.6g\r\ncurrent_mv_per_amp: %.6g\r\ncurrent_offset_mv: %.6g\r\n"
         "cells: %u\r\nwarning_cell_v: %.3f\r\ncritical_cell_v: %.3f\r\ncapacity_mah: %u\r\n"
-        "raw_voltage: %u\r\nraw_current: %u\r\npersistence: ram\r\npower_end: 1\r\n",
+        "raw_voltage: %u\r\nraw_current: %u\r\npersistence: %s\r\npower_end: 1\r\n",
         s->valid,s->present,s->current_valid,s->consumption_valid,(double)s->voltage,(double)s->amps,
         (double)s->consumed_mah,power_warning(),(double)c->voltage_scale,(double)c->current_mv_per_amp,
         (double)c->current_offset_mv,c->cells,(double)c->warning_cell_v,(double)c->critical_cell_v,
-        c->capacity_mah,s->raw_voltage,s->raw_current);
+        c->capacity_mah,s->raw_voltage,s->raw_current,persist_backend());
     cli_write_str(buf);
 }
 

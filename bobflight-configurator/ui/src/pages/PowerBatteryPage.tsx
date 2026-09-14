@@ -1,3 +1,4 @@
+import {StoragePanel} from "../components/StoragePanel";
 import { useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
 import { parsePower, powerKeys, type PowerReading, type PowerKey } from "../protocol/power";
@@ -58,7 +59,7 @@ export function PowerBatteryPage() {
       const next = parsePower(await host.sendCommand(command));
       if (epoch !== generation.current) return;
       setReading(next); setDraft(Object.fromEntries(powerKeys.map(k => [k, String(next[k])])) as Record<PowerKey, string>);
-      setMessage("Applied and read back. Settings reset at reboot; consumption starts a new session.");
+      setMessage("Applied and read back. Save to controller to retain settings; consumption starts a new session.");
     } catch (e) { if (epoch === generation.current) setError(String(e)); }
     finally { inFlight.current = false; setBusy(false); }
   }
@@ -69,6 +70,7 @@ export function PowerBatteryPage() {
   const remaining = reading && reading.capacity_mah > 0 ? Math.max(0, 100*(1-reading.consumed_mah/reading.capacity_mah)) : undefined;
   return <div className="panel">
     <h2>Power &amp; Battery</h2>
+    <StoragePanel requiredScope="power" blocked={busy||!draft||!reading||powerKeys.some(k=>!draft[k].trim()||Number(draft[k])!==reading[k])}/>
     <p className="muted">Voltage source: onboard ADC. Current source: external analog sensor, when fitted and configured.</p>
     {!connected && <p role="status">Connect your board to read battery data.</p>}
     {error && <p className="fail" role="alert">{error}</p>}
@@ -86,13 +88,13 @@ export function PowerBatteryPage() {
     <p className="muted">Cell voltage is the pack average. Current and capacity require a calibrated sensor measuring the whole pack. ESC telemetry is not supported yet.</p>
     <h3>Battery and sensor settings</h3>
     <p className="muted">Current scale uses mV per amp. For a Betaflight scale such as 275, the corresponding starting value is 27.5 mV/A. Verify the scale for your actual sensor.</p>
-    <p>Settings apply until reboot. Flash storage is not implemented. Warnings appear here; they do not stop motors or activate receiver failsafe.</p>
+    <p>Apply settings, then Save to controller to retain them after reboot. Warnings appear here; they do not stop motors or activate receiver failsafe.</p>
     <fieldset disabled={!connected || !draft || busy} style={{border:0,padding:0}}>
       {powerKeys.map(key => <label key={key} style={{display:"block",marginBottom:"0.7rem"}}>
         {labels[key]}<input type="number" step={key === "cells" || key === "capacity_mah" ? "1" : "any"} min="0" value={draft?.[key] ?? ""}
           onChange={e => setDraft(old => old ? {...old,[key]:e.target.value} : old)} style={{display:"block"}} />
       </label>)}
-      <button onClick={() => void apply()} disabled={busy}>Apply to board until reboot</button>
+      <button onClick={() => void apply()} disabled={busy}>Apply to board</button>
     </fieldset>
     <h3>Voltage calibration</h3>
     <p>With the pack connected and props removed, measure pack voltage with a multimeter. Enter it below to calculate the divider, then apply the settings above.</p>

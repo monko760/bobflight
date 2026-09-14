@@ -11,7 +11,7 @@ export function parsePower(raw: string): PowerReading {
     const match = /^([a-z_]+): (.+)$/.exec(line.trim());
     if (match) fields[match[1]] = match[2];
   }
-  if (fields.power_api !== "1" || fields.power_end !== "1" || fields.persistence !== "ram") {
+  if (fields.power_api !== "1" || fields.power_end !== "1" || !["ram","flash","host_sim","unsupported"].includes(fields.persistence)) {
     throw new Error("No complete battery response. Install firmware with Power & Battery support.");
   }
   const result: Record<string, number | string> = { warning: fields.warning };

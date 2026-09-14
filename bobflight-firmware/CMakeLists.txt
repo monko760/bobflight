@@ -191,7 +191,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME gyro_spi_map COMMAND bobflight_gyro_spi_map_test)
   add_test(NAME tmotor_target_contract COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_tmotor_target.py ${CMAKE_SOURCE_DIR} ${CMAKE_C_COMPILER})
-  add_executable(bobflight_persist_config_test tests/host_persist_config.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c)
+  add_executable(bobflight_persist_config_test tests/host_persist_config.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
   target_link_libraries(bobflight_persist_config_test m)
   add_test(NAME persist_config COMMAND bobflight_persist_config_test)
   add_executable(bobflight_storage_cli_test src/flight/config.c tests/host_storage_cli.c)

@@ -21,6 +21,7 @@ void power_sample(uint32_t now, uint16_t voltage, uint16_t current);
 void power_expire(uint32_t now);
 const power_state_t *power_state(void);
 const power_config_t *power_config(void);
+bool power_config_valid(const power_config_t *cfg);
 bool power_configure(const power_config_t *cfg);
 const char *power_warning(void);
 #endif

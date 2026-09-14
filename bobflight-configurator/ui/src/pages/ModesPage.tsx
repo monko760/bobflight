@@ -39,7 +39,7 @@ export function ModesPage(){
  }
  async function refresh(){const result=await q.execute();if(result){setDrafts(result.modes.map(m=>({...m})));setReply('');setLocalError('');}}
  return <div className="panel">
-  <h2>Modes</h2><StoragePanel revision={q.loadedAt} blocked={q.pending}/>
+  <h2>Modes</h2><StoragePanel revision={q.loadedAt} blocked={q.pending||!s||!drafts||drafts.some(m=>{const r=s.modes.find(x=>x.name===m.name);return !r||m.enabled!==r.enabled||m.aux!==r.aux||m.minUs!==r.minUs||m.maxUs!==r.maxUs;})}/>
   <p>Angle, Acro and Level (Horizon) — experimental bench development. Remove propellers and keep motor power disconnected.</p>
   {!q.connected&&<p className="banner-warn">Connect your board first. No current board state is available.</p>}
   {(q.error||localError)&&<p role="alert" className="fail">{q.error||localError}</p>}

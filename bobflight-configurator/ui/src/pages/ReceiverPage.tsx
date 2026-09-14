@@ -1,3 +1,4 @@
+import {StoragePanel} from "../components/StoragePanel";
 import { useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
 import type { CliCommand } from "../protocol";
@@ -55,8 +56,10 @@ export function ReceiverPage() {
       if(/refused|failed|unknown|unsupported/i.test(response))throw new Error(response.trim());
       const next=parseReceiver(await host.sendCommand("receiver"));
       if(id!==epoch.current)return;
-      accept(next);setUart(ports.includes(next.uart as typeof ports[number])?next.uart:6);setMap(next.map);
-      setReply("Applied and read back from the board. Verify every control again. Settings reset at reboot.");
+      accept(next);
+      if(cmd.startsWith("receiver_uart "))setUart(next.uart);
+      if(cmd.startsWith("receiver_map "))setMap(next.map);
+      setReply("Applied and read back from the board. Verify every control again. Click Save to controller to retain the applied settings after reboot.");
     });
     chain.current=job;
     try{await job;}catch(e){if(id===epoch.current)setError(String(e));}
@@ -64,6 +67,7 @@ export function ReceiverPage() {
   }
   return <div className="panel">
     <h2>Receiver · CRSF</h2>
+    <StoragePanel requiredScope="receiver_map" blocked={pending||!reading||uart!==reading.uart||map!==reading.map}/>
     <p>Remove propellers, power the receiver and turn on your transmitter. Move one control at a time and check its name and direction below.</p>
     <p role="status" className={live?"":"banner-warn"}>
       {!connected?"Connect your board first.":!responding?"No current receiver diagnostics.":linkLabels[reading!.link]}
@@ -80,13 +84,13 @@ export function ReceiverPage() {
     <label>Receiver TX wire connects to board pad <select value={uart??6} disabled={!editable} onChange={e=>setUart(Number(e.target.value))}>
       {ports.map(n=><option key={n} value={n}>R{n} / UART{n}</option>)}
     </select></label>{" "}
-    <button disabled={!editable||uart===null} onClick={()=>void apply(`receiver_uart ${uart}` as CliCommand)}>Apply UART until reboot</button>
+    <button disabled={!editable||uart===null} onClick={()=>void apply(`receiver_uart ${uart}` as CliCommand)}>Apply UART</button>
     <p><label>Transmitter channel order <select value={map??"AETR"} disabled={!editable} onChange={e=>setMap(e.target.value as ReceiverMap)}>
       <option value="AETR">AETR — Roll, Pitch, Throttle, Yaw</option>
       <option value="TAER">TAER — Throttle, Roll, Pitch, Yaw</option>
     </select></label>{" "}
-    <button disabled={!editable||map===null} onClick={()=>void apply(`receiver_map ${map}` as CliCommand)}>Apply mapping until reboot</button></p>
-    <p className="muted">CRSF uses 420000 baud. Defaults: UART6 and AETR. Configure the receiver’s serial output as CRSF. Settings changes require disarmed motors and no active bench test. Flash persistence is not available yet.</p>
+    <button disabled={!editable||map===null} onClick={()=>void apply(`receiver_map ${map}` as CliCommand)}>Apply mapping</button></p>
+    <p className="muted">CRSF uses 420000 baud. Defaults: UART6 and AETR. Configure the receiver’s serial output as CRSF. Settings changes require disarmed motors and no active bench test. Apply each change, then Save to controller to keep it after reboot.</p>
     {reply&&<p role="status">{reply}</p>}
     <h3>Mapped controls</h3>
     {!live&&<p>Channel bars are hidden until valid, recent RC frames arrive. Last-known positions are not live controls.</p>}

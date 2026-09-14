@@ -18,7 +18,17 @@ $build = Join-Path $source ("build-bootloader-" + $Board)
 $cache = Join-Path $build 'CMakeCache.txt'
 if (Test-Path -LiteralPath $cache) {
     $old = Get-Content -LiteralPath $cache -Raw
-    if ($old -notmatch ("(?m)^BOBFLIGHT_BOARD:STRING=" + $Board + "\r?$") -or $old -notmatch ("(?m)^BOBFLIGHT_TARGET_MCU:STRING=" + $mcu + "\r?$") -or $old -notmatch '(?m)^CMAKE_C_COMPILER:[^=]+=[^\r\n]*arm-none-eabi-gcc(?:\.exe)?\r?$') {
+    # Toolchains may set the compiler as a normal variable, absent from the cache.
+    # Verify CMake's recorded compiler in that case; do not waive the identity check.
+    $compilerOK = $old -match '(?m)^CMAKE_C_COMPILER:[^=]+=[^\r\n]*arm-none-eabi-gcc(?:\.exe)?\r?$'
+    if (!$compilerOK -and $old -notmatch '(?m)^CMAKE_C_COMPILER:') {
+        $recorded = @(Get-ChildItem -LiteralPath (Join-Path $build 'CMakeFiles') -Filter CMakeCCompiler.cmake -Recurse -File | ForEach-Object {
+            $metadata = Get-Content -LiteralPath $_.FullName -Raw
+            if ($metadata -match 'set\(CMAKE_C_COMPILER "([^"]+)"\)') { $Matches[1] }
+        } | Select-Object -Unique)
+        $compilerOK = $recorded.Count -eq 1 -and $recorded[0] -match '[/\\]arm-none-eabi-gcc(?:\.exe)?$'
+    }
+    if ($old -notmatch ("(?m)^BOBFLIGHT_BOARD:STRING=" + $Board + "\r?$") -or $old -notmatch ("(?m)^BOBFLIGHT_TARGET_MCU:STRING=" + $mcu + "\r?$") -or !$compilerOK) {
         throw 'Build cache belongs to a different target/compiler. Preserve it and use a fresh worktree; do not force the build.'
     }
 }
@@ -33,6 +43,6 @@ $hex = Join-Path $repo ("bobflight-" + $Board + "-bootloader-bench.hex")
 Copy-Item -LiteralPath (Join-Path $build 'bobflight.hex') -Destination $hex -Force
 Get-FileHash -Algorithm SHA256 -LiteralPath $hex
 Write-Host 'BUILD CHECKPOINT: bench image built and bounds/version checked. No controller was flashed.'
-$expectedVersion = if ($Board -eq 'kakute_f7_hdv') { '0.2.0-prototype-switchbench2-bl1-calstore1-piddiag2' } else { '0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1-piddiag2' }
+$expectedVersion = if ($Board -eq 'kakute_f7_hdv') { '0.2.0-prototype-switchbench2-bl1-calstore2-piddiag2' } else { '0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore2-piddiag2' }
 Write-Host "Expected firmware: $expectedVersion; board $Board."
 Write-Host 'Read BOOTLOADER.md before installation. Test Holybro first; arming remains disabled.'

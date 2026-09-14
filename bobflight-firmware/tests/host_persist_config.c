@@ -12,7 +12,7 @@
 static board_t board={.board_id="kakute_f7_hdv",.rx_uart=6};
 static bool armed,bench,calibrating,supported=true,exists,write_failure,read_failure;
 static unsigned saves,rx_resets,freshness_resets,generation;
-static uint8_t image[128];static size_t image_len;static uint32_t image_board;
+static uint8_t image[160];static size_t image_len;static uint32_t image_board;
 const board_t *board_get(void){return &board;}
 bool board_select_rx_uart(unsigned u){if(!(u==1||u==2||u==3||u==4||u==6||u==7))return false;board.rx_uart=u;return true;}
 arm_state_t arming_state(void){return armed?ARM_ARMED:ARM_DISARMED;}
@@ -45,16 +45,29 @@ void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
 uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
 bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding){return binding==gyro_accel_calibration_binding()&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
-uint32_t config_store_loaded_schema(void){return image_len==96?1:2;}
+uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:3;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
  if(image_len==96&&n==128&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,96);return CONFIG_STORE_OK;}
  return config_store_load(id,p,n);
 }
 config_store_result_t config_store_save_v2(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
+#include "drivers/power.h"
+#include "hal/hal.h"
+void hal_power_adc_init(hal_pin_t a,hal_pin_t b){(void)a;(void)b;}
+bool hal_power_adc_poll(uint16_t *a,uint16_t *b){(void)a;(void)b;return false;}
+uint32_t hal_millis(void){return 0;}
+static unsigned speed=300;static bool speed_failure;
+unsigned dshot_speed_kbps(void){return speed;}
+bool dshot_set_speed_kbps(unsigned v){if(speed_failure)return false;speed=v;return true;}
+config_store_result_t config_store_load_v3(uint32_t id,void*p,size_t n){
+ if((image_len==96||image_len==128)&&n==160&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,image_len);return CONFIG_STORE_OK;}
+ return config_store_load(id,p,n);
+}
+config_store_result_t config_store_save_v3(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
 /* Include the codec to validate the on-wire byte format, not just happy-path APIs. */
 #include "../src/drivers/persist.c"
 int main(void){
- persist_init();assert(!persist_load());assert(!strcmp(persist_state(),"defaults"));assert(persist_dirty());
+ power_init();persist_init();assert(!persist_load());assert(!strcmp(persist_state(),"defaults"));assert(persist_dirty());
  assert(config_set_key("rate_max_roll",777));assert(board_select_rx_uart(1));assert(crsf_set_map("TAER"));assert(mode_range_set(MODE_ANGLE,false,12,1100,1450));
  assert(mode_range_set(MODE_ARM,true,11,1200,1500));
  assert(control_mode_set(CONTROL_MODE_ACRO));
@@ -100,7 +113,7 @@ int main(void){
  }
 #if defined(BOBFLIGHT_CONTROL_SOURCE_API)
  /* Upgrade a two-row schema-1 payload while preserving old settings and new defaults. */
- memcpy(image,good,PAYLOAD_BYTES);image[53]=2;image[54]=0;image[55]=1;memset(image+72,0,PAYLOAD_BYTES-72);
+ memcpy(image,good,PAYLOAD_BYTES);image[53]=2;image[54]=0;image[55]=1;memset(image+72,0,128-72);
  persist_init();assert(persist_load());assert(mode_range_get(MODE_ANGLE)->aux_channel==12);assert(!mode_range_get(MODE_ACRO)->enabled);assert(!mode_range_get(MODE_HORIZON)->enabled);assert(persist_dirty());
 #endif
  memcpy(image,good,PAYLOAD_BYTES);read_failure=true;assert(!persist_load());read_failure=false;assert(persist_load());supported=false;assert(!persist_save());assert(!strcmp(persist_state(),"unsupported"));
@@ -132,9 +145,21 @@ int main(void){
  memcpy(image,good,PAYLOAD_BYTES);for(unsigned i=0;i<3;i++){float b=.25f;uint32_t bits;memcpy(&bits,&b,4);put32(image+104+i*4,bits);}assert(!persist_load());
  memcpy(image,good,PAYLOAD_BYTES);assert(persist_load());
  /* A valid schema1 record migrates ALL existing settings, but never invents calibration. */
+ image_len=128;memset(&cal,0,sizeof(cal));persist_init();assert(persist_load());assert(cal.accel_valid&&cal.accel_bias[2]==solved.accel_bias[2]&&persist_dirty());assert(persist_save());
  image_len=96;persist_init();assert(persist_load());assert(!cal.accel_valid);assert(persist_dirty());
  assert(config_get_key("rate_max_roll",&v)&&v==777);assert(!strcmp(map,"TAER"));
- assert(persist_save());assert(image_len==128&&!image[96]&&!persist_dirty());
+ assert(persist_save());assert(image_len==160&&!image[96]&&!persist_dirty());
+ /* All power fields + DShot survive cold resets; malformed values mutate neither. */
+ const power_config_t desired={12.25f,27.5f,100.f,6,3.6f,3.2f,1500};
+ assert(power_configure(&desired));speed=600;assert(persist_dirty());assert(persist_save());
+ power_init();speed=300;persist_init();assert(persist_load());
+ assert(power_config()->voltage_scale==12.25f&&power_config()->current_mv_per_amp==27.5f&&power_config()->current_offset_mv==100.f);
+ assert(power_config()->cells==6&&power_config()->warning_cell_v==3.6f&&power_config()->critical_cell_v==3.2f&&power_config()->capacity_mah==1500&&speed==600);
+ assert(!power_state()->valid&&!power_state()->consumption_valid&&!persist_dirty());
+ memcpy(good,image,PAYLOAD_BYTES);
+ for(unsigned offset=128;offset<160;offset+=4){memcpy(image,good,PAYLOAD_BYTES);put32(image+offset,0x7fc00000u);power_init();speed=300;assert(!persist_load());assert(power_config()->voltage_scale==11.f&&speed==300);}
+ memcpy(image,good,PAYLOAD_BYTES);speed_failure=true;assert(!persist_load());assert(power_config()->voltage_scale==11.f);speed_failure=false;assert(persist_load());
+ image_len=128;power_init();speed=300;persist_init();assert(persist_load());assert(power_config()->voltage_scale==11.f&&speed==300&&persist_dirty());assert(persist_save());
  supported=false;cal.accel_valid=true;before=saves;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"ram-only"));
  puts("PASS actual six-face solver -> codec -> cold restore, candidate/gyro exclusion, atomic malformed-cal refusal, dirty/save/error state, old-settings migration and unsupported target");
  puts("PASS codec offsets, validated atomic restore, repeated boot-init roundtrip, dirty tracking, guards, failed writes/readback, malformed fields and scope");

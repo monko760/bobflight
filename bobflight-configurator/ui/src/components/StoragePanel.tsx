@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
 import {parseStorage,parseConfigurationExport,canSaveStorage,type StorageSnapshot} from '../protocol';
-export function StoragePanel({revision=0,blocked=false}:{revision?:number;blocked?:boolean}){
+export function StoragePanel({revision=0,blocked=false,requiredScope}:{revision?:number;blocked?:boolean;requiredScope?:string}){
  const {host,connectionStatus,postFlashGate}=useHost();
  const connected=connectionStatus==='connected'&&!postFlashGate;
  const [state,setState]=useState<StorageSnapshot|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
@@ -14,7 +14,7 @@ export function StoragePanel({revision=0,blocked=false}:{revision?:number;blocke
   try{
    if(action==='save'){
     const before=parseStorage(await host.sendCommand('storage'));if(!live(id))return;
-    if(!canSaveStorage(before,true,false))throw Error('Flash save unavailable: disarm, stop motors, and connect supported firmware.');
+    if(!canSaveStorage(before,true,false)||(requiredScope&&!before.scope.split(",").includes(requiredScope)))throw Error('Flash save unavailable: disarm, stop motors, and connect supported firmware.');
     await host.saveSettings();if(!live(id))return;
    }
    if(action==='diff'||action==='dump'){
@@ -31,15 +31,19 @@ export function StoragePanel({revision=0,blocked=false}:{revision?:number;blocke
   finally{if(id===epoch.current){busy.current=false;setPending(false);}}
  }
  useEffect(()=>{++epoch.current;busy.current=false;setState(null);setError('');setMessage('');setPending(false);if(connected&&!blocked)void run('refresh');return()=>{++epoch.current;};},[host,connected,revision,blocked]);
- const canSave=canSaveStorage(state,connected,pending||blocked);
+ const supported=!requiredScope||!!state?.scope.split(",").includes(requiredScope);
+ const canSave=supported&&canSaveStorage(state,connected,pending||blocked);
  return <section aria-label="Controller storage" className="panel">
   <h3>Controller storage & backups</h3>
-  <p>Apply edits first, then Save to controller. Save includes PID/rates, receiver UART/map, all mode ranges, manual mode and manual/AUX selection. Schema 2 also saves validated, applied accelerometer calibration. Gyro bias, power settings and DShot speed are excluded. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
+  <p>Apply edits first, then Save to controller. The connected firmware reports which settings it can save below. Schema 3 includes power settings and DShot speed as well as PID/rates, receiver, modes and applied accelerometer calibration. Gyro bias is measured again at startup. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
   <p>{!connected?'Disconnected — no current storage status.':state?`${state.backend==='flash'?'Controller flash':state.backend==='host_sim'?'Host simulation — not physical storage':'Unsupported'} · ${state.state} · ${state.dirty?'unsaved changes':'no unsaved changes'} · generation ${state.generation}`:'Storage capability not yet verified.'}</p>
   <button disabled={!canSave} onClick={()=>void run('save')}>Save to controller</button>{' '}
   <button disabled={!connected||pending||blocked} onClick={()=>void run('refresh')}>Refresh storage</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('diff')}>Export changes</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('dump')}>Export full configuration</button>
+  {state&&<p>Saved scope: {state.scope.replaceAll("_"," ").replaceAll(",",", ")}</p>}
+  {blocked&&<p>Apply all edits on this page before saving, and finish any active operation.</p>}
+  {!supported&&state&&<p role="alert">Update firmware to save this page’s settings. This firmware does not advertise that capability.</p>}
   {error&&<p role="alert">{error} Legacy/demo firmware cannot confirm controller flash storage. Do not treat an old “saved” reply as permanent storage.</p>}
   {message&&<p role="status">{message}</p>}
  </section>;

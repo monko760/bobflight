@@ -3,13 +3,13 @@ import { useHost } from "../hooks/useHost";
 
 /**
  * Failsafe page — FW-locked surface.
- * Read-only failsafe status (ok|ACTIVE) plus fixed 500 ms RX-loss note.
+ * Read-only failsafe status (ok|ACTIVE) with no editable configuration.
  * Procedure/timeout editors honest-disabled — FW has no failsafe config API.
  * No invented BF failsafe commands.
  */
 
 const FAILSAFE_DISABLED_REASON =
-  "FW has no failsafe config API yet (fixed 500 ms RX-loss disarm).";
+  "Firmware does not expose editable failsafe settings.";
 
 const DISABLED_SECTIONS = [
   { id: "procedure", title: "Failsafe procedure", action: "Edit procedure…" },
@@ -45,8 +45,8 @@ export function FailsafePage() {
     <div className="panel">
       <h2>Failsafe</h2>
       <p className="muted">
-        RX-loss failsafe is fixed in firmware: after 500 ms without RX, the FC
-        disarms and zeros motors. No configurable procedure or timeout API yet.
+        Failsafe behavior is defined in firmware. This page displays status only;
+        procedure and timeout settings are not editable or saved here.
       </p>
 
       {!connected && (
@@ -74,7 +74,7 @@ export function FailsafePage() {
           </div>
         </div>
         <p className="muted" style={{ marginTop: "0.75rem" }}>
-          Fixed behavior: 500 ms RX-loss → disarm / motors zero.
+          Status is a snapshot; refresh to read the controller again.
         </p>
       </section>
 

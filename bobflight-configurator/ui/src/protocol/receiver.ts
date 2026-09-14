@@ -11,7 +11,7 @@ export function parseReceiver(raw: string): ReceiverReading {
     const match=/^([a-z_]+): (.+)$/.exec(line.trim());
     if(match) fields[match[1]]=match[2];
   }
-  if (fields.receiver_api!=="1" || fields.receiver_end!=="1" || fields.protocol!=="CRSF" || fields.persistence!=="ram") {
+  if (fields.receiver_api!=="1" || fields.receiver_end!=="1" || fields.protocol!=="CRSF" || !["ram","flash","host_sim","unsupported"].includes(fields.persistence)) {
     throw new Error("Receiver diagnostics unavailable. Update the firmware to match this configurator.");
   }
   if (!["AETR","TAER"].includes(fields.map) || !["unbound","waiting","live","lost"].includes(fields.link)) throw new Error("Invalid receiver response.");
