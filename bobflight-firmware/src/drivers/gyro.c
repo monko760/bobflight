@@ -454,6 +454,19 @@ void gyro_host_inject_dps(const float dps[3], bool healthy)
 }
 #endif
 
+/* Gyro-only readiness for rate (Acro) control: calibrated, healthy, live samples.
+ * Deliberately excludes accelerometer qualification. */
+bool gyro_rate_ready(void) {
+#if BOBFLIGHT_ACCEL_BENCH_RELAXED
+    return false;
+#else
+    if(!gyro_calibrated() || !g_healthy || !g_diag.config_ok ||
+       !g_diag.sample_seq || (uint32_t)(hal_millis()-g_diag.sample_ms)>100u)return false;
+    for(unsigned i=0;i<3;i++){if(!isfinite(g_latest[i]))return false;}
+    return true;
+#endif
+}
+
 void gyro_begin_calibration(void){sc_begin_gyro(&g_cal,hal_millis());}
 bool gyro_calibrated(void){return g_cal.gyro_valid && g_cal.mode!=SC_GYRO && !g_manual;}
 bool gyro_flight_ready(void) {

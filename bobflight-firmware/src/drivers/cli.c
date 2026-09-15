@@ -107,7 +107,7 @@ static void cmd_status(void)
     const float *rates=gyro_latest_dps(),*acc=gyro_accel_g(),*angles=attitude_degrees(),*rc=rx_channels();
     const char *flight="bench-only";
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    flight="angle-prototype";
+    flight="closed-loop-development";
 #endif
     const char *irlab = "none";
     if (b && b->ir_verified) {

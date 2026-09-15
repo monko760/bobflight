@@ -55,6 +55,8 @@ void gyro_begin_calibration(void);
 bool gyro_calibrated(void);
 /** Stricter pre-arm readiness: gyro bias alone does not validate gravity. */
 bool gyro_flight_ready(void);
+/* Gyro-only readiness (rate/Acro control); no accelerometer requirement. */
+bool gyro_rate_ready(void);
 const float *gyro_accel_g(void);
 const float *gyro_latest_dps(void);
 bool gyro_sample(float dps[3]);

@@ -16,7 +16,10 @@
 static bool g_gyro_live = true;
 static float g_rc[16];
 static bool cal_ready=true;
+static bool rate_only_req=false, rate_ready=true;
 bool gyro_flight_ready(void){return cal_ready;}
+bool gyro_rate_ready(void){return rate_ready;}
+bool arming_rate_only(void){return rate_only_req;}
 bool rx_frame_fresh(void){return true;}
 
 bool gyro_is_healthy(void)
@@ -56,6 +59,19 @@ int main(void)
     failsafe_note_rx_frame(0u);
     failsafe_tick(0u);
     if (failsafe_active()) return fail("frame at timestamp zero must be valid");
+#if defined(BOBFLIGHT_MCU)
+    /* Mode-aware sensor gate: Acro is gyro-only. */
+    g_rc[3] = 0.0f;
+    rate_only_req = true; cal_ready = false; rate_ready = true;
+    if (!arming_try_arm()) return fail("rate-only arming must not require qualified accel");
+    if (arming_state() != ARM_ARMED) return fail("rate-only arm did not arm");
+    arming_disarm();
+    rate_ready = false;
+    if (arming_try_arm()) return fail("rate-only arming must require live gyro samples");
+    rate_ready = true;
+    rate_only_req = false; /* leveled mode falls back to the full gravity gate */
+    if (arming_try_arm()) return fail("leveled mode must still require qualified accel");
+#endif
 
 #if defined(BOBFLIGHT_MCU)
     /* Even with otherwise valid gyro/RX, independent gyro calibration must

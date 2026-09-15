@@ -25,6 +25,8 @@ static uint64_t now;
 static arm_state_t arm=ARM_DISARMED;
 static bool healthy=true, calibrating, override, fresh=true,usb=true,gyro_ok=true;
 static float rc[16], gyro[3], accel[3]={0,0.5f,0.8660254f};
+static bool gyro_flight=true;
+bool gyro_flight_ready(void){return gyro_flight;}
 static float motors[4];
 static pid_axis_out_t captured;
 uint64_t hal_micros(void){return now;}
@@ -85,11 +87,23 @@ int main(void){
     CHECK(!control_source_set(true));
     CHECK(control_source_set(false));
     CHECK(control_mode_requested()==CONTROL_MODE_ANGLE);
-    CHECK(!control_mode_set(CONTROL_MODE_ACRO));
-    CHECK(control_mode_get()==CONTROL_MODE_ANGLE);
+    CHECK(control_mode_set(CONTROL_MODE_ACRO));   /* gyro-only mode now selectable */
+    CHECK(control_mode_requested()==CONTROL_MODE_ACRO);
+    CHECK(control_mode_get()==CONTROL_MODE_ACRO);
     CHECK(control_mode_set(CONTROL_MODE_ANGLE));
     CHECK(arm==ARM_DISARMED);
-    puts("PASS: experimental Acro refused in flight-enabled build");return 0;
+    /* Staged failsafe must fail closed when leveling is unqualified,
+     * and keep flying level output when gravity is qualified. */
+    now+=1000;loop_gyro();loop_filter();loop_pid();loop_mixer_dshot();
+    arm=ARM_ARMED;rc[3]=0.4f;rc[4]=1;
+    gyro_flight=false;override=true;
+    now+=1000;loop_gyro();loop_filter();loop_pid();loop_mixer_dshot();
+    CHECK(arm==ARM_DISARMED);
+    arm=ARM_ARMED;gyro_flight=true;
+    now+=1000;loop_gyro();loop_filter();loop_pid();loop_mixer_dshot();
+    CHECK(arm==ARM_ARMED);
+    override=false;
+    puts("PASS: flight profile routes manual Angle/Acro, refuses Horizon, failsafe fails closed without qualified leveling");return 0;
 #else
     /* Real mixer/DShot endpoint: no gyro required, flight stays disarmed. */
     gyro_ok=false;rc[3]=0;rc[4]=1;CHECK(!bench_switch_start());
