@@ -45,9 +45,6 @@ static bool decode(const uint8_t *p,float values[12],mode_config_t modes[MODE_CO
 #if !defined(BOBFLIGHT_CONTROL_SOURCE_API)
  if(p[54])return false;
 #endif
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
- if(p[54]||p[55])return false;
-#endif
  if(p[53]==2&&p[54])return false;
  for(unsigned i=56u+p[53]*8u;i<BASE_BYTES;i++)if(p[i])return false;
  for(unsigned i=0;i<MODE_COUNT;i++){
@@ -106,7 +103,8 @@ bool persist_load(void){
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);load_error=r!=CONFIG_STORE_EMPTY&&r!=CONFIG_STORE_UNSUPPORTED;return false;}
  if(config_store_loaded_schema()<3){const power_config_t defaults={11.f,0.f,0.f,0,3.5f,3.3f,0};power_encode(p,&defaults,300);}
  float values[12];mode_config_t modes[MODE_COUNT];if(!decode(p,values,modes)||!accel_decode_valid(p)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
- /* All validation precedes mutation. Known board UART setters cannot fail after validation. */
+ /* Reject unsupported control selection before mutating other settings */
+ if(p[55]!=CONTROL_MODE_ANGLE&&p[55]!=CONTROL_MODE_ACRO&&p[55]!=CONTROL_MODE_HORIZON){last_error="invalid_settings";load_error=true;return false;}
  if(get32(p+156)!=dshot_speed_kbps()&&!dshot_set_speed_kbps(get32(p+156))){last_error="dshot_restore_failed";load_error=true;return false;}
  power_config_t restored_power=power_decode(p);
  (void)power_configure(&restored_power);
@@ -115,19 +113,30 @@ bool persist_load(void){
  for(unsigned i=0;i<12;i++)(void)config_set_key(keys[i],values[i]);
  (void)crsf_set_map(p[52]?"TAER":"AETR");
  for(unsigned i=0;i<MODE_COUNT;i++)(void)mode_range_set((mode_id_t)i,modes[i].enabled,modes[i].aux_channel,modes[i].min_us,modes[i].max_us);
- (void)control_mode_set((control_mode_t)p[55]);
+ if(!control_mode_set((control_mode_t)p[55])){last_error="control_mode_failed";load_error=true;return false;}
+ bool legacy_aux_migrated=false;
 #if defined(BOBFLIGHT_CONTROL_SOURCE_API)
- (void)control_source_set(p[54]!=0);
+ if(p[54]!=0){
+  if(!control_source_set(true)){
+   if(!control_source_set(false)){last_error="control_source_failed";load_error=true;return false;}
+   legacy_aux_migrated=true;
+  }
+ }else{
+  if(!control_source_set(false)){last_error="control_source_failed";load_error=true;return false;}
+ }
 #endif
  {float bias[3]={0},scale[3]={1,1,1};if(p[96])accel_values(p,bias,scale);gyro_restore_accel_calibration(bias,scale,p[96]!=0);}
- migration_pending=config_store_loaded_schema()!=3;
- failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;last_error="none";return true;
+ migration_pending=config_store_loaded_schema()!=3||legacy_aux_migrated;
+ failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;
+ if(legacy_aux_migrated){
+  last_error="migrated_control_source_manual";
+ }else{
+  last_error="none";
+ }
+ return true;
 }
 bool persist_save(void){
  if(!safe_to_change())return false;
-#if defined(BOBFLIGHT_MCU) && defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
- last_error="flight_build_unqualified";return false;
-#endif
  uint8_t p[PAYLOAD_BYTES];if(!encode(p)){last_error="invalid_settings";return false;}
  config_store_result_t r=config_store_save_v3(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);return false;}
@@ -139,7 +148,12 @@ bool persist_dirty(void){uint8_t now[PAYLOAD_BYTES];return migration_pending||!h
 const char *persist_last_error(void){return last_error;}
 const char *persist_backend(void){return config_store_backend();}
 uint32_t persist_generation(void){return config_store_generation();}
-const char *persist_state(void){if(!config_store_supported())return "unsupported";if(load_error||(strcmp(last_error,"none")&&strcmp(last_error,"empty")))return "error";if(!have_saved)return "defaults";return persist_dirty()?"dirty":"saved";}
+const char *persist_state(void){
+ if(!config_store_supported())return "unsupported";
+ if(load_error||(strcmp(last_error,"none")&&strcmp(last_error,"empty")&&strcmp(last_error,"migrated_control_source_manual")))return "error";
+ if(!have_saved)return "defaults";
+ return persist_dirty()?"dirty":"saved";
+}
 
 const char *persist_accel_storage(void){
  if(!config_store_supported())return "ram-only";

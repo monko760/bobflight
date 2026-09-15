@@ -15,7 +15,7 @@ export function parseStorage(raw:string):StorageSnapshot {
  return {backend:backend as StorageSnapshot['backend'],schema:Number(field(f,'schema')) as 1|2|3,state:state as StorageSnapshot['state'],dirty,generation:uint(field(f,'generation'),0,4294967295),lastError,scope:field(f,'scope'),armed:bit(field(f,'armed')),benchActive:bit(field(f,'bench_active')),calibrationActive:bit(field(f,'calibration_active')),flightEnabled:bit(field(f,'flight_enabled'))};
 }
 export function isVerifiedFlashSave(raw:string):boolean{return raw.trim()==='saved: flash verified';}
-export function canSaveStorage(s:StorageSnapshot|null,connected:boolean,pending:boolean):boolean{return connected&&!pending&&!!s&&s.backend==='flash'&&!s.armed&&!s.benchActive&&!s.calibrationActive&&!s.flightEnabled;}
+export function canSaveStorage(s:StorageSnapshot|null,connected:boolean,pending:boolean):boolean{return connected&&!pending&&!!s&&s.backend==='flash'&&!s.armed&&!s.benchActive&&!s.calibrationActive;}
 export interface ConfigurationExport {raw:string;board:string;firmware:string;kind:'diff'|'dump';modeCount:2|4}
 export function parseConfigurationExport(raw:string,kind:'diff'|'dump'):ConfigurationExport {
  const lines=raw.trim().split(/\r?\n/);if(raw.length>1800||lines[0]!=='# bobflight_config: 1'||lines.at(-1)!=='# config_end: 1')throw Error('Incomplete or oversized configuration export');

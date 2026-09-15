@@ -1,5 +1,7 @@
 # Angle, Acro and Level (Horizon): bench development increment
 
+> **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
+
 **Not flight-qualified. Do not arm or attempt flight using this increment.** The configured ARM range now feeds guarded arm/disarm input; the bench lockout and flight-enable restrictions remain. See [configured ARM integration](CONFIGURED-ARM.md). The existing accelerometer discrepancy and estimator limitations remain open.
 
 ## Three control modes

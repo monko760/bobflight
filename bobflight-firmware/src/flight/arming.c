@@ -38,7 +38,7 @@ bool arming_try_arm(void)
     return false;
 #endif
 #if defined(BOBFLIGHT_MCU)
-    /* Bench image cannot arm; the explicit closed-loop profile opts in. */
+    /* Sensor-only targets (no motor backend) cannot arm. */
 #if !defined(BOBFLIGHT_FLIGHT_ENABLE) || !BOBFLIGHT_FLIGHT_ENABLE
     return false;
 #endif

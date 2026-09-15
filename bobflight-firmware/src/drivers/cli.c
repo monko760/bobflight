@@ -58,8 +58,8 @@ static void cmd_help(void)
     cli_write_str(
         "BobFlight CLI\r\n"
         "  help     - this text\r\n"
-        "  control_mode [angle|acro|horizon] - experimental bench routing (explicit save available)\r\n"
-        "  control_source <manual|aux> - experimental bench AUX mode routing\r\n"
+        "  control_mode [angle|acro|horizon] - manual control mode selection (explicit save available)\r\n"
+        "  control_source manual - manual-only mode routing (aux retired)\r\n"
         "  version  - firmware version\r\n"
         "  status   - MCU, loops, arm, gyro, board\r\n"
         "  ports    - UART/USB pin mapping & roles\r\n"
@@ -293,7 +293,7 @@ static void handle_line(char *line)
         const char *arg=line+15;
         bool valid=strcmp(arg,"manual")==0 || strcmp(arg,"aux")==0;
         if(valid && control_source_set(strcmp(arg,"aux")==0))cmd_modes();
-        else cli_write_str("control_source refused: manual|aux; disarm, stop motors and calibration; aux requires bench build\r\n");
+        else cli_write_str("control_source refused: manual only; disarm, stop motors and calibration\r\n");
     } else if (strcmp(line, "control_mode") == 0) {
         cmd_control_mode();
     } else if (strncmp(line, "control_mode ", 13) == 0) {

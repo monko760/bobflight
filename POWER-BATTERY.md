@@ -1,5 +1,7 @@
 # Power & Battery bench implementation
 
+> **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
+
 Based on main ddfa3ef (merged failsafe, DShot, bench safeguards and motor configurator).
 Branch: feature/power-battery. Flight arming remains OFF in the supplied build.
 

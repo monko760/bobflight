@@ -10,7 +10,7 @@ for expected in ['"tmotor_f7_v2"','"STM32F722"','BOARD_GENERATED_HSE_MHZ      8u
  assert expected in header,expected
 # Pin facts are zero-based GPIO numbers. Human motor labels and AUX are one-based.
 for number,pin in [(1,0),(2,1),(3,4),(4,5)]:assert re.search(rf'BOARD_GENERATED_MOTOR{number}_PIN\s+HAL_PIN_PACK\(1u, {pin}u\)',header)
-cm=(root/'CMakeLists.txt').read_text();assert 'TMOTORF7V2 requires the STM32F722' in cm;assert 'BOBFLIGHT_TARGET_MCU_STM32F722=1' in cm;assert 'BOBFLIGHT_FLIGHT_ENABLE OR BOBFLIGHT_ACCEL_BENCH_RELAXED' in cm
+cm=(root/'CMakeLists.txt').read_text();assert 'TMOTORF7V2 requires the STM32F722' in cm;assert 'BOBFLIGHT_TARGET_MCU_STM32F722=1' in cm;assert 'BOBFLIGHT_FLIGHT_ENABLE is retired' in cm;assert 'if(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv")' in cm
 spi=(root/'src/hal/stm32f7/hal_spi.c').read_text();assert 'gyro_spi_map(b,cfg->bus_index,&base,&enable)' in spi
 motor=(root/'src/hal/stm32f7/hal_tim_dma.c').read_text();assert 'strcmp(b->board_id,"kakute_f7_hdv")' in motor
 adc=(root/'src/hal/stm32f7/hal_adc.c').read_text();assert 'strcmp(board_get()->board_id,"kakute_f7_hdv")' in adc

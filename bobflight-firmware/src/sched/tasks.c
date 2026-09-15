@@ -49,10 +49,6 @@ static const char *switch_blocker(const float *rc){
     return NULL;
 }
 bool bench_switch_start(void){
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    switch_status="flight-build-refused";
-    return false;
-#else
     const float *rc=rx_channels();
     if(bench_motor_active())return false; /* Do not overwrite an active session's state. */
     const char *reason=switch_blocker(rc);
@@ -61,7 +57,6 @@ bool bench_switch_start(void){
     switch_enabled=true;switch_low=false;switch_running=false;
     switch_status="waiting-for-low";
     switch_session_ms=switch_tick_ms=hal_millis();return true;
-#endif
 }
 static float bench_switch_output(void){
     if(!switch_enabled)return 0.f;
@@ -96,36 +91,23 @@ static bool control_edit_allowed(void) {
 bool control_mode_set(control_mode_t mode) {
     if (mode != CONTROL_MODE_ANGLE && mode != CONTROL_MODE_ACRO && mode != CONTROL_MODE_HORIZON) return false;
     if (!control_edit_allowed()) return false;
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    /* Gyro-only Acro is selectable in the closed-loop profile; Horizon's
-     * blended leveling still requires a qualified accelerometer. */
-    if (mode == CONTROL_MODE_HORIZON) return false;
-#endif
+    /* All three modes are selectable; the mode-aware arming gate and staged
+     * failsafe enforce accel/gravity requirements at arm time. */
     g_control_mode = mode;
     return true;
 }
 bool control_source_set(bool use_aux) {
     if (!control_edit_allowed()) return false;
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+    /* Manual selection only: AUX mode-range routing is retired. */
     if (use_aux) return false;
-#endif
     g_control_aux = use_aux;
     return true;
 }
 static control_mode_t resolve_control_mode(bool *conflict) {
+    /* Manual selection only: the mode ranges below ARM are configuration
+     * storage, never runtime routing. */
     if(conflict)*conflict=false;
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    return g_control_mode; /* Manual selection only; AUX routing stays bench-only. */
-#else
-    if(!g_control_aux)return g_control_mode;
-    const bool angle=mode_range_is_active(MODE_ANGLE);
-    const bool acro=mode_range_is_active(MODE_ACRO);
-    const bool horizon=mode_range_is_active(MODE_HORIZON);
-    const unsigned matches=(unsigned)angle+(unsigned)acro+(unsigned)horizon;
-    if(conflict)*conflict=matches>1u;
-    if(matches!=1u)return CONTROL_MODE_ANGLE; /* no match, stale RX, or overlap */
-    return acro ? CONTROL_MODE_ACRO : horizon ? CONTROL_MODE_HORIZON : CONTROL_MODE_ANGLE;
-#endif
+    return g_control_mode;
 }
 control_mode_t control_mode_requested(void) { return resolve_control_mode(NULL); }
 bool arming_rate_only(void) { return control_mode_requested()==CONTROL_MODE_ACRO; }
@@ -206,11 +188,9 @@ void loop_pid(void)
     }
     if(!sample_ok || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
     else if(fs_flying) {arm_low_seen=false;
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
         /* Staged HOLD/LAND fly leveled output: without qualified gravity that
          * would be fake leveling, so fail closed and stop the motors. */
         if(!gyro_flight_ready()) arming_disarm();
-#endif
     }
     /* HOLD/LAND above owns stale-link output. Otherwise an invalid input must
      * not create the inactive witness needed for a later arm request. */

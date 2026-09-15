@@ -1,5 +1,7 @@
 # Zero-output rate/PID diagnostics — freshness fix
 
+> **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
+
 This is a RAM-only Acro/rate shadow PID. Its correction never enters the motor mixer or motor drivers. It does not arm, stabilize a craft or establish flight readiness. Production PID equations, gyro driver/filter, scheduler, arming, failsafe, persistence and bootloader implementation are unchanged. Accelerometer qualification and Angle/Horizon diagnostics are separate work; six-face calibration is not required for this gyro-only check.
 
 ## What changes in piddiag2

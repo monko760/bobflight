@@ -58,7 +58,6 @@ void mixer_update(const pid_axis_out_t *p,float t,float out[4]){
 }
 #define CHECK(c) do{if(!(c)){fprintf(stderr,"control mode FAIL %d: %s\n",__LINE__,#c);return 1;}}while(0)
 #define NEAR(a,b) (fabsf((a)-(b))<0.000002f)
-#if !defined(BOBFLIGHT_FLIGHT_ENABLE) || !BOBFLIGHT_FLIGHT_ENABLE
 static void tick(uint64_t dt){now+=dt;loop_gyro();loop_filter();loop_pid();loop_mixer_dshot();}
 static bool prime(control_mode_t mode){
     arm=ARM_DISARMED;override=false;healthy=true;calibrating=false;
@@ -76,35 +75,30 @@ static bool configure(void){
         config_set_key("pid_roll_i",0) && config_set_key("pid_pitch_i",0) && config_set_key("pid_yaw_i",0) &&
         config_set_key("pid_roll_d",0) && config_set_key("pid_pitch_d",0);
 }
-#endif
 int main(void){
     mode_range_init();
     CHECK(control_mode_get()==CONTROL_MODE_ANGLE);
     CHECK(strcmp(control_mode_name(),"angle")==0);
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    CHECK(!bench_switch_start());
-    CHECK(!control_mode_set(CONTROL_MODE_HORIZON));
+    /* Unified build: manual selection only; all three modes selectable and the
+     * mode-aware arming gate enforces sensor requirements at arm time. */
     CHECK(!control_source_set(true));
     CHECK(control_source_set(false));
     CHECK(control_mode_requested()==CONTROL_MODE_ANGLE);
-    CHECK(control_mode_set(CONTROL_MODE_ACRO));   /* gyro-only mode now selectable */
+    CHECK(control_mode_set(CONTROL_MODE_ACRO));
     CHECK(control_mode_requested()==CONTROL_MODE_ACRO);
     CHECK(control_mode_get()==CONTROL_MODE_ACRO);
+    CHECK(control_mode_set(CONTROL_MODE_HORIZON));
+    CHECK(control_mode_requested()==CONTROL_MODE_HORIZON);
     CHECK(control_mode_set(CONTROL_MODE_ANGLE));
     CHECK(arm==ARM_DISARMED);
     /* Staged failsafe must fail closed when leveling is unqualified,
      * and keep flying level output when gravity is qualified. */
-    now+=1000;loop_gyro();loop_filter();loop_pid();loop_mixer_dshot();
     arm=ARM_ARMED;rc[3]=0.4f;rc[4]=1;
-    gyro_flight=false;override=true;
-    now+=1000;loop_gyro();loop_filter();loop_pid();loop_mixer_dshot();
+    gyro_flight=false;override=true;tick(1000);
     CHECK(arm==ARM_DISARMED);
-    arm=ARM_ARMED;gyro_flight=true;
-    now+=1000;loop_gyro();loop_filter();loop_pid();loop_mixer_dshot();
+    arm=ARM_ARMED;gyro_flight=true;tick(1000);
     CHECK(arm==ARM_ARMED);
-    override=false;
-    puts("PASS: flight profile routes manual Angle/Acro, refuses Horizon, failsafe fails closed without qualified leveling");return 0;
-#else
+    override=false;arm=ARM_DISARMED;
     /* Real mixer/DShot endpoint: no gyro required, flight stays disarmed. */
     gyro_ok=false;rc[3]=0;rc[4]=1;CHECK(!bench_switch_start());
     rc[4]=-1;CHECK(bench_switch_start());CHECK(bench_motor_active());
@@ -187,28 +181,18 @@ int main(void){
     CHECK(strcmp(control_effective_name(),"angle")==0);
     CHECK(NEAR(captured.roll,0.001f*(desired[0]-gyro[0])));override=false;
 
-    /* AUX switch routing is explicit opt-in, ARM range is not an arm assignment. */
+    /* Mode ranges are configuration storage only; routing is manual. */
     arm=ARM_DISARMED;loop_mixer_dshot();
     CHECK(mode_range_set(MODE_ANGLE,true,2,900,1300));
     CHECK(mode_range_set(MODE_HORIZON,true,2,1301,1700));
     CHECK(mode_range_set(MODE_ACRO,true,2,1701,2100));
-    CHECK(control_source_set(true));CHECK(arm==ARM_DISARMED);
-    rc[5]=1;CHECK(control_mode_requested()==CONTROL_MODE_ACRO);CHECK(!control_mode_conflict());
-    tick(1000);rc[4]=1;arm=ARM_ARMED;tick(1000);tick(1000);
-    CHECK(strcmp(control_effective_name(),"acro")==0);
-    rc[5]=0;tick(1000);CHECK(strcmp(control_effective_name(),"horizon")==0);
-    rc[5]=-1;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);
-    rc[5]=1;fresh=false;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);fresh=true;
-    rc[5]=NAN;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);
-    rc[5]=2;tick(1000);CHECK(strcmp(control_effective_name(),"angle")==0);
-    rc[5]=1;override=true;tick(1000);
-    CHECK(control_mode_requested()==CONTROL_MODE_ACRO);CHECK(strcmp(control_effective_name(),"angle")==0);override=false;
+    CHECK(!control_source_set(true)); /* AUX routing stays retired even with ranges configured */
+    CHECK(control_mode_set(CONTROL_MODE_ANGLE));
+    rc[5]=1;CHECK(control_mode_requested()==CONTROL_MODE_ANGLE); /* manual ignores aux channels */
+    CHECK(control_mode_set(CONTROL_MODE_ACRO));
+    CHECK(control_mode_requested()==CONTROL_MODE_ACRO);
+    CHECK(!control_mode_conflict());
     arm=ARM_DISARMED;loop_mixer_dshot();
-    CHECK(mode_range_set(MODE_ANGLE,true,2,900,2100));
-    CHECK(control_mode_conflict());CHECK(control_mode_requested()==CONTROL_MODE_ANGLE);
-    CHECK(mode_range_set(MODE_ANGLE,false,2,900,2100));
-    CHECK(mode_range_set(MODE_ACRO,false,2,1701,2100));
-    CHECK(!control_mode_conflict());CHECK(control_mode_requested()==CONTROL_MODE_ANGLE);
     CHECK(mode_range_set(MODE_ARM,true,2,900,2100));
     CHECK(mode_range_is_active(MODE_ARM));tick(1000);CHECK(arm==ARM_DISARMED);
     mode_range_reset();CHECK(!mode_range_get(MODE_ACRO)->enabled);CHECK(!mode_range_get(MODE_HORIZON)->enabled);
@@ -234,6 +218,5 @@ int main(void){
     CHECK(prime(CONTROL_MODE_ACRO));loop_pid();CHECK(arm==ARM_DISARMED);
     CHECK(prime(CONTROL_MODE_ACRO));attitude_init();accel[0]=-1;accel[1]=accel[2]=0;
     tick(1000);CHECK(arm==ARM_DISARMED); /* estimator pitch singularity is NOT bypassed */
-    puts("PASS: real Acro/Angle routing, feedback units/sign, failsafe precedence, guards, measured dt dividers1/2/4/8, reset/prime and existing health gate");return 0;
-#endif
+    puts("PASS: unified build - manual Angle/Acro/Horizon routing, bench switch session, failsafe fail-closed, guards, measured dt dividers, reset/prime and health gates");return 0;
 }

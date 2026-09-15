@@ -8,7 +8,8 @@ const {parseKeyValueSnapshot}=loadUiTs(path.resolve(__dirname,'../../ui/src/sens
 function storage(schema,scope){return `storage_api: 1\nbackend: flash\nschema: ${schema}\nstate: saved\ndirty: 0\ngeneration: 2\nlast_error: none\nscope: ${scope}\narmed: 0\nbench_active: 0\ncalibration_active: 0\nflight_enabled: 0\nstorage_end: 1\n`;}
 for(const [schema,scope] of [[1,STORAGE_SCOPE],[2,STORAGE_SCOPE_V2],[3,STORAGE_SCOPE_V3]]){
  const s=parseStorage(storage(schema,scope));assert.equal(s.schema,schema);assert(canSaveStorage(s,true,false));
- for(const key of ['armed','benchActive','calibrationActive','flightEnabled'])assert(!canSaveStorage({...s,[key]:true},true,false));
+ for(const key of ['armed','benchActive','calibrationActive'])assert(!canSaveStorage({...s,[key]:true},true,false));
+ assert(canSaveStorage({...s,flightEnabled:true},true,false)); /* unified flight firmware: flight-enabled configuration is legitimately saveable */
  assert(!canSaveStorage({...s,backend:'host_sim'},true,false));
 }
 assert.throws(()=>parseStorage(storage(3,STORAGE_SCOPE_V2)));

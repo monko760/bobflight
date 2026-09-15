@@ -29,7 +29,7 @@ assert.equal(row(modes[0],'ARM').aux,1);assert.equal(row(modes[0],'ANGLE').aux,2
 for(const s of modes.slice(1)){assert.equal(row(s,'ARM').aux,12);assert.equal(row(s,'ARM').minUs,1100);assert.equal(row(s,'ARM').maxUs,1450);}
 for(const s of modes.slice(3)){assert.equal(row(s,'ANGLE').aux,1);assert.equal(row(s,'ANGLE').minUs,1200);assert.equal(row(s,'ANGLE').maxUs,1800);}
 assert.equal((run.stdout.match(/mode_range refused:/g)||[]).length,invalid.length);
-for(const s of modes){assert.equal(s.semantics,"bench-control");assert.equal(s.flightEnabled,false);assert.equal(s.armed,false);assert.equal(s.rxFresh,false);assert.ok(s.modes.every(m=>!m.active));}
+for(const s of modes){assert.equal(s.semantics,"bench-control");assert.equal(s.flightEnabled,true);assert.equal(s.armed,false);assert.equal(s.rxFresh,false);assert.ok(s.modes.every(m=>!m.active));}
 const reboot=spawnSync(binary,[],{input:'ports\nmodes\n',encoding:'utf8'});assert.equal(reboot.status,0);
 const reset=parseModes(reboot.stdout.match(/modes_api: [12]\r?\n[\s\S]*?modes_end: 1\r?\n/)[0]);assert.equal(row(reset,'ARM').aux,1);assert.equal(row(reset,'ANGLE').aux,2);
 for(const p of run.stdout.matchAll(/(?:ports_api|modes_api): [12]\r?\n[\s\S]*?(?:ports_end|modes_end): 1\r?\n/g))assert.ok(Buffer.byteLength(p[0])<2048,'snapshot fits CDC TX ring');
@@ -39,9 +39,16 @@ console.log(`PASS actual Kakute host firmware → configurator parsers: numeric 
 const flight=spawnSync(binary,[],{input:'control_source aux\nmode_range HORIZON 1 2 1301 1700\nmode_range ACRO 1 2 1701 2100\nmodes\ncontrol_source manual\ncontrol_mode horizon\nmodes\n',encoding:'utf8'});
 assert.equal(flight.status,0,flight.stderr);
 const flightSnapshots=[...flight.stdout.matchAll(/modes_api: 2\r?\n[\s\S]*?modes_end: 1\r?\n/g)].map(m=>parseModes(m[0]));
-assert.equal(flightSnapshots.length,6);
-for(const m of flightSnapshots){assert.equal(m.modes.length,4);assert.equal(m.armed,false);assert.equal(m.flightEnabled,false);assert.match(m.raw,/arm_semantics: configured/);}
-assert.equal(row(flightSnapshots[2],'ACRO').enabled,true);assert.equal(row(flightSnapshots[2],'HORIZON').enabled,true);
-assert.match(flightSnapshots[0].raw,/control_source: aux/);assert.match(flightSnapshots[0].raw,/requested_mode: angle/);
-assert.match(flightSnapshots[5].raw,/control_source: manual/);assert.match(flightSnapshots[5].raw,/requested_mode: horizon/);
-console.log('PASS API2 real firmware-to-configurator Angle/Acro/Horizon, opt-in source and honest stale-RX fallback');
+assert.match(flight.stdout,/control_source refused: manual only/);
+assert.equal(flightSnapshots.length,5);
+for(const m of flightSnapshots){assert.equal(m.modes.length,4);assert.equal(m.armed,false);assert.equal(m.flightEnabled,true);assert.match(m.raw,/arm_semantics: configured/);}
+assert.equal(row(flightSnapshots[1],'ACRO').enabled,true);assert.equal(row(flightSnapshots[1],'HORIZON').enabled,true);
+assert.match(flightSnapshots[0].raw,/control_source: manual/);assert.match(flightSnapshots[0].raw,/requested_mode: angle/);
+assert.match(flightSnapshots[4].raw,/control_source: manual/);assert.match(flightSnapshots[4].raw,/requested_mode: horizon/);
+console.log('PASS API2 real firmware-to-configurator Angle/Acro/Horizon, manual selection and explicit unsupported AUX refusal');
+
+const acro=spawnSync(binary,[],{input:'control_mode acro\nmodes\ncontrol_mode invalid\nmodes\n',encoding:'utf8'});
+assert.equal(acro.status,0);assert.match(acro.stdout,/control_mode refused/);
+const acroFrames=[...acro.stdout.matchAll(/modes_api: 2\r?\n[\s\S]*?modes_end: 1\r?\n/g)].map(m=>parseModes(m[0]));
+assert.equal(acroFrames.length,2);for(const x of acroFrames){assert.equal(x.requestedMode,'acro');assert.equal(x.effectiveMode,'angle','host CLI does not run a controller pass; do not fake effective-mode readback');assert.equal(x.armed,false);}
+console.log('PASS main image manual Acro actual firmware readback + invalid selection leaves Acro unchanged');

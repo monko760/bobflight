@@ -7,8 +7,8 @@
 #if BOBFLIGHT_ACCEL_BENCH_RELAXED != 0 && BOBFLIGHT_ACCEL_BENCH_RELAXED != 1
 #error "BOBFLIGHT_ACCEL_BENCH_RELAXED must be 0 or 1"
 #endif
-#if BOBFLIGHT_ACCEL_BENCH_RELAXED && defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-#error "Relaxed accelerometer calibration is bench-only: flight must remain disabled"
+#if BOBFLIGHT_ACCEL_BENCH_RELAXED && defined(BOBFLIGHT_MCU)
+#error "Relaxed accelerometer checks are host-test-only: MCU images never relax sensor qualification"
 #endif
 #if BOBFLIGHT_ACCEL_BENCH_RELAXED
 #define SC_PAIR_CENTER_MAX_G 0.10f

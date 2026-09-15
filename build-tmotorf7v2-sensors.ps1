@@ -19,7 +19,7 @@ if (Test-Path -LiteralPath $cache) {
         throw 'Build cache belongs to a different target/compiler. Preserve it and use a fresh worktree; do not force the build.'
     }
 }
-& $cmake -S $source -B $build -G 'MinGW Makefiles' '-DCMAKE_TOOLCHAIN_FILE=cmake/stm32f722.cmake' '-DBOBFLIGHT_BOARD=tmotor_f7_v2' '-DBOBFLIGHT_HOST_SMOKE=OFF' '-DBOBFLIGHT_FLIGHT_ENABLE=OFF' '-DBOBFLIGHT_ACCEL_BENCH_RELAXED=OFF' '-DBOBFLIGHT_PROVE_RESET=OFF' '-DBOBFLIGHT_BOOT_LED_DIAGNOSTICS=OFF'
+& $cmake -S $source -B $build -G 'MinGW Makefiles' '-DCMAKE_TOOLCHAIN_FILE=cmake/stm32f722.cmake' '-DBOBFLIGHT_BOARD=tmotor_f7_v2' '-DBOBFLIGHT_HOST_SMOKE=OFF' '-DBOBFLIGHT_ACCEL_BENCH_RELAXED=OFF' '-DBOBFLIGHT_PROVE_RESET=OFF' '-DBOBFLIGHT_BOOT_LED_DIAGNOSTICS=OFF'
 if ($LASTEXITCODE -ne 0) { throw 'TMOTORF7V2 configuration failed. Do not flash an older HEX.' }
 & $cmake --build $build -j 4
 if ($LASTEXITCODE -ne 0) { throw 'TMOTORF7V2 build/image validation failed. Do not flash an older HEX.' }
@@ -30,5 +30,5 @@ $hex = Join-Path $repo 'bobflight-tmotorf7v2-sensors-bench.hex'
 Copy-Item -LiteralPath (Join-Path $build 'bobflight.hex') -Destination $hex -Force
 Get-FileHash -Algorithm SHA256 -LiteralPath $hex
 Write-Host 'BUILD CHECKPOINT: sensor-only image built and bounds/version checked. No controller was flashed.'
-Write-Host 'Expected firmware: 0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore2-piddiag2; board tmotor_f7_v2.'
+Write-Host 'Expected firmware: 0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore2-flightdev1; board tmotor_f7_v2.'
 Write-Host 'Read BOOTLOADER.md (Holybro first) and TMOTORF7V2.md before installation. Motors, flight and F722 configuration saving are unavailable.'

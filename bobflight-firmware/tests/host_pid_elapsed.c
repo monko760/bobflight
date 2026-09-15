@@ -39,6 +39,7 @@ bool gyro_sample(float d[3]){memset(d,0,3*sizeof(float));return true;}
 void gyro_filter(const float in[3],float out[3]){memcpy(out,in,3*sizeof(float));}
 const float *gyro_accel_g(void){return accel;}
 bool gyro_calibrated(void){return true;}
+bool gyro_flight_ready(void){return true;}
 bool dshot_is_healthy(void){return healthy;}
 void dshot_write(const float m[4]){memcpy(motors,m,sizeof(motors));}
 

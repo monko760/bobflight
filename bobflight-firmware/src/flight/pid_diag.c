@@ -88,10 +88,6 @@ static bool finite3(const float *v) {
 }
 
 static const char *guards(pid_diag_source_t source) {
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    (void)source;
-    return "flight-build-refused";
-#else
     if (arming_state() == ARM_ARMED) return "armed";
     if (!hal_usb_cdc_connected()) return "usb-disconnected";
     if (bench_motor_active()) return "bench-motor-active";
@@ -109,7 +105,6 @@ static const char *guards(pid_diag_source_t source) {
             return "receiver-invalid";
     }
     return NULL;
-#endif
 }
 
 static const char *session_guard(void) {

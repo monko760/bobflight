@@ -1,5 +1,7 @@
 # BobFlight
 
+> **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
+
 Clean-room flight controller firmware and browser configurator, developed
 against the Holybro Kakute F7 HDV (STM32F745).
 
