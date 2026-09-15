@@ -90,7 +90,7 @@ static void cmd_modes(void)
     char buf[640];
     unsigned flight_enabled = 0;
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    flight_enabled = 1;
+    flight_enabled=1;
 #endif
     int n=snprintf(buf,sizeof(buf),
         "modes_api: 2\r\npersistence: %s\r\nsemantics: bench-control\r\n"

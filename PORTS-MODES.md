@@ -1,5 +1,7 @@
 # Ports and Modes: bench configuration
 
+> **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
+
 > Historical increment. For current Angle/Acro/Level (Horizon) routing, API-2 semantics and safe installation checks, see [Flight modes](FLIGHT-MODES.md). Persistence remains a separate task.
 
 This development increment replaces the configurator's disabled Ports/Modes placeholders with firmware-backed configuration and explicit readback. It does not make BobFlight flight-qualified.

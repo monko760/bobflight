@@ -1,5 +1,7 @@
 > Current calibration-persistence branch versions append `-calstore1`. Follow [CALIBRATION-PERSISTENCE.md](CALIBRATION-PERSISTENCE.md) for this update. T-Motor hardware flash remains unsupported. Historical version examples below predate this increment.
 
+> **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
+
 # CLI `bl` / `BL` — bench ROM DFU test
 
 This update implements **software entry to the ST ROM bootloader**, not a new flash bootloader. It is a bench-only development increment, not hardware-qualified. Test **Holybro Kakute F7 HDV first**, using a board with a personally verified hardware BOOT/DFU recovery path. Flight enablement and arming logic are unchanged. T-Motor motor output and flash configuration support remain unavailable; Holybro's existing capabilities are retained.

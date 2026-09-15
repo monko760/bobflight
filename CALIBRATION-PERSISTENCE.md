@@ -1,5 +1,7 @@
 # Persistent accelerometer calibration — bench acceptance
 
+> **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
+
 ## Scope and current support
 
 This increment adds explicit `save` and startup restoration of validated, **applied** accelerometer bias/scale. Existing PID/rates, RX UART/map, all four mode rows, and manual/AUX mode selection remain included. There is no automatic save after Apply. Gyro startup bias, raw samples, incomplete/candidate solutions, power and DShot settings are NOT stored. Strict six-face validation and all arming/flight restrictions remain unchanged.

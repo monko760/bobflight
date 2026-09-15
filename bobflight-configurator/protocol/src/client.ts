@@ -1,5 +1,5 @@
 import {parseStorage,isVerifiedFlashSave} from "./storage";
-import { isModeRangeCommand, isControlSourceCommand } from "./parse-modes";
+import { isModeRangeCommand, isControlSourceCommand, isControlModeCommand } from "./parse-modes";
 /*
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
@@ -267,7 +267,7 @@ export class BobFlightCliClient {
     opts?: SendCommandOptions
   ): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd)) {
+    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);
@@ -376,7 +376,7 @@ export class BobFlightCliClient {
 
   async saveSettings(opts?: SendCommandOptions): Promise<void> {
     const before=parseStorage(await this.sendCommand("storage",opts));
-    if(before.backend!=="flash"||before.armed||before.benchActive||before.calibrationActive||before.flightEnabled)throw new Error("Controller flash save unavailable: disarm and stop bench motors; mock/RAM save is not durable");
+    if(before.backend!=="flash"||before.armed||before.benchActive||before.calibrationActive)throw new Error("Controller flash save unavailable: disarm and stop bench motors; mock/RAM save is not durable");
     const raw=await this.sendRaw("save",opts);
     if(!isVerifiedFlashSave(raw))throw new Error(`Save was not verified: ${raw.trim()}`);
     const after=parseStorage(await this.sendCommand("storage",opts));

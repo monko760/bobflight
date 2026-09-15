@@ -40,7 +40,7 @@ export function parseModes(raw:string):ParsedModes {
    const expected=matches.length===1?matches[0].name.toLowerCase():'angle';
    if(requested!==expected)throw Error('Contradictory AUX selection');
   }
-  if(base.flightEnabled&&(source!=='manual'||requested!=='angle'||effective!=='angle'))throw Error('Experimental routing cannot be flight-enabled');
+  if(base.flightEnabled&&source==='aux')throw Error('AUX mode routing is unavailable in this firmware');
   return {...base,calibrationActive:bit(field(f,'calibration_active')),armSemantics,controlSource:source,requestedMode:requested as ControlMode,effectiveMode:effective as ControlMode,modeConflict:conflict};
  }
  return base;
@@ -54,6 +54,13 @@ export function canEditModeRanges(s:ParsedModes|null,connected:boolean,pending:b
 }
 export function canSelectControlSource(s:ParsedModes|null,connected:boolean,pending:boolean):boolean{
  return canEditModeRanges(s,connected,pending)&&s?.apiVersion===2&&!s.flightEnabled;
+}
+export function isControlModeCommand(s:string):boolean{return s==='control_mode angle'||s==='control_mode acro'||s==='control_mode horizon';}
+export function controlModeCommand(mode:'angle'|'acro'|'horizon'):CliCommand{
+ const cmd=`control_mode ${mode}`;if(!isControlModeCommand(cmd))throw Error('Invalid control mode');return cmd as CliCommand;
+}
+export function canSelectControlMode(s:ParsedModes|null,connected:boolean,pending:boolean):boolean{
+ return canEditModeRanges(s,connected,pending)&&s?.apiVersion===2;
 }
 export function isModeRangeCommand(s:string):boolean{const a=s.split(' ');if(a.length!==6||a[0]!=='mode_range'||!['ARM','ANGLE','ACRO','HORIZON'].includes(a[1]))return false;try{bit(a[2]);uint(a[3],1,12);return uint(a[4],900,2100)<uint(a[5],900,2100);}catch{return false;}}
 export function modeRangeCommand(m:Pick<ModeRow,'name'|'enabled'|'aux'|'minUs'|'maxUs'>):CliCommand{const s=`mode_range ${m.name} ${m.enabled?1:0} ${m.aux} ${m.minUs} ${m.maxUs}`;if(!isModeRangeCommand(s))throw Error('Invalid mode range: numeric AUX 1–12 and integer bounds 900–2100 required');return s as CliCommand;}

@@ -42,6 +42,7 @@ bool gyro_sample(float d[3]) { memcpy(d, input_gyro, sizeof(input_gyro)); gd.sam
 void gyro_filter(const float in[3], float out[3]) { memcpy(out, in, 3 * sizeof(float)); }
 const float *gyro_accel_g(void) { return accel; }
 bool gyro_calibrated(void) { return true; }
+bool gyro_flight_ready(void) { return true; }
 bool dshot_is_healthy(void) { return healthy; }
 void dshot_write(const float m[4]) { motor_calls++; memcpy(motors, m, sizeof(motors)); }
 

@@ -41,6 +41,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope}:{revision?
   <button disabled={!connected||pending||blocked} onClick={()=>void run('refresh')}>Refresh storage</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('diff')}>Export changes</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('dump')}>Export full configuration</button>
+  {state&&state.lastError!=='none'&&<p role="alert">{state.lastError==='migrated_control_source_manual'?'Older AUX mode routing was restored as manual selection. Your stored manual mode and other settings were retained. Review Modes, then explicitly Save to controller to accept this migration.':`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
   {state&&<p>Saved scope: {state.scope.replaceAll("_"," ").replaceAll(",",", ")}</p>}
   {blocked&&<p>Apply all edits on this page before saving, and finish any active operation.</p>}
   {!supported&&state&&<p role="alert">Update firmware to save this page’s settings. This firmware does not advertise that capability.</p>}

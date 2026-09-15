@@ -61,6 +61,7 @@ void pid_diag_update(uint64_t t,const float g[3]){(void)t;(void)g;}
 void gyro_calibration_tick(void){}
 bool gyro_manual_calibration_active(void){return cal_active;}
 bool gyro_calibrated(void){return cal_ready;}
+bool gyro_flight_ready(void){return cal_ready;}
 bool gyro_is_healthy(void){return gyro_ok;}
 bool gyro_sample(float g[3]){memcpy(g,gyro_vec,sizeof(gyro_vec));return gyro_ok;}
 void gyro_filter(const float in[3],float out[3]){memcpy(out,in,sizeof(gyro_vec));}
@@ -164,7 +165,8 @@ int main(int argc,char **argv){
   age_to(251);REQUIRE(failsafe_stage()==FAILSAFE_STAGE_HOLD&&arming_state()==ARM_ARMED&&all(encode(.4f)));
   controls_at(.4f,12,-1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));
  }else if(!strcmp(name,"arm-config-independent-source")){
-  REQUIRE(control_source_set(true));REQUIRE(control_mode_set(CONTROL_MODE_ACRO));
+  REQUIRE(!control_source_set(true)); /* aux routing retired */
+  REQUIRE(control_source_set(false));REQUIRE(control_mode_set(CONTROL_MODE_ACRO));
   REQUIRE(mode_range_set(MODE_ARM,true,9,1751,2100));controls_at(0,9,-1);step();controls_at(0,9,1);step();REQUIRE(arming_state()==ARM_ARMED);
  }else if(!strcmp(name,"boot")){
   for(unsigned i=0;i<300;i++){step();}REQUIRE(failsafe_active());REQUIRE(arming_state()==ARM_DISARMED&&all(0));

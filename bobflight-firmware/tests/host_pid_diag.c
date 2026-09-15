@@ -35,26 +35,14 @@ void dshot_write(const float *v) { (void)v; writes++; }
 
 static void fresh(unsigned us) { now += us; gd.sample_ms = hal_millis(); gd.sample_seq++; }
 static pid_diag_snapshot_t snap(void) { pid_diag_snapshot_t s; pid_diag_get_snapshot(&s); return s; }
-#if !defined(BOBFLIGHT_FLIGHT_ENABLE) || !BOBFLIGHT_FLIGHT_ENABLE
 static void tick(unsigned us, const float *g) { fresh(us); pid_diag_update(now, g); }
 static void near(float a, float b) { assert(fabsf(a - b) < 1e-6f); }
-#endif
 
 int main(void) {
     config_init();
     pid_diag_init();
     char text[1024];
 
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    assert(!pid_diag_start(PID_DIAG_SOURCE_ZERO, NULL));
-    assert(!pid_diag_start(PID_DIAG_SOURCE_RX, NULL));
-    pid_diag_cli_process("pid_diag start", text, sizeof(text));
-    assert(strstr(text, "flight-build-refused"));
-    assert(!snap().active && !snap().valid);
-    assert(writes == 0);
-    puts("PASS PID diagnostic flight-build refusal");
-    return 0;
-#else
     float zero[3] = {0}, g[3] = {10, -20, 30};
     assert(pid_diag_start(PID_DIAG_SOURCE_ZERO, NULL));
     tick(1000, g);
@@ -340,5 +328,4 @@ int main(void) {
     assert(arm == ARM_DISARMED);
     puts("PASS shadow PID: original equation equivalence, independent state, rates, freshness/dt/reset guards, session safety, bounded CLI and no motor writes");
     return 0;
-#endif
 }

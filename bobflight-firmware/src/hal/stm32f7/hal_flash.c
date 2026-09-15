@@ -43,9 +43,6 @@ static void leave(flash_context_t c){
 bool hal_flash_read(uint32_t off,void *dst,size_t n){if(!dst||!bounds(off,n)||!hal_flash_supported()||(FLASH_SR&BUSY))return false;memcpy(dst,(const void *)(uintptr_t)(CFG_BASE+off),n);return true;}
 bool hal_flash_erase_slot(unsigned slot){
  if(slot>=2||!hal_flash_supported())return false;
-#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
- return false;
-#endif
  if(arming_state()==ARM_ARMED||bench_motor_active()||gyro_manual_calibration_active())return false;
  flash_iwdg_t *wd=(flash_iwdg_t *)(uintptr_t)0x40003000u;
  flash_iwdg_saved_t saved;

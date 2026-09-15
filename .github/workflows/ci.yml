@@ -36,7 +36,7 @@ jobs:
       - name: Install ARM toolchain
         run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
       - name: Configure
-        run: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/stm32f745.cmake -DBOBFLIGHT_BOARD=kakute_f7_hdv
+        run: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/stm32f745.cmake -DBOBFLIGHT_BOARD=kakute_f7_hdv -DBOBFLIGHT_HOST_SMOKE=OFF
       - name: Build
         run: cmake --build build -j
       - name: Upload firmware artifacts
@@ -77,7 +77,7 @@ jobs:
         run: npm --prefix protocol run test:ports-modes
       - name: Firmware to configurator Ports and Modes contract
         run: |
-          cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract -DBOBFLIGHT_BOARD=kakute_f7_hdv -DBOBFLIGHT_FLIGHT_ENABLE=OFF
+          cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract -DBOBFLIGHT_BOARD=kakute_f7_hdv
           cmake --build ../bobflight-firmware/build-contract --target bobflight_host bobflight_pid_mpu_freshness_test -j 4
           node ../.github/scripts/ports-modes-contract.cjs
       - name: Firmware to configurator persistent storage and exports

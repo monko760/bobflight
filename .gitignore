@@ -60,3 +60,8 @@ __pycache__/
 !/CALIBRATION-PERSISTENCE.md
 
 !PID-DIAGNOSTICS.md
+
+# Canonical single-image workflow.
+!/build-main.ps1
+!/MAIN-BUILD.md
+!/SINGLE-BUILD-VALIDATION.md
