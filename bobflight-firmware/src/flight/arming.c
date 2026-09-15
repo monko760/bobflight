@@ -38,12 +38,15 @@ bool arming_try_arm(void)
     return false;
 #endif
 #if defined(BOBFLIGHT_MCU)
-    /* Bench image cannot arm; enable only after axis/motor bench validation. */
+    /* Bench image cannot arm; the explicit closed-loop profile opts in. */
 #if !defined(BOBFLIGHT_FLIGHT_ENABLE) || !BOBFLIGHT_FLIGHT_ENABLE
     return false;
 #endif
-    /* Stationary gyro bias alone is insufficient to validate accelerometer gravity. */
-    if(!gyro_flight_ready() || !rx_frame_fresh())return false;
+    if(!rx_frame_fresh())return false;
+    /* Mode-aware readiness: Acro is rate-only and never needs the accelerometer.
+     * Angle/Horizon still require qualified gravity for leveling. */
+    if(!arming_rate_only()){ if(!gyro_flight_ready())return false; }
+    else { if(!gyro_rate_ready())return false; }
 #endif
     if (!gyro_is_healthy() || !g_gyro_ok) {
         return false;

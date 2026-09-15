@@ -97,7 +97,9 @@ bool control_mode_set(control_mode_t mode) {
     if (mode != CONTROL_MODE_ANGLE && mode != CONTROL_MODE_ACRO && mode != CONTROL_MODE_HORIZON) return false;
     if (!control_edit_allowed()) return false;
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    if (mode != CONTROL_MODE_ANGLE) return false;
+    /* Gyro-only Acro is selectable in the closed-loop profile; Horizon's
+     * blended leveling still requires a qualified accelerometer. */
+    if (mode == CONTROL_MODE_HORIZON) return false;
 #endif
     g_control_mode = mode;
     return true;
@@ -113,7 +115,7 @@ bool control_source_set(bool use_aux) {
 static control_mode_t resolve_control_mode(bool *conflict) {
     if(conflict)*conflict=false;
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
-    return CONTROL_MODE_ANGLE; /* Development routing cannot escape bench builds. */
+    return g_control_mode; /* Manual selection only; AUX routing stays bench-only. */
 #else
     if(!g_control_aux)return g_control_mode;
     const bool angle=mode_range_is_active(MODE_ANGLE);
@@ -126,6 +128,7 @@ static control_mode_t resolve_control_mode(bool *conflict) {
 #endif
 }
 control_mode_t control_mode_requested(void) { return resolve_control_mode(NULL); }
+bool arming_rate_only(void) { return control_mode_requested()==CONTROL_MODE_ACRO; }
 const char *control_requested_name(void) { return mode_name(control_mode_requested()); }
 bool control_mode_conflict(void) { bool conflict;resolve_control_mode(&conflict);return conflict; }
 static uint32_t bench_started;
@@ -202,7 +205,13 @@ void loop_pid(void)
         if (arming_state() == ARM_ARMED) arming_disarm();
     }
     if(!sample_ok || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
-    else if(fs_flying) {arm_low_seen=false;}
+    else if(fs_flying) {arm_low_seen=false;
+#if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
+        /* Staged HOLD/LAND fly leveled output: without qualified gravity that
+         * would be fake leveling, so fail closed and stop the motors. */
+        if(!gyro_flight_ready()) arming_disarm();
+#endif
+    }
     /* HOLD/LAND above owns stale-link output. Otherwise an invalid input must
      * not create the inactive witness needed for a later arm request. */
     else if(!arm_input_valid || gyro_manual_calibration_active() ||
@@ -213,7 +222,10 @@ void loop_pid(void)
     else if(arm_low_seen && arming_state()!=ARM_ARMED) {
         arm_low_seen=false; /* Every attempt requires a fresh valid inactive-to-active range edge. */
         const float *angles=attitude_degrees();
-        if(gyro_calibrated() && attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f && arming_try_arm())arm_low_seen=false;
+        /* Acro is rate-only: no attitude/tilt precondition. Leveled modes
+         * keep the full attitude and tilt qualification. */
+        const bool acro = control_mode_requested()==CONTROL_MODE_ACRO;
+        if(gyro_calibrated() && (acro || (attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f)) && arming_try_arm())arm_low_seen=false;
     }
     /* Preserve the existing leveling override during staged failsafe. */
     g_effective_mode = fs_flying ? CONTROL_MODE_ANGLE : control_mode_requested();

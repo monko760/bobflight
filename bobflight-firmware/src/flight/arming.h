@@ -24,6 +24,9 @@ typedef enum {
 
 void arming_init(void);
 arm_state_t arming_state(void);
+/* True when the currently requested control mode is gyro-only (Acro).
+ * Leveled modes (Angle/Horizon) still require qualified gravity. */
+bool arming_rate_only(void);
 bool arming_try_arm(void);   /* false if gyro / failsafe / throttle high */
 void arming_disarm(void);
 void arming_set_gyro_healthy(bool healthy);

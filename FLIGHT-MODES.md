@@ -19,7 +19,7 @@ Horizon combines two **degrees/second rate demands before the existing inner PID
 - With AUX enabled, exactly one matching control-mode range selects that mode. No match, stale/invalid receiver data, or more than one match falls back to Angle. Overlap is reported as a conflict, not resolved with a hidden priority.
 - The existing staged failsafe leveling override takes precedence over all modes. Failsafe timers and throttle policy are unchanged; ARM switch input follows the separately documented configured range.
 - Configuration edits/source/manual-mode changes require disarmed state, no active/pending motor output and no manual calibration. Automatic AUX resolution is evaluated in the controller task; software tests use mocked arming to exercise it.
-- In `BOBFLIGHT_FLIGHT_ENABLE=1` builds, non-Angle manual selection and AUX-source activation are refused, and resolution is forced to Angle. This patch does not enable that build option.
+- In `BOBFLIGHT_FLIGHT_ENABLE=1` closed-loop development builds, manual Angle and gyro-only Acro can be selected; Horizon and AUX-source activation stay refused, and staged failsafe disarms rather than leveling without qualified gravity. Arming readiness is mode-aware (see [CLOSED-LOOP-DEV.md](CLOSED-LOOP-DEV.md)); the default bench build is unchanged.
 
 All modes still depend on the current attitude estimator's loop-health gates, including pitch-singularity rejection. Acro/Horizon here are **not unrestricted gyro-only aerobatic flight support**. Disarmed firmware resets the PID as before; changing a Modes-tab indicator does not prove active physical PID operation. Mode transition transients and hardware response are not yet qualified.
 
