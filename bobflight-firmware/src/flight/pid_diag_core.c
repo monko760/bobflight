@@ -6,4 +6,6 @@
 #define pid_init pid_diag_core_reset
 #define pid_set_dt pid_diag_core_dt
 #define pid_update pid_diag_core_update
+#define pid_trace_enable pid_diag_core_trace_enable
+#define pid_trace_read pid_diag_core_trace_read
 #include "pid.c"
