@@ -125,6 +125,15 @@ bool hal_tim_dma_start_burst(hal_tim_dma_t *t, const uint16_t *words, size_t n);
 /** Re-time the DShot bit clock (300000 or 600000 Hz); false if invalid. */
 bool hal_tim_dma_set_bit_rate(uint32_t hz);
 
+/* ---- DShot M1 listen-after-TX IC (Kakute: PB0 / TIM3_CH3) ----
+ * TX remains TIM3_UP DMA (Stream2/CH5). IC uses TIM3_CH3 capture on the
+ * same pin after the outbound burst. Host provides inject stubs. */
+#define HAL_DSHOT_M1_IC_MAX_EDGES 64u
+bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap);
+size_t hal_dshot_m1_ic_take(void);           /* edge count; restores TX-ready CH3 */
+void hal_dshot_m1_ic_cancel(void);
+uint16_t hal_dshot_m1_ic_bit_period_ticks(void); /* telem bit period (4/5 DShot) */
+
 /* ---- EXTI ---- */
 typedef void (*hal_exti_cb_t)(void *ctx);
 bool hal_exti_attach(hal_pin_t pin, hal_exti_cb_t cb, void *ctx);

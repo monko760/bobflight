@@ -4,8 +4,8 @@
  *
  * DShot TX, selectable 300/600 kbps — public-protocol packet encode +
  * TIM+DMA bit-period burst. Encode is not Betaflight-derived. Burst only
- * if board_t gave a valid timer+pin (never on dummy IR). Motor count
- * capped at DSHOT_MOTOR_COUNT. Default 300 kbps (bench bring-up); the
+ * if board_t gave a valid timer+pin (never on dummy IR). Motor count capped
+ * at DSHOT_MOTOR_COUNT. Default 300 kbps (bench bring-up); the
  * header previously claimed DShot600 while the timers were 300k — the
  * rate is now an explicit, switchable setting.
  *
@@ -15,6 +15,7 @@
  * plus a trailing low slot as inter-frame idle.
  */
 #include "drivers/dshot.h"
+#include "drivers/dshot_telem.h"
 #include "board/board.h"
 #include "hal/hal.h"
 
@@ -30,9 +31,9 @@ static unsigned g_bound;
 static uint16_t g_last_pkt[DSHOT_MOTOR_COUNT];
 static uint16_t g_burst[DSHOT_MOTOR_COUNT][DSHOT_BURST_LEN];
 
-uint16_t dshot_encode_packet(uint16_t throttle11)
+uint16_t dshot_encode_packet_ex(uint16_t throttle11, bool request_telem)
 {
-    uint16_t value = (uint16_t)(throttle11 << 1); /* telem bit 0 */
+    uint16_t value = (uint16_t)((throttle11 << 1) | (request_telem ? 1u : 0u));
     uint16_t crc = 0;
     uint16_t c = value;
     unsigned i;
@@ -42,6 +43,11 @@ uint16_t dshot_encode_packet(uint16_t throttle11)
     }
     crc &= 0xFu;
     return (uint16_t)((value << 4) | crc);
+}
+
+uint16_t dshot_encode_packet(uint16_t throttle11)
+{
+    return dshot_encode_packet_ex(throttle11, false);
 }
 
 void dshot_expand_frame(uint16_t packet, uint16_t *out, size_t out_n)
@@ -121,13 +127,21 @@ void dshot_write(const float motor[DSHOT_MOTOR_COUNT])
         if (n > 1.f) {
             n = 1.f;
         }
-        /* DShot throttle 48..2047; 0 = disarmed command. Dummy never bursts. */
+        /* DShot throttle 48..2047; 0 = disarmed command. Dummy never bursts.
+         * R0b: request telem on M1 (motor 0) when bidir enabled so ESC replies. */
         th = (n <= 0.f) ? 0u : (uint16_t)(48u + (unsigned)(n * (2047u - 48u)));
-        g_last_pkt[i] = dshot_encode_packet(th);
+        {
+            bool telem = (i == 0u) && dshot_bidir_enabled();
+            g_last_pkt[i] = dshot_encode_packet_ex(th, telem);
+        }
         if (g_tim[i]) {
             dshot_expand_frame(g_last_pkt[i], g_burst[i], DSHOT_BURST_LEN);
             if(!hal_tim_dma_start_burst(g_tim[i], g_burst[i], DSHOT_BURST_LEN)) {g_output_ok=false; arming_disarm();}
         }
+    }
+    /* Listen-after-TX on M1 (same pin); TX TIM3_UP DMA path unchanged. */
+    if (dshot_bidir_enabled()) {
+        dshot_telem_m1_arm_listen();
     }
 }
 
