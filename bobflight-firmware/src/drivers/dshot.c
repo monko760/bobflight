@@ -4,8 +4,8 @@
  *
  * DShot TX, selectable 300/600 kbps — public-protocol packet encode +
  * TIM+DMA bit-period burst. Encode is not Betaflight-derived. Burst only
- * if board_t gave a valid timer+pin (never on dummy IR). Motor count capped
- * at DSHOT_MOTOR_COUNT. Default 300 kbps (bench bring-up); the
+ * if board_t gave a valid timer+pin (never on dummy IR). Motor count
+ * capped at DSHOT_MOTOR_COUNT. Default 300 kbps (bench bring-up); the
  * header previously claimed DShot600 while the timers were 300k — the
  * rate is now an explicit, switchable setting.
  *
