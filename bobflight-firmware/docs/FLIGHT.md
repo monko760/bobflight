@@ -43,10 +43,9 @@ AirMode (`airmode` 0/1, default **0**): when off, low throttle (`<0.05`) resets 
 
 Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
 
+## Soft LPF (`flight/filter`) — Filters R0 (schema 5)
 
-## Soft LPF (`flight/filter`) — Filters R0
-
-First-order low-pass used by soft gyro filtering (`gyro_filter` via `loop_filter`) and PID D-term:
+First-order low-pass used by soft gyro filtering (`gyro_filter` via `loop_filter`) and PID D-term. Filter math is Flight-owned; Lead owns Schema 5 persist/CLI.
 
 ```
 tau   = 1 / (2 * pi * fc)
@@ -61,7 +60,9 @@ y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
 | `gyro_lpf_hz` | `320` | `0` = off, else `10..1000` | Matches prior hardcoded α≈0.3345 at `dt=1/4000` (`α = dt/(τ+dt)`, `τ=1/(2π·fc)` → fc≈320 Hz) |
 | `dterm_lpf_hz` | `53` | `0` = off, else `10..1000` | Matches prior D-term `τ=0.003` s (`fc=1/(2π·0.003)`≈53 Hz) |
 
-Gyro LPF `dt` comes from the scheduler PID cadence (`pid_process_denom / gyro_hz`, default 2/8000 → 1/4000). D-term LPF uses the live `pid_set_dt` period (default `1/4000`). Schema5 persist/CLI migration is owned by Lead; this tree exposes RAM `get`/`set`/`defaults` keys only.
+Gyro LPF `dt` comes from the scheduler PID cadence (`pid_process_denom / gyro_hz`, default 2/8000 → 1/4000). D-term LPF uses the live `pid_set_dt` period (default `1/4000`).
+
+Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 5, 184 bytes; bytes 176–179 `gyro_lpf_hz`, 180–183 `dterm_lpf_hz`).
 
 Host unit test: `bobflight_filter_test` / `scripts/test_flight_host_math.sh`.
 
