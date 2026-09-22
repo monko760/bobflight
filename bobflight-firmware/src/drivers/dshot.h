@@ -48,6 +48,8 @@ bool dshot_is_healthy(void);
 
 /** 11-bit throttle → 16-bit DShot packet (telem bit 0 + nibble XOR CRC). */
 uint16_t dshot_encode_packet(uint16_t throttle11);
+/** Same as encode_packet but sets the telemetry-request bit when request_telem. */
+uint16_t dshot_encode_packet_ex(uint16_t throttle11, bool request_telem);
 /** Expand packet MSB-first into CCR high-time buffer; out_n >= DSHOT_BURST_LEN. */
 void dshot_expand_frame(uint16_t packet, uint16_t *out, size_t out_n);
 

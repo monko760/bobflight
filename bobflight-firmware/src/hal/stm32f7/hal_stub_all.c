@@ -38,7 +38,7 @@ bool hal_spi_transfer(hal_spi_bus_t *bus, hal_pin_t cs, const uint8_t *tx, uint8
 }
 
 struct hal_uart { int dummy; };
-hal_uart_t *hal_uart_open(unsigned instance, uint32_t baud) { (void)instance; (void)baud; return NULL; }
+hal_uart_t *hal_uart_open(unsigned instance, unsigned baud) { (void)instance; (void)baud; return NULL; }
 size_t hal_uart_read(hal_uart_t *u, uint8_t *buf, size_t maxlen) { (void)u; (void)buf; (void)maxlen; return 0; }
 size_t hal_uart_write(hal_uart_t *u, const uint8_t *buf, size_t len) { (void)u; (void)buf; return len; }
 
@@ -46,6 +46,13 @@ struct hal_tim_dma { int dummy; };
 hal_tim_dma_t *hal_tim_dma_open(unsigned tim, unsigned channel) { (void)tim; (void)channel; return NULL; }
 bool hal_tim_dma_start_burst(hal_tim_dma_t *t, const uint16_t *words, size_t n)
 { (void)t; (void)words; (void)n; return false; }
+
+bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap)
+{ (void)edge_buf; (void)cap; return false; }
+size_t hal_dshot_m1_ic_take(void) { return 0; }
+void hal_dshot_m1_ic_cancel(void) {}
+uint16_t hal_dshot_m1_ic_bit_period_ticks(void) { return 1u; }
+
 
 bool hal_exti_attach(hal_pin_t pin, hal_exti_cb_t cb, void *ctx)
 { (void)pin; (void)cb; (void)ctx; return false; }
