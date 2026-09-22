@@ -1,6 +1,6 @@
 /**
  * FALLBACK ONLY — local mock FW settings CLI when Protocol host settings
- * throw / are unavailable. RatesPage/PidPage prefer BobFlightHost
+ * throw / are unavailable. RatesPage/PidPage/FiltersPage prefer BobFlightHost
  * getSetting/setSetting/saveSettings/restoreDefaults/getAllSettings.
  *
  * Lead-locked reply shapes (no spaces around `=`):
@@ -12,14 +12,19 @@
  */
 
 import {
+  getFilters,
   getPid,
   getRates,
+  FILTERS_DEFAULTS,
   PID_DEFAULTS,
   RATES_DEFAULTS,
+  resetFilters,
   resetPid,
   resetRates,
+  setFilters,
   setPid,
   setRates,
+  type FiltersConfig,
   type PidConfig,
   type RatesConfig,
 } from "./mockTuningStore";
@@ -44,11 +49,19 @@ export const PID_KEYS = [
   "airmode",
 ] as const;
 
+/** Filters R0 (Schema5) — also in Protocol SETTINGS_KEYS. */
+export const FILTER_KEYS = ["gyro_lpf_hz", "dterm_lpf_hz"] as const;
+
 export type RateKey = (typeof RATE_KEYS)[number];
 export type PidKey = (typeof PID_KEYS)[number];
-export type SettingsKey = RateKey | PidKey;
+export type FilterKey = (typeof FILTER_KEYS)[number];
+export type SettingsKey = RateKey | PidKey | FilterKey;
 
-const ALL_KEYS: readonly SettingsKey[] = [...RATE_KEYS, ...PID_KEYS];
+const ALL_KEYS: readonly SettingsKey[] = [
+  ...RATE_KEYS,
+  ...PID_KEYS,
+  ...FILTER_KEYS,
+];
 
 function isSettingsKey(k: string): k is SettingsKey {
   return (ALL_KEYS as readonly string[]).includes(k);
@@ -62,9 +75,22 @@ function formatNum(n: number): string {
   return s.length ? s : "0";
 }
 
+/**
+ * FW lock for filter Hz: 0 = off; else 10..1000 inclusive.
+ * Non-finite → invalid.
+ */
+export function validateFilterHz(value: number): boolean {
+  if (!Number.isFinite(value)) return false;
+  if (value === 0) return true;
+  return value >= 10 && value <= 1000;
+}
+
 function readValue(key: SettingsKey): number {
   if ((RATE_KEYS as readonly string[]).includes(key)) {
     return getRates()[key as RateKey];
+  }
+  if ((FILTER_KEYS as readonly string[]).includes(key)) {
+    return getFilters()[key as FilterKey];
   }
   return getPid()[key as PidKey];
 }
@@ -74,6 +100,12 @@ function writeValue(key: SettingsKey, value: number): boolean {
   if ((RATE_KEYS as readonly string[]).includes(key)) {
     const next: RatesConfig = { ...getRates(), [key]: value };
     setRates(next);
+    return true;
+  }
+  if ((FILTER_KEYS as readonly string[]).includes(key)) {
+    if (!validateFilterHz(value)) return false;
+    const next: FiltersConfig = { ...getFilters(), [key]: value };
+    setFilters(next);
     return true;
   }
   const next: PidConfig = { ...getPid(), [key]: value };
@@ -142,13 +174,14 @@ export const mockSettingsApi = {
   },
 
   save(): string {
-    // Mock: state already in memory; always succeed.
+    // Mock: state already in memory; always succeed (includes filter keys).
     return "saved";
   },
 
-  defaults(scope: "rates" | "pid" | "all" = "all"): string {
+  defaults(scope: "rates" | "pid" | "filters" | "all" = "all"): string {
     if (scope === "rates" || scope === "all") resetRates();
     if (scope === "pid" || scope === "all") resetPid();
+    if (scope === "filters" || scope === "all") resetFilters();
     return "defaults restored";
   },
 
@@ -162,7 +195,15 @@ export const mockSettingsApi = {
     return out;
   },
 
-  defaultsSnapshot(): { rates: RatesConfig; pid: PidConfig } {
-    return { rates: { ...RATES_DEFAULTS }, pid: { ...PID_DEFAULTS } };
+  defaultsSnapshot(): {
+    rates: RatesConfig;
+    pid: PidConfig;
+    filters: FiltersConfig;
+  } {
+    return {
+      rates: { ...RATES_DEFAULTS },
+      pid: { ...PID_DEFAULTS },
+      filters: { ...FILTERS_DEFAULTS },
+    };
   },
 };

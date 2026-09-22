@@ -48,6 +48,7 @@ export {
 
 export {
   SETTINGS_KEYS,
+  SCHEMA5_FLOAT_KEYS,
   DEFAULT_SETTINGS,
   DEFAULT_SETTING_VALUES,
   cloneDefaultSettings,
@@ -63,6 +64,7 @@ export {
 } from "./settings";
 export type {
   SettingsKey,
+  Schema5FloatKey,
   ParsedGetReply,
   ParsedSetReply,
 } from "./settings";

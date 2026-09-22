@@ -4,14 +4,14 @@
  */
 
 /**
- * FW-locked first-12 CLI settings keys (get/set/save/defaults).
+ * FW-locked CLI settings (get/set/save/defaults) + Schema5 Filters R0 LPF.
  * Reply shapes (exact, no spaces around '='):
  *   get ok:      `<key>=<value>\r\n`  — value via snprintf "%.6g"
  *   get unknown: `unknown key\r\n`
  *   set ok:      `ok <key>=<value>\r\n` — after config_set_key + re-get
  *   set unknown: `unknown key\r\n`
  *   set bad:     `set failed\r\n`
- *   save ok:     `saved\r\n`
+ *   save ok:     `saved\r\n` / host: `saved: flash verified\r\n`
  *   save fail:   `save failed\r\n`
  *   defaults:    `defaults restored\r\n` (does not auto-save)
  *
@@ -19,8 +19,18 @@
  *   rate_max_*: 10..2000
  *   rate_expo:  0..1
  *   other pid_*: 0..10, must be finite
+ *   gyro_lpf_hz / dterm_lpf_hz: 0=off else 10..1000 — FW Lead+Flight lock 2026-09-22
+ *   min_throttle: 0..0.2; airmode: 0|1
  */
 
+/** Filters R0 / Schema 5 float keys (no notches). FW Lead+Flight lock 2026-09-22. */
+export const SCHEMA5_FLOAT_KEYS = ["gyro_lpf_hz", "dterm_lpf_hz"] as const;
+
+export type Schema5FloatKey = (typeof SCHEMA5_FLOAT_KEYS)[number];
+
+/**
+ * Float get/set keys: first-12 PID/rate + Gate2 min_throttle/airmode + Schema5 LPF.
+ */
 export const SETTINGS_KEYS = [
   "rate_max_roll",
   "rate_max_pitch",
@@ -36,6 +46,7 @@ export const SETTINGS_KEYS = [
   "pid_yaw_i",
   "min_throttle",
   "airmode",
+  ...SCHEMA5_FLOAT_KEYS,
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -113,6 +124,9 @@ export const DEFAULT_SETTING_VALUES: Readonly<Record<SettingsKey, number>> = {
   pid_yaw_i: 0.001,
   min_throttle: 0.05,
   airmode: 0,
+  // Schema5 Filters R0 — FW Lead+Flight lock 2026-09-22
+  gyro_lpf_hz: 320,
+  dterm_lpf_hz: 53,
 };
 
 /**
@@ -134,6 +148,8 @@ export const DEFAULT_SETTINGS: Readonly<Record<SettingsKey, string>> = {
   pid_yaw_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_i),
   min_throttle: formatFwFloat(DEFAULT_SETTING_VALUES.min_throttle),
   airmode: formatFwFloat(DEFAULT_SETTING_VALUES.airmode),
+  gyro_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.gyro_lpf_hz),
+  dterm_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.dterm_lpf_hz),
 };
 
 export function cloneDefaultSettings(): Record<SettingsKey, string> {
@@ -160,6 +176,11 @@ export function validateSettingValue(key: SettingsKey, value: number): boolean {
   }
   if (key === "airmode") {
     return value === 0 || value === 1;
+  }
+  // Schema5 Filters R0 — FW Lead+Flight lock 2026-09-22: 0=off else 10..1000
+  if (key === "gyro_lpf_hz" || key === "dterm_lpf_hz") {
+    if (value === 0) return true;
+    return value >= 10 && value <= 1000;
   }
   // pid_* and any other known key: 0..10
   return value >= 0 && value <= 10;

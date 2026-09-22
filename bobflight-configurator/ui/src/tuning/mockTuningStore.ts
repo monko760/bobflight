@@ -1,5 +1,5 @@
 /**
- * Local mock Rates/PID store until Protocol exposes get/set.
+ * Local mock Rates/PID/Filters store until Protocol exposes get/set.
  * Key names locked to FW/Lead contract — do not rename.
  */
 
@@ -24,6 +24,12 @@ export type PidConfig = {
   // pid_yaw_d omitted for now (Lead)
 };
 
+/** Filters R0 — gyro/dterm LPF only (no notches). FW-locked defaults. */
+export type FiltersConfig = {
+  gyro_lpf_hz: number;
+  dterm_lpf_hz: number;
+};
+
 export const RATES_DEFAULTS: RatesConfig = {
   rate_max_roll: 800,
   rate_max_pitch: 800,
@@ -44,8 +50,15 @@ export const PID_DEFAULTS: PidConfig = {
   airmode: 0,
 };
 
+/** FW lock: gyro_lpf_hz=320, dterm_lpf_hz=53. */
+export const FILTERS_DEFAULTS: FiltersConfig = {
+  gyro_lpf_hz: 320,
+  dterm_lpf_hz: 53,
+};
+
 let ratesState: RatesConfig = { ...RATES_DEFAULTS };
 let pidState: PidConfig = { ...PID_DEFAULTS };
+let filtersState: FiltersConfig = { ...FILTERS_DEFAULTS };
 
 export function getRates(): RatesConfig {
   return { ...ratesState };
@@ -71,4 +84,17 @@ export function setPid(next: PidConfig): void {
 export function resetPid(): PidConfig {
   pidState = { ...PID_DEFAULTS };
   return getPid();
+}
+
+export function getFilters(): FiltersConfig {
+  return { ...filtersState };
+}
+
+export function setFilters(next: FiltersConfig): void {
+  filtersState = { ...next };
+}
+
+export function resetFilters(): FiltersConfig {
+  filtersState = { ...FILTERS_DEFAULTS };
+  return getFilters();
 }

@@ -27,8 +27,9 @@ export {
   parseDefaultsReply,
   isSettingsKey,
   DEFAULT_SETTINGS,
+  SCHEMA5_FLOAT_KEYS,
 } from "@bobflight/protocol";
-export type { ParsedGetReply, ParsedSetReply } from "@bobflight/protocol";
+export type { ParsedGetReply, ParsedSetReply, Schema5FloatKey } from "@bobflight/protocol";
 
 export { parsePorts, parseModes, modeRangeCommand, isModeRangeCommand, controlSourceCommand, isControlSourceCommand, controlModeCommand, isControlModeCommand, canEditModeRanges, canSelectControlSource, canSelectControlMode } from "@bobflight/protocol";
 export type { ParsedPorts, ParsedModes, ModeRow } from "@bobflight/protocol";
