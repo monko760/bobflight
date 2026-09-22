@@ -223,65 +223,113 @@ bool hal_tim_dma_set_bit_rate(uint32_t hz)
     return hz == 300000u || hz == 600000u;
 }
 
-/* ---- DShot M1 IC (host: test inject / no TIM) ---- */
-static uint16_t *g_m1_ic_buf;
-static size_t g_m1_ic_cap;
-static size_t g_m1_ic_n;
-static uint16_t g_m1_ic_bit_ticks = 1u;
-static bool g_m1_ic_armed;
+/* ---- DShot M1–M4 IC (host: test inject / no TIM) ---- */
+typedef struct {
+    uint16_t *buf;
+    size_t cap;
+    size_t n;
+    uint16_t bit_ticks;
+    bool armed;
+} host_ic_slot_t;
 
-bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap)
+static host_ic_slot_t g_ic[HAL_DSHOT_IC_MOTOR_COUNT];
+
+bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap)
 {
-    if (!edge_buf || cap == 0u) {
+    host_ic_slot_t *s;
+    if (motor >= HAL_DSHOT_IC_MOTOR_COUNT || !edge_buf || cap == 0u) {
         return false;
     }
-    g_m1_ic_buf = edge_buf;
-    g_m1_ic_cap = cap;
-    g_m1_ic_n = 0u;
-    g_m1_ic_armed = true;
+    s = &g_ic[motor];
+    s->buf = edge_buf;
+    s->cap = cap;
+    s->n = 0u;
+    s->armed = true;
+    if (s->bit_ticks == 0u) {
+        s->bit_ticks = 1u;
+    }
     return true;
 }
 
-size_t hal_dshot_m1_ic_take(void)
+void hal_dshot_ic_collect(void)
 {
+    /* Host: edges are injected into per-motor bufs before take(). */
+}
+
+size_t hal_dshot_ic_take(unsigned motor)
+{
+    host_ic_slot_t *s;
     size_t n;
-    if (!g_m1_ic_armed) {
+    if (motor >= HAL_DSHOT_IC_MOTOR_COUNT) {
         return 0u;
     }
-    g_m1_ic_armed = false;
-    n = g_m1_ic_n;
-    g_m1_ic_n = 0u;
+    s = &g_ic[motor];
+    if (!s->armed) {
+        return 0u;
+    }
+    s->armed = false;
+    n = s->n;
+    s->n = 0u;
     return n;
 }
 
-void hal_dshot_m1_ic_cancel(void)
+void hal_dshot_ic_cancel(unsigned motor)
 {
-    g_m1_ic_armed = false;
-    g_m1_ic_n = 0u;
-    g_m1_ic_buf = NULL;
-    g_m1_ic_cap = 0u;
-}
-
-uint16_t hal_dshot_m1_ic_bit_period_ticks(void)
-{
-    return g_m1_ic_bit_ticks == 0u ? 1u : g_m1_ic_bit_ticks;
-}
-
-/** Host-test helper: queue synthetic edge deltas for the next take(). */
-void hal_host_dshot_m1_ic_inject(const uint16_t *deltas, size_t n, uint16_t bit_ticks)
-{
-    size_t i;
-    g_m1_ic_bit_ticks = bit_ticks == 0u ? 1u : bit_ticks;
-    if (!g_m1_ic_armed || !g_m1_ic_buf) {
+    host_ic_slot_t *s;
+    if (motor >= HAL_DSHOT_IC_MOTOR_COUNT) {
         return;
     }
-    if (n > g_m1_ic_cap) {
-        n = g_m1_ic_cap;
+    s = &g_ic[motor];
+    s->armed = false;
+    s->n = 0u;
+    s->buf = NULL;
+    s->cap = 0u;
+}
+
+void hal_dshot_ic_cancel_all(void)
+{
+    unsigned i;
+    for (i = 0u; i < HAL_DSHOT_IC_MOTOR_COUNT; i++) {
+        hal_dshot_ic_cancel(i);
+    }
+}
+
+uint16_t hal_dshot_ic_bit_period_ticks(unsigned motor)
+{
+    host_ic_slot_t *s;
+    if (motor >= HAL_DSHOT_IC_MOTOR_COUNT) {
+        return 1u;
+    }
+    s = &g_ic[motor];
+    return s->bit_ticks == 0u ? 1u : s->bit_ticks;
+}
+
+/** Host-test helper: queue synthetic edge deltas for motor (default M1). */
+void hal_host_dshot_ic_inject(unsigned motor, const uint16_t *deltas, size_t n,
+                              uint16_t bit_ticks)
+{
+    host_ic_slot_t *s;
+    size_t i;
+    if (motor >= HAL_DSHOT_IC_MOTOR_COUNT) {
+        return;
+    }
+    s = &g_ic[motor];
+    s->bit_ticks = bit_ticks == 0u ? 1u : bit_ticks;
+    if (!s->armed || !s->buf) {
+        return;
+    }
+    if (n > s->cap) {
+        n = s->cap;
     }
     for (i = 0u; i < n; i++) {
-        g_m1_ic_buf[i] = deltas[i];
+        s->buf[i] = deltas[i];
     }
-    g_m1_ic_n = n;
+    s->n = n;
+}
+
+void hal_host_dshot_m1_ic_inject(const uint16_t *deltas, size_t n, uint16_t bit_ticks)
+{
+    hal_host_dshot_ic_inject(0u, deltas, n, bit_ticks);
 }
 
 bool hal_exti_attach(hal_pin_t pin, hal_exti_cb_t cb, void *ctx)
