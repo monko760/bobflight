@@ -19,9 +19,9 @@ export type PidConfig = {
   pid_pitch_d: number;
   pid_yaw_p: number;
   pid_yaw_i: number;
+  pid_yaw_d: number;
   min_throttle: number;
   airmode: number;
-  // pid_yaw_d omitted for now (Lead)
 };
 
 /** Filters R0 — gyro/dterm LPF only (no notches). FW-locked defaults. */
@@ -46,6 +46,7 @@ export const PID_DEFAULTS: PidConfig = {
   pid_pitch_d: 0.00005,
   pid_yaw_p: 0.002,
   pid_yaw_i: 0.001,
+  pid_yaw_d: 0.00005,
   min_throttle: 0.05,
   airmode: 0,
 };
