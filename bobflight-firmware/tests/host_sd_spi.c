@@ -18,6 +18,7 @@ typedef enum {
     MOCK_CARD_SDSC,          /* Standard capacity (CCS = 0) */
     MOCK_CARD_READ_BAD_CRC,  /* Corrupts read CRC16 */
     MOCK_CARD_WRITE_REJECT,  /* Rejects data write (0x0B status) */
+    MOCK_CARD_WRITE_DELAY,
     MOCK_CARD_CSD_BAD_CRC,
     MOCK_CARD_CSD_MAX,
     MOCK_CARD_UNRESPONSIVE   /* Ignores commands / times out */
@@ -25,6 +26,7 @@ typedef enum {
 
 typedef struct {
     mock_card_type_t type;
+    unsigned write_commands;
     uint8_t memory[16][512]; /* Mock storage for 16 sectors */
 
     /* SPI bus state */
@@ -190,6 +192,7 @@ static void process_mock_cmd(void) {
         break;
 
     case 24: /* CMD24: WRITE_BLOCK */
+        g_mock.write_commands++;
         fifo_push(0x00); /* R1: Success */
         g_mock.active_write_sector = arg;
         g_mock.receiving_write_data = true;
@@ -233,6 +236,7 @@ static void mock_start_exchange(uint8_t tx_byte, void *user_ctx) {
                 if (g_mock.type == MOCK_CARD_WRITE_REJECT) {
                     fifo_push(0x0B); /* Data rejected due to CRC error */
                 } else {
+                    if(g_mock.type==MOCK_CARD_WRITE_DELAY){for(unsigned delay=0;delay<4;delay++)fifo_push(0xFF);}
                     fifo_push(0x05); /* Data accepted */
                     /* Save to mock memory */
                     if (g_mock.active_write_sector < 16) {
@@ -559,7 +563,9 @@ static void test_additional_guards(void){
  io=create_mock_io();reset_mock_card(MOCK_CARD_SDHC_64GB);sd_spi_init_ctx(&sd,&io);assert(sd_spi_begin_init(&sd,now)==SD_SPI_OK);assert(drive_sd_poll_until_done(&sd,&now,2000)==SD_SPI_OK);
  uint8_t data[512];memset(data,0xfe,sizeof data);assert(sd_spi_begin_write(&sd,7,data,now)==SD_SPI_OK);assert(drive_sd_poll_until_done(&sd,&now,2000)==SD_SPI_OK);assert(!memcmp(data,g_mock.memory[7],512));
  memset(data,0,sizeof data);assert(sd_spi_begin_read(&sd,7,data,now)==SD_SPI_OK);assert(drive_sd_poll_until_done(&sd,&now,2000)==SD_SPI_OK);for(unsigned i=0;i<512;i++)assert(data[i]==0xfe);assert(!g_mock.cs_asserted);
- puts("PASS extra guards: independent CRC vectors, CSD CRC rejection, 2TiB counter boundary, missing CS callback, payload starting with token byte, sequential write/read");
+ reset_mock_card(MOCK_CARD_WRITE_DELAY);sd_spi_init_ctx(&sd,&io);assert(sd_spi_begin_init(&sd,now)==SD_SPI_OK);assert(drive_sd_poll_until_done(&sd,&now,2000)==SD_SPI_OK);
+ assert(sd_spi_begin_write(&sd,3,data,now)==SD_SPI_OK);assert(drive_sd_poll_until_done(&sd,&now,2000)==SD_SPI_OK);assert(!memcmp(data,g_mock.memory[3],512));
+ puts("PASS extra guards: delayed write response, independent CRC vectors, CSD CRC rejection, 2TiB counter boundary, missing CS callback, payload starting with token byte, sequential write/read");
 }
 
 int main(void) {

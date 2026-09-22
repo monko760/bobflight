@@ -27,7 +27,8 @@
     "test:ports-modes": "tsc && node tests/ports-modes.cjs",
     "test:flight-modes": "tsc && node tests/flight-modes.cjs",
     "test:bootloader": "tsc && node tests/bootloader.cjs",
-    "test:pid-diagnostics": "tsc && node tests/pid-diagnostics.cjs"
+    "test:pid-diagnostics": "tsc && node tests/pid-diagnostics.cjs",
+    "test:sd": "tsc && node tests/sd-probe.cjs"
   },
   "engines": {
     "node": ">=18"

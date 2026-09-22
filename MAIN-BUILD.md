@@ -49,7 +49,7 @@ modes
 receiver
 ```
 
-Expected: board `kakute_f7_hdv`, version `0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2`, status `flight_mode: closed-loop-development`, `flight_enabled: 1` in modes/storage, initially disarmed, and supported flash storage. The status label describes the control capability of the single main image; it is not a second selectable build. Stop on a wrong board/version, failed storage restore, unexpected active output, or unreliable USB.
+Expected: board `kakute_f7_hdv`, version `0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2-sdprobe1`, status `flight_mode: closed-loop-development`, `flight_enabled: 1` in modes/storage, initially disarmed, and supported flash storage. The status label describes the control capability of the single main image; it is not a second selectable build. Stop on a wrong board/version, failed storage restore, unexpected active output, or unreliable USB.
 
 ## 3. Configure and confirm persistence on the same image
 
@@ -87,3 +87,7 @@ The current Blackbox tab is a **browser-side asynchronous USB snapshot recorder*
 `pid_diag` is a separate **zero-output, disarmed** diagnostic. Its motor values are virtual commands, not measured RPM, and it is not a recording of the armed flight PID. Do not start that diagnostic while performing the armed test or interpret its inactive status as evidence that the armed controller is inactive. A dedicated high-rate armed PID-term recorder remains additional work.
 
 On a stop condition: disarm, disconnect motor power if output does not stop, preserve logs/configuration, and investigate before retrying. There is no requirement to switch to a separate bench image to save or diagnose this main build.
+
+## SD card diagnostics
+
+The Blackbox tab now includes an onboard SD-card panel. See [SD-CARD.md](SD-CARD.md) for its read-only scope and tests. It does not yet provide flight-log downloads or USB removable-drive mode. The existing JSON/CSV recorder remains a separate low-rate USB bench tool.

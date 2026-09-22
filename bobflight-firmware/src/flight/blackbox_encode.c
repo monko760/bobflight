@@ -66,12 +66,14 @@ size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
  n=add(b,n,sizeof b,"\n");if(n>=sizeof b||n>=cap)return 0;memcpy(dst,b,n+1u);return n;
 }
 static bool quant(float value,double scale,int32_t *out){
- if(!isfinite(value))return false;double v=(double)value*scale;
+ if(!isfinite(value))return false;
+ double v=(double)value*scale;
  double q=v<0?ceil(v-0.5):floor(v+0.5);if(q<(double)INT32_MIN||q>(double)INT32_MAX)return false;*out=(int32_t)q;return true;
 }
 static size_t uv(uint8_t *dst,uint32_t v){size_t n=0;while(v>=128u){dst[n++]=(uint8_t)((v&127u)|128u);v>>=7;}dst[n++]=(uint8_t)v;return n;}
 size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){
- if(!dst||!s)return 0;int32_t v[FIELD_COUNT]={0};uint32_t u[FIELD_COUNT]={0};
+ if(!dst||!s)return 0;
+ int32_t v[FIELD_COUNT]={0};uint32_t u[FIELD_COUNT]={0};
  u[0]=s->iteration;u[1]=s->time_us;
  for(unsigned a=0;a<3;a++){
   if(!quant(s->gyro[a],10,&v[2+a])||!quant(s->gyro_raw[a],10,&v[5+a])||!quant(s->setpoint[a],1,&v[8+a])||!quant(s->p[a],1000,&v[12+a])||!quant(s->i[a],1000,&v[15+a])||!quant(s->d[a],1000,&v[18+a])||!quant(s->pid_output[a],1000,&v[21+a])||!quant(s->setpoint[a]-s->gyro[a],1,&v[32+a]))return 0;
@@ -89,9 +91,11 @@ size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){
   uint32_t bits=unsigned_field(i)?u[i]:((uint32_t)v[i]<<1)^(v[i]<0?UINT32_MAX:0u);
   n+=uv(b+n,bits);
  }
- if(cap<n)return 0;memcpy(dst,b,n);return n;
+ if(cap<n)return 0;
+ memcpy(dst,b,n);return n;
 }
 size_t blackbox_end(uint8_t *dst,size_t cap){
  static const uint8_t end[]={'E',255,'E','n','d',' ','o','f',' ','l','o','g',0};
- if(!dst||cap<sizeof end)return 0;memcpy(dst,end,sizeof end);return sizeof end;
+ if(!dst||cap<sizeof end)return 0;
+ memcpy(dst,end,sizeof end);return sizeof end;
 }

@@ -85,7 +85,8 @@ void pid_update(const float gyro_dps[3], const float setpoint_dps[3],
             g_trace.dt=DT;g_trace.gyro[a]=gyro_dps[a];g_trace.setpoint[a]=setpoint_dps[a];g_trace.error[a]=err;
             g_trace.p[a]=kp[a]*err;g_trace.i[a]=ki[a]*g_i[a];g_trace.d[a]=kd[a]*g_deriv[a];g_trace.sum[a]=axes[a];
         }
-        if(axes[a]>0.4f)axes[a]=0.4f;if(axes[a]< -0.4f)axes[a]=-0.4f;
+        if(axes[a]>0.4f)axes[a]=0.4f;
+        if(axes[a]< -0.4f)axes[a]=-0.4f;
     }
     g_have_prev = 1;
 

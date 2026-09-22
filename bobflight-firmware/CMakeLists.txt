@@ -113,6 +113,8 @@ set(BF_COMMON_SOURCES
   src/sched/scheduler.c
   src/sched/tasks.c
   src/flight/pid.c
+  src/flight/flight_recorder.c src/flight/blackbox_encode.c
+  src/drivers/sd_spi.c src/drivers/sd_probe.c
   src/flight/pid_diag.c src/flight/pid_diag_core.c
   src/flight/attitude.c
   src/flight/mixer.c
@@ -141,6 +143,25 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_recorder_test src/flight/flight_recorder.c tests/host_flight_recorder.c)
+  target_link_libraries(bobflight_recorder_test m)
+  add_test(NAME flight_recorder_bounded COMMAND bobflight_recorder_test)
+  set_tests_properties(flight_recorder_bounded PROPERTIES TIMEOUT 5)
+  add_executable(bobflight_blackbox_encode_test src/flight/blackbox_encode.c src/flight/config.c tests/host_blackbox_encode.c)
+  target_link_libraries(bobflight_blackbox_encode_test m)
+  add_test(NAME blackbox_encode COMMAND bobflight_blackbox_encode_test)
+  add_executable(bobflight_pid_trace_test src/flight/pid.c src/flight/config.c tests/pid_pr38_baseline.c tests/host_pid_trace.c)
+  target_link_libraries(bobflight_pid_trace_test m)
+  add_test(NAME pid_trace_bit_exact COMMAND bobflight_pid_trace_test)
+  add_executable(bobflight_sd_probe_test src/drivers/sd_probe.c src/drivers/sd_spi.c tests/host_sd_probe.c)
+  add_test(NAME sd_readonly_probe COMMAND bobflight_sd_probe_test)
+  add_executable(bobflight_sd_cli_test src/drivers/sd_probe.c src/drivers/sd_spi.c tests/host_sd_cli.c)
+  add_test(NAME sd_cli_guards COMMAND bobflight_sd_cli_test)
+  add_executable(bobflight_sd_spi_hw_test tests/host_sd_spi_hw.c)
+  add_test(NAME sd_spi_hw_nonblocking COMMAND bobflight_sd_spi_hw_test)
+  add_executable(bobflight_sd_spi_test src/drivers/sd_spi.c tests/host_sd_spi.c)
+  add_test(NAME sd_spi_transport COMMAND bobflight_sd_spi_test)
+  set_tests_properties(sd_spi_transport PROPERTIES TIMEOUT 10)
   # Native audit of actual scheduler -> RX/failsafe -> PID/mixer -> DShot packets.
   # Hardware and diagnostic telemetry hook are mocked; never enables MCU arming.
   add_executable(bobflight_failsafe_integration_test
@@ -420,6 +441,7 @@ else()
     src/hal/stm32f7/hal_clock.c
     src/hal/stm32f7/hal_gpio.c
     src/hal/stm32f7/hal_spi.c
+    src/hal/stm32f7/sd_spi_hw.c
     src/hal/stm32f7/hal_adc.c
     src/hal/stm32f7/hal_uart.c
     src/hal/stm32f7/hal_tim_dma.c

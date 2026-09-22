@@ -437,22 +437,15 @@ sd_spi_status_t sd_poll(sd_spi_t *sd, uint64_t now_us) {
             sd->io_active = true;
             return SD_SPI_ERR_BUSY;
         }
-        /* OCR read complete. Verify CCS (Card Capacity Status) bit = bit 30 (bit 6 of byte 0) */
+        /* Require power-up complete, SDHC/SDXC and compatibility with the
+         * target slot's 3.3V supply. No 1.8V signaling negotiation is performed. */
         if ((sd->card_info.ocr[0] & 0xC0) != 0xC0 || (sd->card_info.ocr[1] & 0x30) == 0) {
-            /* CCS is 0 => Standard Capacity card (SDSC), reject! */
+            /* Fail closed for unsupported capacity/voltage state. */
             transition_error(sd, SD_SPI_ERR_UNSUPPORTED);
             return SD_SPI_ERR_UNSUPPORTED;
         }
         set_cs(sd, false);
         sd->substate = SUB_INIT_SWITCH_SPEED;
-        if (sd->io.set_speed) {
-            sd->io.set_speed(SD_SPI_SPEED_FAST, sd->io.user_ctx);
-        }
-        set_cs(sd, true);
-        prepare_cmd(sd, 9, 0); /* CMD9 SEND_CSD */
-        sd->substate = SUB_INIT_CMD9_SEND;
-        sd->io.spi_start_exchange(sd->cmd_buf[sd->cmd_idx++], sd->io.user_ctx);
-        sd->io_active = true;
         return SD_SPI_ERR_BUSY;
 
     case SUB_INIT_SWITCH_SPEED:
@@ -734,11 +727,17 @@ sd_spi_status_t sd_poll(sd_spi_t *sd, uint64_t now_us) {
         }
         /* Both CRC bytes sent. Now read Data Response Byte */
         sd->substate = SUB_WRITE_RESP;
+        sd->step_start_us=now_us;sd->ncr_attempts=0;
         sd->io.spi_start_exchange(0xFF, sd->io.user_ctx);
         sd->io_active = true;
         return SD_SPI_ERR_BUSY;
 
     case SUB_WRITE_RESP:
+        /* A delayed response is not a rejection; clock it with bounded polls. */
+        if(rx_byte==0xFF){
+            if(++sd->ncr_attempts>64u||now_us-sd->step_start_us>100000u){transition_error(sd,SD_SPI_ERR_TIMEOUT);return SD_SPI_ERR_TIMEOUT;}
+            sd->io.spi_start_exchange(0xFF,sd->io.user_ctx);sd->io_active=true;return SD_SPI_ERR_BUSY;
+        }
         /* Data response byte received */
         uint8_t status = rx_byte & 0x1F;
         if (status == 0x05) { /* Data accepted */

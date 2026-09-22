@@ -43,6 +43,10 @@ typedef struct {
     hal_pin_t gyro_exti_pin;
     char      gyro_align[16];
 
+    /* Optional SD capability. No slot means SPI=0 and invalid pins. */
+    unsigned sd_spi_bus;
+    hal_pin_t sd_cs_pin,sd_sck_pin,sd_miso_pin,sd_mosi_pin,sd_detect_pin;
+
     /* motors */
     board_motor_ch_t motors[BOARD_MOTOR_MAX];
     unsigned         motor_count;
