@@ -6,6 +6,7 @@ import { CommandGate } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 
 import { DEFAULT_MOTOR_POLES, MOTOR_POLES_KEY, readMotorPoles, storeMotorPoles, validMotorPoles } from "../src/motors/motorPoles";
+import { parseErpmReply, parseTelemReply, detailForTelemStatus, emptyErpmCells } from "../src/motors/erpmTelemetry";
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log(`PASS ${name}`); }
 const ack = "motor test accepted (one second maximum)\r\n";
@@ -31,6 +32,9 @@ class FakeHost {
     if (cmd.startsWith("dshot ")) { this.rate = Number(cmd.slice(6)); return `dshot: switched to ${this.rate} kbps`; }
     if (cmd === "motor_seq") return "sequence running: RR FR RL FL, 1s each - watch spin direction";
     if (cmd.startsWith("motor_pulse ")) return "motor pulse accepted (one second maximum)";
+    // R0c: honest empty eRPM / telem (never invent 0).
+    if (/^get erpm_m[1-4]$/.test(cmd)) return `${cmd.slice(4)}=none\r\n`;
+    if (/^get dshot_telem_m[1-4]$/.test(cmd)) return "none\r\n";
     return ack;
   }
 }
@@ -249,6 +253,27 @@ async function main() {
     assert.equal(readMotorPoles(null),14);assert.equal(storeMotorPoles(14,null),false);
     const denied={getItem:()=>{throw new Error("denied");},setItem:()=>{throw new Error("quota");}};
     assert.equal(readMotorPoles(denied),14);assert.equal(storeMotorPoles(16,denied),false);
+  });
+  await test("R0c erpm parse never invents 0; telem enriches detail", () => {
+    assert.deepEqual(parseErpmReply(1, "erpm_m1=none"), { value: null, detail: "Waiting telem" });
+    assert.deepEqual(parseErpmReply(2, "erpm_m2=24700"), { value: 24700, detail: "Live" });
+    assert.equal(parseErpmReply(3, "erpm_m3=0").value, 0); // real zero only when FW says so
+    assert.equal(parseTelemReply("crc_fail\r\n"), "crc_fail");
+    assert.equal(detailForTelemStatus("timeout"), "Timeout");
+    assert.equal(emptyErpmCells()[4].detail, "Waiting telem");
+    assert.notEqual(emptyErpmCells()[2].detail, "Waiting FW R0c");
+  });
+  await test("bench poll hits erpm_m1..m4 and telem when erpm is none", async () => {
+    const host = new FakeHost();
+    const c = new BenchController(host, () => 100);
+    c.connection(true);
+    await c.poll();
+    for (const n of [1, 2, 3, 4] as const) {
+      assert.ok(host.commands.includes(`get erpm_m${n}`), `missing erpm_m${n}`);
+      assert.ok(host.commands.includes(`get dshot_telem_m${n}`), `missing telem_m${n}`);
+      assert.equal(c.state.erpm[n].value, null);
+      assert.equal(c.state.erpm[n].detail, "Waiting telem");
+    }
   });
   console.log(`${passed} motor-bench tests passed`);
 }
