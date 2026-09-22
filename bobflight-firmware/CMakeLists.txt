@@ -192,7 +192,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
       COMMAND bobflight_failsafe_integration_test ${fs_case})
   endforeach()
   add_executable(bobflight_pid_diag_task_test tests/host_pid_diag_task.c
-    src/sched/tasks.c src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c src/flight/filter.c
+    src/sched/scheduler.c src/sched/tasks.c src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c src/flight/filter.c
     src/flight/mixer.c src/flight/attitude.c src/flight/config.c src/flight/rates.c
     src/flight/mode_range.c src/flight/horizon.c)
   target_compile_definitions(bobflight_pid_diag_task_test PRIVATE BOBFLIGHT_HOST=1)
@@ -240,7 +240,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mode_range_test src/flight/mode_range.c tests/host_mode_range.c)
   target_link_libraries(bobflight_mode_range_test m)
   add_test(NAME mode_range COMMAND bobflight_mode_range_test)
-  add_executable(bobflight_pid_elapsed_test src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c)
+  add_executable(bobflight_pid_elapsed_test src/sched/scheduler.c src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c)
   target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/rates.c src/flight/config.c)
   target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_pid_elapsed_test m)
@@ -392,7 +392,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_mpu6000_relaxed_test m)
   add_test(NAME mpu6000_relaxed COMMAND bobflight_mpu6000_relaxed_test)
   add_executable(bobflight_bench_safety_test
-    src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/mixer.c
+    src/sched/scheduler.c src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/mixer.c
     src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c)
   target_compile_definitions(bobflight_bench_safety_test PRIVATE BOBFLIGHT_HOST=1)
   target_sources(bobflight_bench_safety_test PRIVATE src/flight/rates.c)
@@ -414,7 +414,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME flight_modes_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_flight_modes_cli.py $<TARGET_FILE:bobflight_host>)
   add_executable(bobflight_control_mode_test
-    src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/attitude.c
+    src/sched/scheduler.c src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/attitude.c
     src/flight/rates.c src/flight/config.c tests/host_control_mode.c)
   target_compile_definitions(bobflight_control_mode_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_FLIGHT_ENABLE=1)
   target_sources(bobflight_control_mode_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
@@ -425,6 +425,11 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
 
   foreach(task_test pid_elapsed bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)
+  endforeach()
+  # Filters R0: loop_filter() needs gyro_filter_set_dt; these targets stub gyro_filter
+  # and cannot link drivers/gyro.c, so provide a host-only no-op.
+  foreach(task_test failsafe_integration pid_diag_task pid_elapsed bench_safety control_mode)
+    target_sources(bobflight_${task_test}_test PRIVATE tests/gyro_filter_dt_stub.c)
   endforeach()
   get_target_property(BB_TASK_SOURCES bobflight_control_mode_test SOURCES)
   list(REMOVE_ITEM BB_TASK_SOURCES tests/host_control_mode.c)
