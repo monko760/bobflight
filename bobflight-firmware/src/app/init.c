@@ -100,7 +100,7 @@ static void boot_led_heartbeat(void)
 
     hal_gpio_init(led, HAL_GPIO_OUT);
 
-    src = hal_clock_usb_src();
+    src = hali_clock_usb_src();
     if (src != NULL && strcmp(src, "hse-pll") == 0) {
         flashes = 1u;
     } else if (src != NULL && strcmp(src, "hsi-pll") == 0) {
@@ -227,7 +227,7 @@ bool app_init(void)
     boot_busywait_ms(5u);
 #endif
     if (b && b->usb_enable_cdc) {
-        const char *usb_src = hal_clock_usb_src();
+        const char *usb_src = hali_clock_usb_src();
         if (usb_src != NULL && strcmp(usb_src, "hsi-raw") == 0) {
             /* No USB 48 MHz -- Device Manager would stay silent; skip hang risk. */
         } else {
