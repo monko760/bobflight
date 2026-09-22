@@ -10,6 +10,7 @@ import {
   MockTransportFactory,
   MOCK_PORT_PATH,
   SETTINGS_KEYS,
+  SCHEMA5_FLOAT_KEYS,
   DEFAULT_SETTINGS,
   formatFwFloat,
   parseGetReply,
@@ -53,10 +54,17 @@ async function main(): Promise<void> {
   // Give banner idle time so it does not collide with first get collector.
   await new Promise((r) => setTimeout(r, 60));
 
-  // --- get all 12 ---
+  // --- get all float keys (first-12 + Gate2 + Schema5 LPF) ---
   const all = await client.getAllSettings();
   console.log("getAllSettings keys:", Object.keys(all).length);
   assert(Object.keys(all).length === SETTINGS_KEYS.length, `${SETTINGS_KEYS.length} keys`);
+  assert(
+    SCHEMA5_FLOAT_KEYS[0] === "gyro_lpf_hz" &&
+      SCHEMA5_FLOAT_KEYS[1] === "dterm_lpf_hz",
+    "SCHEMA5_FLOAT_KEYS"
+  );
+  assert(SETTINGS_KEYS.includes("gyro_lpf_hz"), "SETTINGS_KEYS has gyro_lpf_hz");
+  assert(SETTINGS_KEYS.includes("dterm_lpf_hz"), "SETTINGS_KEYS has dterm_lpf_hz");
   for (const key of SETTINGS_KEYS) {
     assert(all[key] === DEFAULT_SETTINGS[key], `default ${key}=${all[key]}`);
     console.log(`  ${key}=${all[key]}`);
@@ -118,6 +126,31 @@ async function main(): Promise<void> {
   const still = await client.getSetting("pid_roll_p");
   assert(still.value === "0.005", `unchanged after fail, got ${still.value}`);
 
+  // --- Schema5 Filters R0 (FW Lead LOCKED LPF) ---
+  assert(all.gyro_lpf_hz === "320", `default gyro_lpf_hz=${all.gyro_lpf_hz}`);
+  assert(all.dterm_lpf_hz === "53", `default dterm_lpf_hz=${all.dterm_lpf_hz}`);
+  const gLpf = parseGetReply("gyro_lpf_hz=320\r\n");
+  assert(gLpf.ok && gLpf.key === "gyro_lpf_hz" && gLpf.value === "320", "parseGet LPF");
+  const sLpf = parseSetReply("ok dterm_lpf_hz=53\r\n");
+  assert(sLpf.ok && sLpf.key === "dterm_lpf_hz" && sLpf.value === "53", "parseSet LPF");
+  const setLpf = await client.setSetting("gyro_lpf_hz", "250");
+  assert(setLpf.value === "250", `set gyro_lpf_hz got ${setLpf.value}`);
+  const getLpf = await client.getSetting("gyro_lpf_hz");
+  assert(getLpf.value === "250", `get gyro_lpf_hz got ${getLpf.value}`);
+  const setOff = await client.setSetting("dterm_lpf_hz", "0");
+  assert(setOff.value === "0", "dterm_lpf_hz 0=off");
+  const lpfOorHi = await client.sendRaw("set gyro_lpf_hz 1001");
+  assert(lpfOorHi.trim() === "set failed", `LPF hi OOR: ${JSON.stringify(lpfOorHi)}`);
+  const lpfOorLo = await client.sendRaw("set gyro_lpf_hz 9");
+  assert(lpfOorLo.trim() === "set failed", `LPF lo OOR (9): ${JSON.stringify(lpfOorLo)}`);
+  const lpfFive = await client.sendRaw("set gyro_lpf_hz 5");
+  assert(lpfFive.trim() === "set failed", `LPF set 5 must fail: ${JSON.stringify(lpfFive)}`);
+  const lpfNeg = await client.sendRaw("set dterm_lpf_hz -1");
+  assert(lpfNeg.trim() === "set failed", `LPF neg: ${JSON.stringify(lpfNeg)}`);
+  const lpfOk10 = await client.setSetting("dterm_lpf_hz", "10");
+  assert(lpfOk10.value === "10", "dterm_lpf_hz 10 edge ok");
+  console.log("Schema5 LPF get/set/range (locked): ok");
+
   // --- save acks ---
   await client.saveSettings().then(() => { throw new Error("Mock must not claim flash persistence"); }, () => {});
   console.log("saveSettings: mock correctly refuses durable controller save");
@@ -135,6 +168,14 @@ async function main(): Promise<void> {
   assert(
     afterDefaults.pid_roll_d === DEFAULT_SETTINGS.pid_roll_d,
     `defaults pid_roll_d=${afterDefaults.pid_roll_d}`
+  );
+  assert(
+    afterDefaults.gyro_lpf_hz === DEFAULT_SETTINGS.gyro_lpf_hz,
+    `defaults gyro_lpf_hz=${afterDefaults.gyro_lpf_hz}`
+  );
+  assert(
+    afterDefaults.dterm_lpf_hz === DEFAULT_SETTINGS.dterm_lpf_hz,
+    `defaults dterm_lpf_hz=${afterDefaults.dterm_lpf_hz}`
   );
   console.log("restoreDefaults: pid_roll_p back to", afterDefaults.pid_roll_p);
 

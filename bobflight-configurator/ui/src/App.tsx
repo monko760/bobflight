@@ -4,6 +4,7 @@ import { ConnectPage } from "./pages/ConnectPage";
 import { StatusPage } from "./pages/StatusPage";
 import { RatesPage } from "./pages/RatesPage";
 import { PidPage } from "./pages/PidPage";
+import { FiltersPage } from "./pages/FiltersPage";
 import { CliPage } from "./pages/CliPage";
 import { FlasherPage } from "./pages/FlasherPage";
 import { SetupPage } from "./pages/SetupPage";
@@ -33,6 +34,7 @@ type Tab =
   | "status"
   | "rates"
   | "pid"
+  | "filters"
   | "cli";
 
 const GATED_TABS: ReadonlySet<Tab> = new Set([
@@ -49,6 +51,7 @@ const GATED_TABS: ReadonlySet<Tab> = new Set([
   "status",
   "rates",
   "pid",
+  "filters",
   "cli",
 ]);
 
@@ -100,6 +103,7 @@ function Shell() {
               ["status", "Status"],
               ["rates", "Rates"],
               ["pid", "PID"],
+              ["filters", "Filters"],
               ["cli", "CLI"],
             ] as const
           ).map(([id, label]) => {
@@ -145,6 +149,7 @@ function Shell() {
           {tab === "status" && <StatusPage />}
           {tab === "rates" && <RatesPage />}
           {tab === "pid" && <PidPage />}
+          {tab === "filters" && <FiltersPage />}
           {tab === "cli" && <CliPage />}
         </main>
       </div>
