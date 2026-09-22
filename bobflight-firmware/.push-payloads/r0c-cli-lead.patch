@@ -1,0 +1,86 @@
+diff --git a/bobflight-firmware/src/drivers/cli.c b/bobflight-firmware/src/drivers/cli.c
+index b9f64a6..a7d1093 100644
+--- a/bobflight-firmware/src/drivers/cli.c
++++ b/bobflight-firmware/src/drivers/cli.c
+@@ -72,7 +72,7 @@ static void cmd_help(void)
+         "  mode_range <ARM|ANGLE|ACRO|HORIZON> <0|1> <1..12> <min> <max> - configure mode range\r\n"
+         "  power - battery readings and configuration\r\n"
+         "  power_config <divider> <mV/A or 0> <offset_mV> <cells or 0> <warn_V> <critical_V> <mAh> - until reboot\r\n"
+-        "  get      - get <key> (incl. erpm_m1, dshot_telem_m1, dshot_bidir)\r\n"
++        "  get      - get <key> (incl. erpm_m1..m4, dshot_telem_m1..m4, dshot_bidir)\r\n"
+         "  set      - set <key> <value> (dshot_bidir on|off is RAM-only)\r\n"
+         "  storage  - backend, dirty state and verified-save status\r\n"
+         "  save     - verify/write supported settings to controller flash\r\n"
+@@ -222,29 +222,53 @@ static const char *dshot_telem_status_name(dshot_telem_status_t st)
+     }
+ }
+ 
++/* Map erpm_mN / dshot_telem_mN → motor index 0..3; -1 if not a match. */
++static int dshot_cli_motor_index(const char *key, const char *prefix)
++{
++    size_t n;
++    char digit;
++    if (!key || !prefix) {
++        return -1;
++    }
++    n = strlen(prefix);
++    if (strncmp(key, prefix, n) != 0) {
++        return -1;
++    }
++    digit = key[n];
++    if (digit < '1' || digit > '4' || key[n + 1] != '\0') {
++        return -1;
++    }
++    return (int)(digit - '1');
++}
++
+ static void cmd_get(const char *key)
+ {
+     float v;
+     char buf[64];
++    int motor;
+     if (!key) {
+         cli_write_str("unknown key\r\n");
+         return;
+     }
+-    /* R0b DShot bidir / M1 eRPM — RAM-only; not config schema. */
+-    if (strcmp(key, "erpm_m1") == 0) {
+-        if (dshot_m1_telem_status() == DSHOT_TELEM_OK) {
+-            snprintf(buf, sizeof(buf), "erpm_m1=%lu\r\n",
+-                     (unsigned long)dshot_m1_erpm());
++    /* R0c DShot bidir / M1–M4 eRPM — RAM-only; not config schema. */
++    motor = dshot_cli_motor_index(key, "erpm_m");
++    if (motor >= 0) {
++        if (dshot_telem_status((unsigned)motor) == DSHOT_TELEM_OK) {
++            snprintf(buf, sizeof(buf), "erpm_m%u=%lu\r\n",
++                     (unsigned)motor + 1u,
++                     (unsigned long)dshot_erpm((unsigned)motor));
++            cli_write_str(buf);
+         } else {
+-            cli_write_str("erpm_m1=none\r\n");
+-            return;
++            snprintf(buf, sizeof(buf), "erpm_m%u=none\r\n",
++                     (unsigned)motor + 1u);
++            cli_write_str(buf);
+         }
+-        cli_write_str(buf);
+         return;
+     }
+-    if (strcmp(key, "dshot_telem_m1") == 0) {
++    motor = dshot_cli_motor_index(key, "dshot_telem_m");
++    if (motor >= 0) {
+         snprintf(buf, sizeof(buf), "%s\r\n",
+-                 dshot_telem_status_name(dshot_m1_telem_status()));
++                 dshot_telem_status_name(dshot_telem_status((unsigned)motor)));
+         cli_write_str(buf);
+         return;
+     }
+@@ -274,7 +298,7 @@ static void cmd_set(const char *key, const char *valstr)
+         cli_write_str("set failed\r\n");
+         return;
+     }
+-    /* R0b: dshot_bidir on|off (RAM). Bad token → set failed. */
++    /* R0c: dshot_bidir on|off (RAM). Bad token → set failed. */
+     if (strcmp(key, "dshot_bidir") == 0) {
+         bool on;
+         if (strcmp(valstr, "on") == 0) {
