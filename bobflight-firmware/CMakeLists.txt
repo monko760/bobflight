@@ -126,6 +126,7 @@ set(BF_COMMON_SOURCES
   src/flight/mode_range.c
   src/drivers/gyro.c src/drivers/sensor_calibration.c
   src/drivers/dshot.c
+  src/drivers/dshot_gcr.c
   src/drivers/rx.c
   src/drivers/crsf.c
   src/drivers/cli.c
@@ -318,6 +319,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/src)
   target_compile_definitions(bobflight_dshot_frame_test PRIVATE BOBFLIGHT_HOST=1)
 
+  include(${CMAKE_SOURCE_DIR}/cmake/host_dshot_gcr.cmake)
+
   add_executable(bobflight_crsf_parse_test
     src/drivers/crsf.c
     tests/host_crsf_parse.c)
@@ -357,8 +360,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_compile_definitions(bobflight_relaxed_arming_test PRIVATE BOBFLIGHT_ACCEL_BENCH_RELAXED=1)
   target_link_libraries(bobflight_relaxed_arming_test m)
   add_test(NAME relaxed_arming COMMAND bobflight_relaxed_arming_test)
-  add_test(NAME calibration_policy_guards COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_SOURCE_DIR}/tests/host_calibration_policy_guards.py ${CMAKE_C_COMPILER} ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR})
+  add_test(NAME calibration_policy_guards COMMAND ${CMAKE_COMMAND} -E env "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/host_calibration_policy_guards.py" "${CMAKE_C_COMPILER}" "${CMAKE_COMMAND}" "${CMAKE_SOURCE_DIR}")
   add_executable(bobflight_sensor_calibration_test src/drivers/sensor_calibration.c tests/host_sensor_calibration.c)
   target_link_libraries(bobflight_sensor_calibration_test m)
   add_test(NAME sensor_calibration COMMAND bobflight_sensor_calibration_test)
@@ -406,8 +408,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_sources(bobflight_control_mode_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_control_mode_test m)
   add_test(NAME control_mode_routing COMMAND bobflight_control_mode_test)
-  add_test(NAME control_mode_cli COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_SOURCE_DIR}/tests/host_control_mode_cli.py $<TARGET_FILE:bobflight_host>)
+  add_test(NAME control_mode_cli COMMAND ${CMAKE_SOURCE_DIR}/tests/host_control_mode_cli.py $<TARGET_FILE:bobflight_host>)
 
   foreach(task_test pid_elapsed bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)
