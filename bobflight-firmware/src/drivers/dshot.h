@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "drivers/dshot_telem.h"
 
 #ifdef __cplusplus
 extern "C" {
