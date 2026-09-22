@@ -79,7 +79,8 @@ export function parseErpmReply(motor: MotorNumber, raw: string): ErpmCell {
 export function detailForTelemStatus(status: DshotTelemStatus): string {
   switch (status) {
     case "ok":
-      return "Live";
+      // Null-value path only — never claim Live without a parsed eRPM number.
+      return "Telem ok, no eRPM";
     case "crc_fail":
       return "CRC fail";
     case "invalid":
