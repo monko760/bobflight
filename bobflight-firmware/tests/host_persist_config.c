@@ -202,6 +202,7 @@ int main(void){
   assert(!config_set_key("pid_yaw_d",11.f));
  }
 
+
  supported=false;cal.accel_valid=true;before=saves;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"ram-only"));
  puts("PASS actual six-face solver -> codec -> cold restore, candidate/gyro exclusion, atomic malformed-cal refusal, dirty/save/error state, old-settings migration and unsupported target");
  puts("PASS codec offsets, validated atomic restore, repeated boot-init roundtrip, dirty tracking, guards, failed writes/readback, malformed fields and scope");
