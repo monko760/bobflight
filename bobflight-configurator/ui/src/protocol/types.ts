@@ -27,7 +27,7 @@ import type {
 
 export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "help", "ports", "modes", "storage", "save", "diff all", "dump all",
-  "version",
+  "version", "sd probe", "sd status", "sd cancel",
   "pid_diag", "pid_diag status", "pid_diag start", "pid_diag start rx", "pid_diag stop",
   "timing", "status", "sensors", "calibration", "calibration_cancel", "calibrate_gyro",
   "calibrate_accel start", "calibrate_accel apply", "calibrate_accel cancel",

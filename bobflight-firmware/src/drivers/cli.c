@@ -44,6 +44,7 @@ static void cli_write_str(const char *s)
 #include "drivers/storage_cli.h"
 #include "drivers/bootloader_cli.h"
 #include "drivers/pid_diag_cli.h"
+#include "drivers/sd_cli.h"
 
 static void cmd_control_mode(void)
 {
@@ -57,6 +58,7 @@ static void cmd_help(void)
 {
     cli_write_str(
         "BobFlight CLI\r\n"
+        "  sd probe | sd status | sd cancel - read-only SD capacity/filesystem diagnostic\r\n"
         "  help     - this text\r\n"
         "  control_mode [angle|acro|horizon] - manual control mode selection (explicit save available)\r\n"
         "  control_source manual - manual-only mode routing (aux retired)\r\n"
@@ -272,6 +274,7 @@ static void handle_line(char *line)
 
     if (bl_pending) return; /* Do not execute buffered arm/motor/config commands while exiting. */
     if (cmd_bootloader(line)) return;
+    if (cmd_sd(line)) return;
 
     if (strcmp(line, "storage") == 0) {
         cmd_storage();
@@ -405,6 +408,7 @@ void cli_poll(void)
     /* Keep TinyUSB / CDC alive on MCU (bg_cli_poll path). Host HAL no-op. */
     hal_usb_cdc_poll();
     power_poll();
+    sd_cli_poll();
     uint8_t buf[32];
     size_t n = hal_usb_cdc_read(buf, sizeof(buf));
     for (size_t i = 0; i < n; i++) {

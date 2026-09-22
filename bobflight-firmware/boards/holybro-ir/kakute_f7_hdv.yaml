@@ -25,3 +25,11 @@ serial_rx:
   uart: 6
   pins: {tx: PC6, rx: PC7}
   protocol_default: CRSF
+
+# SD slot facts: same HBRO-KAKUTEF7HDV target cited above. Separate from gyro SPI4.
+sd_spi_bus: 1
+sd_cs_pin: PA4
+sd_sck_pin: PA5
+sd_miso_pin: PA6
+sd_mosi_pin: PA7
+sd_detect_pin: PD8

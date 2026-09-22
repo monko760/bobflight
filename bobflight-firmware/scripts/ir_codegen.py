@@ -118,6 +118,12 @@ def parse_ir(raw: str, fallback_id: str) -> dict:
         "mosi": _field(raw, "mosi_pin"),
         "align": _field(raw, "gyro_align", "CW0_DEG"),
         "motors": _channel_pins(raw),
+        "sd_spi": int(_field(raw,"sd_spi_bus","0")),
+        "sd_cs": _field(raw,"sd_cs_pin"),
+        "sd_sck": _field(raw,"sd_sck_pin"),
+        "sd_miso": _field(raw,"sd_miso_pin"),
+        "sd_mosi": _field(raw,"sd_mosi_pin"),
+        "sd_detect": _field(raw,"sd_detect_pin"),
     }
 
 
@@ -172,6 +178,12 @@ def render(src: Path, ir: dict) -> str:
         f"#define BOARD_GENERATED_IR_VERIFIED  {verified}",
         f"#define BOARD_GENERATED_IR_BF_DERIVED {bf}",
         "",
+        f"#define BOARD_GENERATED_SD_SPI {ir['sd_spi'] if pack else 0}u",
+        f"#define BOARD_GENERATED_SD_CS {pin(ir['sd_cs'])}",
+        f"#define BOARD_GENERATED_SD_SCK {pin(ir['sd_sck'])}",
+        f"#define BOARD_GENERATED_SD_MISO {pin(ir['sd_miso'])}",
+        f"#define BOARD_GENERATED_SD_MOSI {pin(ir['sd_mosi'])}",
+        f"#define BOARD_GENERATED_SD_DETECT {pin(ir['sd_detect'])}",
         f"#define BOARD_GENERATED_GYRO_CS      {pin(ir['cs'])}",
         f"#define BOARD_GENERATED_GYRO_EXTI    {pin(ir['exti'])}",
         f"#define BOARD_GENERATED_GYRO_SPI     {spi}u",

@@ -47,6 +47,13 @@ bool board_ir_load_dummy(board_t *out)
     out->gyro_exti_pin = BOARD_GENERATED_GYRO_EXTI;
     strncpy(out->gyro_align, BOARD_GENERATED_GYRO_ALIGN, sizeof(out->gyro_align) - 1);
 
+    out->sd_spi_bus=BOARD_GENERATED_SD_SPI;
+    out->sd_cs_pin=BOARD_GENERATED_SD_CS;
+    out->sd_sck_pin=BOARD_GENERATED_SD_SCK;
+    out->sd_miso_pin=BOARD_GENERATED_SD_MISO;
+    out->sd_mosi_pin=BOARD_GENERATED_SD_MOSI;
+    out->sd_detect_pin=BOARD_GENERATED_SD_DETECT;
+
     out->motor_count = BOARD_MOTOR_MAX;
     out->motors[0].pin = BOARD_GENERATED_MOTOR1_PIN;
     out->motors[0].timer = (uint8_t)BOARD_GENERATED_MOTOR1_TIM;

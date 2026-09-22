@@ -57,6 +57,6 @@ Copy-Item -LiteralPath (Join-Path $build 'bobflight.hex') -Destination $hex -For
 Get-FileHash -Algorithm SHA256 -LiteralPath $hex
 
 Write-Host "BUILD COMPLETE: Single supported Kakute image built at $hex. No controller was flashed."
-$expectedVersion = '0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2'
+$expectedVersion = '0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2-sdprobe1'
 Write-Host "Expected firmware: $expectedVersion; board $Board."
 Write-Host 'Keep props removed when flashing and testing on bench.'
