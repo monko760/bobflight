@@ -125,14 +125,40 @@ bool hal_tim_dma_start_burst(hal_tim_dma_t *t, const uint16_t *words, size_t n);
 /** Re-time the DShot bit clock (300000 or 600000 Hz); false if invalid. */
 bool hal_tim_dma_set_bit_rate(uint32_t hz);
 
-/* ---- DShot M1 listen-after-TX IC (Kakute: PB0 / TIM3_CH3) ----
- * TX remains TIM3_UP DMA (Stream2/CH5). IC uses TIM3_CH3 capture on the
- * same pin after the outbound burst. Host provides inject stubs. */
-#define HAL_DSHOT_M1_IC_MAX_EDGES 64u
-bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap);
-size_t hal_dshot_m1_ic_take(void);           /* edge count; restores TX-ready CH3 */
-void hal_dshot_m1_ic_cancel(void);
-uint16_t hal_dshot_m1_ic_bit_period_ticks(void); /* telem bit period (4/5 DShot) */
+/* ---- DShot M1–M4 listen-after-TX IC (Kakute R0c) ----
+ * Pins (IR lock; AF already set by TX path — do not remap):
+ *   M1 PB0 AF2 TIM3_CH3 | M2 PB1 AF2 TIM3_CH4 | share TIM3_UP DMA1 S2/C5
+ *   M3 PE9 AF1 TIM1_CH1 | M4 PE11 AF1 TIM1_CH2 | share TIM1_UP DMA2 S5/C6
+ * TX UP DMA paths unchanged. Host provides inject stubs. */
+#define HAL_DSHOT_IC_MOTOR_COUNT 4u
+#define HAL_DSHOT_IC_MAX_EDGES 64u
+#define HAL_DSHOT_M1_IC_MAX_EDGES HAL_DSHOT_IC_MAX_EDGES /* R0b alias */
+
+bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap);
+/** Parallel CCxIF collect for all armed motors (shared listen window). */
+void hal_dshot_ic_collect(void);
+size_t hal_dshot_ic_take(unsigned motor); /* edge count after collect or solo spin */
+void hal_dshot_ic_cancel(unsigned motor);
+void hal_dshot_ic_cancel_all(void);
+uint16_t hal_dshot_ic_bit_period_ticks(unsigned motor); /* telem bit = 4/5 DShot */
+
+/* M1 wrappers → motor 0 */
+static inline bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap)
+{
+    return hal_dshot_ic_arm(0u, edge_buf, cap);
+}
+static inline size_t hal_dshot_m1_ic_take(void)
+{
+    return hal_dshot_ic_take(0u);
+}
+static inline void hal_dshot_m1_ic_cancel(void)
+{
+    hal_dshot_ic_cancel(0u);
+}
+static inline uint16_t hal_dshot_m1_ic_bit_period_ticks(void)
+{
+    return hal_dshot_ic_bit_period_ticks(0u);
+}
 
 /* ---- EXTI ---- */
 typedef void (*hal_exti_cb_t)(void *ctx);
