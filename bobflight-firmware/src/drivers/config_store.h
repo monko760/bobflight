@@ -19,5 +19,8 @@ config_store_result_t config_store_save_v3(uint32_t board_id,const void *payload
 /* v4 is 176 bytes; accepts schema1/2/3 with zero extension. Adds min_throttle+airmode. */
 config_store_result_t config_store_load_v4(uint32_t board_id,void *payload,size_t bytes);
 config_store_result_t config_store_save_v4(uint32_t board_id,const void *payload,size_t bytes);
+/* v5 is 184 bytes; accepts schema1/2/3/4 with zero extension. Adds gyro_lpf_hz+dterm_lpf_hz. */
+config_store_result_t config_store_load_v5(uint32_t board_id,void *payload,size_t bytes);
+config_store_result_t config_store_save_v5(uint32_t board_id,const void *payload,size_t bytes);
 uint32_t config_store_loaded_schema(void);
 #endif

@@ -5,6 +5,7 @@
  */
 #include "flight/pid.h"
 #include "flight/config.h"
+#include "flight/filter.h"
 #include <math.h>
 
 static float DT = 1.f / 4000.f;
@@ -61,7 +62,10 @@ void baseline_pid_update(const float gyro_dps[3], const float setpoint_dps[3],
             d = -(gyro_dps[a] - g_prev_err[a]) / DT;
         }
         g_prev_err[a] = gyro_dps[a];
-        g_deriv[a]+=(DT/(0.003f+DT))*(d-g_deriv[a]);
+        {
+            const float d_alpha = filter_lpf_alpha(cfg->dterm_lpf_hz, DT);
+            g_deriv[a] = filter_lpf_step(&g_deriv[a], d, d_alpha);
+        }
 
         const float p_term = kp[a] * err;
         const float d_term = kd[a] * g_deriv[a];

@@ -14,6 +14,8 @@
 #define DEF_KD       0.00005f
 #define DEF_MIN_THR  0.05f
 #define DEF_AIRMODE  0
+#define DEF_GYRO_LPF 320.f
+#define DEF_DTERM_LPF 53.f
 
 static bf_config_t g_cfg = {
     .rate_max_roll = DEF_RATE_MAX,
@@ -30,6 +32,8 @@ static bf_config_t g_cfg = {
     .pid_yaw_i = DEF_KI,
     .min_throttle = DEF_MIN_THR,
     .airmode = DEF_AIRMODE,
+    .gyro_lpf_hz = DEF_GYRO_LPF,
+    .dterm_lpf_hz = DEF_DTERM_LPF,
 };
 
 void config_defaults(void)
@@ -48,6 +52,8 @@ void config_defaults(void)
     g_cfg.pid_yaw_i = DEF_KI;
     g_cfg.min_throttle = DEF_MIN_THR;
     g_cfg.airmode = DEF_AIRMODE;
+    g_cfg.gyro_lpf_hz = DEF_GYRO_LPF;
+    g_cfg.dterm_lpf_hz = DEF_DTERM_LPF;
 }
 
 void config_init(void)
@@ -116,6 +122,12 @@ static float *slot_for(const char *key)
     if (strcmp(key, "min_throttle") == 0) {
         return &g_cfg.min_throttle;
     }
+    if (strcmp(key, "gyro_lpf_hz") == 0) {
+        return &g_cfg.gyro_lpf_hz;
+    }
+    if (strcmp(key, "dterm_lpf_hz") == 0) {
+        return &g_cfg.dterm_lpf_hz;
+    }
     return NULL;
 }
 
@@ -162,6 +174,11 @@ bool config_set_key(const char *key, float value)
         }
     } else if (strcmp(key, "min_throttle") == 0) {
         if (value < 0.f || value > 0.2f) {
+            return false;
+        }
+    } else if (strcmp(key, "gyro_lpf_hz") == 0 || strcmp(key, "dterm_lpf_hz") == 0) {
+        /* 0 = off; else 10..1000 Hz (schema5 Lead lock) */
+        if (value != 0.f && (value < 10.f || value > 1000.f)) {
             return false;
         }
     } else if (value < 0.f || value > 10.f) {
