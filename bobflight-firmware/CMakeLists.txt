@@ -113,8 +113,8 @@ set(BF_COMMON_SOURCES
   src/sched/scheduler.c
   src/sched/tasks.c
   src/flight/pid.c
-  src/flight/flight_recorder.c src/flight/blackbox_encode.c
-  src/drivers/sd_spi.c src/drivers/sd_probe.c
+  src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/blackbox_capture.c src/flight/blackbox_session.c
+  src/drivers/sd_spi.c src/drivers/sd_probe.c src/drivers/fat32_log.c
   src/flight/pid_diag.c src/flight/pid_diag_core.c
   src/flight/attitude.c
   src/flight/mixer.c
@@ -143,6 +143,9 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(bobflight_capture_test src/flight/blackbox_capture.c src/flight/flight_recorder.c src/flight/pid.c src/flight/config.c tests/host_blackbox_capture.c)
+  target_link_libraries(bobflight_capture_test m)
+  add_test(NAME blackbox_production_capture COMMAND bobflight_capture_test)
   add_executable(bobflight_recorder_test src/flight/flight_recorder.c tests/host_flight_recorder.c)
   target_link_libraries(bobflight_recorder_test m)
   add_test(NAME flight_recorder_bounded COMMAND bobflight_recorder_test)
@@ -401,6 +404,39 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   foreach(task_test pid_elapsed bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)
   endforeach()
+  get_target_property(BB_TASK_SOURCES bobflight_control_mode_test SOURCES)
+  list(REMOVE_ITEM BB_TASK_SOURCES tests/host_control_mode.c)
+  add_executable(bobflight_blackbox_task_test ${BB_TASK_SOURCES}
+    tests/host_blackbox_task.c src/flight/blackbox_capture.c src/flight/flight_recorder.c)
+  target_compile_definitions(bobflight_blackbox_task_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_FLIGHT_ENABLE=1 BOBFLIGHT_CAPTURE_TASK_TEST=1)
+  target_link_libraries(bobflight_blackbox_task_test m)
+  add_test(NAME blackbox_actual_cascade COMMAND bobflight_blackbox_task_test)
+  add_executable(bobflight_blackbox_session_test tests/host_blackbox_session.c
+    src/flight/blackbox_session.c src/flight/blackbox_capture.c src/flight/flight_recorder.c
+    src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+  target_link_libraries(bobflight_blackbox_session_test m)
+  add_test(NAME blackbox_session_end_to_end COMMAND bobflight_blackbox_session_test)
+  add_executable(bobflight_blackbox_cli_test tests/host_blackbox_cli.c
+    src/drivers/sd_spi.c src/drivers/sd_probe.c src/drivers/fat32_log.c
+    src/flight/blackbox_session.c src/flight/blackbox_capture.c src/flight/flight_recorder.c
+    src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+  target_link_libraries(bobflight_blackbox_cli_test m)
+  add_test(NAME blackbox_cli_guards COMMAND bobflight_blackbox_cli_test)
+  add_executable(bobflight_blackbox_card_test tests/host_blackbox_card.c
+    src/drivers/fat32_log.c src/flight/blackbox_session.c src/flight/blackbox_capture.c
+    src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+  target_link_libraries(bobflight_blackbox_card_test m)
+  add_test(NAME blackbox_real_fat32_file COMMAND bobflight_blackbox_card_test)
+  set_tests_properties(blackbox_real_fat32_file PROPERTIES TIMEOUT 30)
+  add_executable(bobflight_blackbox_corruption_test tests/host_blackbox_corruption.c
+    src/drivers/fat32_log.c src/flight/blackbox_session.c src/flight/blackbox_capture.c
+    src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+  target_link_libraries(bobflight_blackbox_corruption_test m)
+  add_test(NAME blackbox_independent_corruption_guards COMMAND bobflight_blackbox_corruption_test)
+  set_tests_properties(blackbox_independent_corruption_guards PROPERTIES TIMEOUT 30)
+  add_executable(bobflight_fat32_test tests/host_fat32_log.c src/drivers/fat32_log.c)
+  add_test(NAME fat32_new_log_preservation COMMAND bobflight_fat32_test)
+  set_tests_properties(blackbox_actual_cascade blackbox_session_end_to_end fat32_new_log_preservation PROPERTIES TIMEOUT 30)
   add_executable(bobflight_cascade_inject_test
     src/flight/pid.c
   src/flight/attitude.c

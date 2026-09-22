@@ -15,7 +15,7 @@
 #include <string.h>
 #include <limits.h>
 
-#define FIELD_COUNT 42u
+#define FIELD_COUNT 46u
 static const char *const names[FIELD_COUNT]={
  "loopIteration","time",
  "gyroADC[0]","gyroADC[1]","gyroADC[2]",
@@ -29,7 +29,8 @@ static const char *const names[FIELD_COUNT]={
  "rcCommand[0]","rcCommand[1]","rcCommand[2]","rcCommand[3]",
  "bobflightError[0]","bobflightError[1]","bobflightError[2]",
  "bobflightArmed","bobflightMode","bobflightFailsafe",
- "bobflightDtUs","bobflightDropped","bobflightIteration","bobflightSchema"
+ "bobflightDtUs","bobflightDropped","bobflightIteration","bobflightSchema",
+ "bobflightPidValid","bobflightGyroValid","bobflightRxFresh","bobflightOutputHealthy"
 };
 /* Unsigned absolute 32-bit integers avoid overflow in sequence/counter fields. */
 static bool unsigned_field(unsigned i){return i<2u || i>=35u;}
@@ -72,7 +73,7 @@ static bool quant(float value,double scale,int32_t *out){
 }
 static size_t uv(uint8_t *dst,uint32_t v){size_t n=0;while(v>=128u){dst[n++]=(uint8_t)((v&127u)|128u);v>>=7;}dst[n++]=(uint8_t)v;return n;}
 size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){
- if(!dst||!s)return 0;
+ if(!dst||!s||s->armed>1u||s->mode>2u||s->failsafe>2u||s->pid_valid>1u||s->gyro_valid>1u||s->rx_fresh>1u||s->output_healthy>1u)return 0;
  int32_t v[FIELD_COUNT]={0};uint32_t u[FIELD_COUNT]={0};
  u[0]=s->iteration;u[1]=s->time_us;
  for(unsigned a=0;a<3;a++){
@@ -85,7 +86,7 @@ size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){
   v[24+a]=m<=0?0:(int32_t)(48u+(unsigned)(m*1999.f));
  }
  if(!isfinite(s->rc[3])||s->rc[3]<0||s->rc[3]>1||!quant(s->rc[3],1000,&v[11]))return 0;
- v[31]=1000+v[11];u[35]=s->armed;u[36]=s->mode;u[37]=s->failsafe;u[38]=s->dt_us;u[39]=s->dropped;u[40]=s->iteration;u[41]=1;
+ v[31]=1000+v[11];u[35]=s->armed;u[36]=s->mode;u[37]=s->failsafe;u[38]=s->dt_us;u[39]=s->dropped;u[40]=s->iteration;u[41]=2;u[42]=s->pid_valid;u[43]=s->gyro_valid;u[44]=s->rx_fresh;u[45]=s->output_healthy;
  uint8_t b[1+FIELD_COUNT*5];size_t n=0;b[n++]='I';
  for(unsigned i=0;i<FIELD_COUNT;i++){
   uint32_t bits=unsigned_field(i)?u[i]:((uint32_t)v[i]<<1)^(v[i]<0?UINT32_MAX:0u);

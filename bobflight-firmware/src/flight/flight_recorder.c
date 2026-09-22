@@ -14,7 +14,7 @@ static flight_recorder_stats_t stats={.queue_capacity=FLIGHT_RECORDER_QUEUE_CAPA
 static void inc(uint32_t *v){if(*v<UINT32_MAX)++*v;}
 static void plus(uint32_t *v,uint64_t n){*v=n>UINT32_MAX-*v?UINT32_MAX:*v+(uint32_t)n;}
 static bool valid(const flight_log_sample_t *s){
- if(!s||s->armed>1u||s->mode>2u)return false;
+ if(!s||s->armed>1u||s->mode>2u||s->failsafe>2u||s->pid_valid>1u||s->gyro_valid>1u||s->rx_fresh>1u||s->output_healthy>1u)return false;
  for(unsigned a=0;a<3;a++){
   if(!isfinite(s->gyro_raw[a])||!isfinite(s->gyro[a])||!isfinite(s->setpoint[a])||!isfinite(s->p[a])||!isfinite(s->i[a])||!isfinite(s->d[a])||!isfinite(s->pid_output[a]))return false;
   if(!isfinite(s->rc[a])||s->rc[a]<-1.f||s->rc[a]>1.f)return false;

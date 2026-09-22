@@ -65,3 +65,6 @@ __pycache__/
 !/build-main.ps1
 !/MAIN-BUILD.md
 !/SINGLE-BUILD-VALIDATION.md
+
+# Experimental onboard recorder implementation and acceptance guide.
+!/BLACKBOX_RECORDING.md
