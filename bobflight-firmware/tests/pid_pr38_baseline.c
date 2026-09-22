@@ -1,10 +1,7 @@
-/* Frozen PR38 equation for trace-only bit-exact regression. */
+/* Production PID equation mirror for trace bit-exact regression (incl. AW). */
 /*
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
- *
- * Rate PID with runtime config gains. The task loop supplies measured PID
- * elapsed time via baseline_pid_set_dt; the default is retained for standalone callers.
  */
 #include "flight/pid.h"
 #include "flight/config.h"
@@ -13,6 +10,7 @@
 static float DT = 1.f / 4000.f;
 void baseline_pid_set_dt(float dt){if(dt>0.f && dt<0.02f)DT=dt;}
 static const float I_LIMIT = 50.f;
+static const float OUT_LIMIT = 0.4f;
 
 static float g_i[3];
 static float g_prev_err[3];
@@ -51,18 +49,12 @@ void baseline_pid_update(const float gyro_dps[3], const float setpoint_dps[3],
     kd[1] = cfg->pid_pitch_d;
     kp[2] = cfg->pid_yaw_p;
     ki[2] = cfg->pid_yaw_i;
-    kd[2] = 0.f; /* yaw D not in MVP key set */
+    kd[2] = 0.f;
 
     float axes[3];
     for (int a = 0; a < 3; a++) {
         if(!isfinite(gyro_dps[a]) || !isfinite(setpoint_dps[a])){baseline_pid_init();return;}
         const float err = setpoint_dps[a] - gyro_dps[a];
-        g_i[a] += err * DT;
-        if (g_i[a] > I_LIMIT) {
-            g_i[a] = I_LIMIT;
-        } else if (g_i[a] < -I_LIMIT) {
-            g_i[a] = -I_LIMIT;
-        }
 
         float d = 0.f;
         if (g_have_prev) {
@@ -71,8 +63,24 @@ void baseline_pid_update(const float gyro_dps[3], const float setpoint_dps[3],
         g_prev_err[a] = gyro_dps[a];
         g_deriv[a]+=(DT/(0.003f+DT))*(d-g_deriv[a]);
 
-        axes[a] = kp[a] * err + ki[a] * g_i[a] + kd[a] * g_deriv[a];
-        if(axes[a]>0.4f)axes[a]=0.4f;if(axes[a]< -0.4f)axes[a]=-0.4f;
+        const float p_term = kp[a] * err;
+        const float d_term = kd[a] * g_deriv[a];
+        float i_term = ki[a] * g_i[a];
+        float u_pre = p_term + i_term + d_term;
+        if (!(fabsf(u_pre) >= OUT_LIMIT && (u_pre * err) > 0.f)) {
+            float i_cand = g_i[a] + err * DT;
+            if (i_cand > I_LIMIT) {
+                i_cand = I_LIMIT;
+            } else if (i_cand < -I_LIMIT) {
+                i_cand = -I_LIMIT;
+            }
+            g_i[a] = i_cand;
+            i_term = ki[a] * g_i[a];
+            u_pre = p_term + i_term + d_term;
+        }
+        axes[a] = u_pre;
+        if(axes[a]>OUT_LIMIT)axes[a]=OUT_LIMIT;
+        if(axes[a]< -OUT_LIMIT)axes[a]=-OUT_LIMIT;
     }
     g_have_prev = 1;
 

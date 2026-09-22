@@ -34,6 +34,8 @@ export const SETTINGS_KEYS = [
   "pid_pitch_d",
   "pid_yaw_p",
   "pid_yaw_i",
+  "min_throttle",
+  "airmode",
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -109,6 +111,8 @@ export const DEFAULT_SETTING_VALUES: Readonly<Record<SettingsKey, number>> = {
   pid_pitch_d: 0.00005,
   pid_yaw_p: 0.002,
   pid_yaw_i: 0.001,
+  min_throttle: 0.05,
+  airmode: 0,
 };
 
 /**
@@ -128,6 +132,8 @@ export const DEFAULT_SETTINGS: Readonly<Record<SettingsKey, string>> = {
   pid_pitch_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_d),
   pid_yaw_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_p),
   pid_yaw_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_i),
+  min_throttle: formatFwFloat(DEFAULT_SETTING_VALUES.min_throttle),
+  airmode: formatFwFloat(DEFAULT_SETTING_VALUES.airmode),
 };
 
 export function cloneDefaultSettings(): Record<SettingsKey, string> {
@@ -148,6 +154,12 @@ export function validateSettingValue(key: SettingsKey, value: number): boolean {
   }
   if (key === "rate_expo") {
     return value >= 0 && value <= 1;
+  }
+  if (key === "min_throttle") {
+    return value >= 0 && value <= 0.2;
+  }
+  if (key === "airmode") {
+    return value === 0 || value === 1;
   }
   // pid_* and any other known key: 0..10
   return value >= 0 && value <= 10;

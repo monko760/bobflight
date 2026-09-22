@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
+ * Schema 4: schema3 bytes0..159 plus min_throttle float160..163, airmode u8 at 164,
+ * bytes 165..175 reserved (zero). Leaves room under config_store MAX_PAYLOAD 192.
  * Schema 3: schema2 bytes0..127 plus power fields128..155 and DShot156..159.
  * Byte96 valid;97..99 reserved;100..103 sensor/range/model binding;104..115 bias;116..127 scale.
  * Byte offsets: floats 0..47; UART 48..51; map 52; mode-count 53; source 54; manual mode 55;
@@ -23,7 +25,7 @@
 #include <float.h>
 
 #define BASE_BYTES 96u
-#define PAYLOAD_BYTES 160u
+#define PAYLOAD_BYTES 176u
 _Static_assert(MODE_COUNT == 2 || MODE_COUNT == 4, "Update persistence schema for new mode model");
 _Static_assert(sizeof(float)==4 && FLT_RADIX==2 && FLT_MANT_DIG==24, "binary32 config required");
 static const char *keys[12]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo",
@@ -70,7 +72,13 @@ static void power_encode(uint8_t *p,const power_config_t *c,unsigned speed){
  putfloat(p+128,c->voltage_scale);putfloat(p+132,c->current_mv_per_amp);putfloat(p+136,c->current_offset_mv);
  put32(p+140,c->cells);putfloat(p+144,c->warning_cell_v);putfloat(p+148,c->critical_cell_v);put32(p+152,c->capacity_mah);put32(p+156,speed);
 }
-static bool extras_valid(const uint8_t *p){power_config_t c=power_decode(p);return power_config_valid(&c)&&(get32(p+156)==300||get32(p+156)==600);}
+static bool flight_idle_valid(const uint8_t *p){
+ float mt=getfloat(p+160);if(!isfinite(mt)||mt<0.f||mt>0.2f)return false;
+ if(p[164]>1)return false;
+ for(unsigned i=165;i<PAYLOAD_BYTES;i++)if(p[i])return false;
+ return true;
+}
+static bool extras_valid(const uint8_t *p){power_config_t c=power_decode(p);return power_config_valid(&c)&&(get32(p+156)==300||get32(p+156)==600)&&flight_idle_valid(p);}
 static bool encode(uint8_t p[PAYLOAD_BYTES]){
  const board_t *b=board_get();if(!b)return false;memset(p,0,PAYLOAD_BYTES);
  for(unsigned i=0;i<12;i++){float v;uint32_t bits;if(!config_get_key(keys[i],&v))return false;memcpy(&bits,&v,4);put32(p+i*4,bits);}
@@ -87,6 +95,8 @@ static bool encode(uint8_t p[PAYLOAD_BYTES]){
   for(unsigned i=0;i<3;i++){uint32_t b,v;memcpy(&b,&cal.accel_bias[i],4);memcpy(&v,&cal.accel_scale[i],4);put32(p+104+i*4,b);put32(p+116+i*4,v);}
  }
  power_encode(p,power_config(),dshot_speed_kbps());
+ {float mt;if(!config_get_key("min_throttle",&mt))return false;putfloat(p+160,mt);}
+ {float am;if(!config_get_key("airmode",&am))return false;p[164]=(uint8_t)am;}
  float values[12];mode_config_t modes[MODE_COUNT];return decode(p,values,modes)&&accel_decode_valid(p)&&extras_valid(p);
 }
 static const char *store_error(config_store_result_t r){switch(r){case CONFIG_STORE_EMPTY:return "empty";case CONFIG_STORE_UNSUPPORTED:return "unsupported";case CONFIG_STORE_INVALID:return "invalid_record";case CONFIG_STORE_IO_ERROR:return "storage_io";default:return "none";}}
@@ -99,9 +109,10 @@ static bool safe_to_change(void){
 void persist_init(void){config_init();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;migration_pending=false;last_error="none";memset(saved,0,sizeof(saved));}
 bool persist_load(void){
  if(!safe_to_change())return false;
- uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v3(board_tag(),p,sizeof(p));
+ uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v4(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);load_error=r!=CONFIG_STORE_EMPTY&&r!=CONFIG_STORE_UNSUPPORTED;return false;}
  if(config_store_loaded_schema()<3){const power_config_t defaults={11.f,0.f,0.f,0,3.5f,3.3f,0};power_encode(p,&defaults,300);}
+ if(config_store_loaded_schema()<4){putfloat(p+160,0.05f);p[164]=0;for(unsigned i=165;i<PAYLOAD_BYTES;i++)p[i]=0;}
  float values[12];mode_config_t modes[MODE_COUNT];if(!decode(p,values,modes)||!accel_decode_valid(p)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
  /* Reject unsupported control selection before mutating other settings */
  if(p[55]!=CONTROL_MODE_ANGLE&&p[55]!=CONTROL_MODE_ACRO&&p[55]!=CONTROL_MODE_HORIZON){last_error="invalid_settings";load_error=true;return false;}
@@ -111,6 +122,8 @@ bool persist_load(void){
  const board_t *b=board_get();uint32_t uart=get32(p+48);
  if(uart!=b->rx_uart&&!board_select_rx_uart(uart)){last_error="invalid_uart";load_error=true;return false;}
  for(unsigned i=0;i<12;i++)(void)config_set_key(keys[i],values[i]);
+ (void)config_set_key("min_throttle",getfloat(p+160));
+ (void)config_set_key("airmode",(float)p[164]);
  (void)crsf_set_map(p[52]?"TAER":"AETR");
  for(unsigned i=0;i<MODE_COUNT;i++)(void)mode_range_set((mode_id_t)i,modes[i].enabled,modes[i].aux_channel,modes[i].min_us,modes[i].max_us);
  if(!control_mode_set((control_mode_t)p[55])){last_error="control_mode_failed";load_error=true;return false;}
@@ -126,7 +139,7 @@ bool persist_load(void){
  }
 #endif
  {float bias[3]={0},scale[3]={1,1,1};if(p[96])accel_values(p,bias,scale);gyro_restore_accel_calibration(bias,scale,p[96]!=0);}
- migration_pending=config_store_loaded_schema()!=3||legacy_aux_migrated;
+ migration_pending=config_store_loaded_schema()!=4||legacy_aux_migrated;
  failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;
  if(legacy_aux_migrated){
   last_error="migrated_control_source_manual";
@@ -138,9 +151,9 @@ bool persist_load(void){
 bool persist_save(void){
  if(!safe_to_change())return false;
  uint8_t p[PAYLOAD_BYTES];if(!encode(p)){last_error="invalid_settings";return false;}
- config_store_result_t r=config_store_save_v3(board_tag(),p,sizeof(p));
+ config_store_result_t r=config_store_save_v4(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);return false;}
- uint8_t check[PAYLOAD_BYTES];r=config_store_load_v3(board_tag(),check,sizeof(check));
+ uint8_t check[PAYLOAD_BYTES];r=config_store_load_v4(board_tag(),check,sizeof(check));
  if(r!=CONFIG_STORE_OK||memcmp(p,check,sizeof(p))){last_error="verify_failed";return false;}
  memcpy(saved,p,sizeof(saved));have_saved=true;migration_pending=false;load_error=false;last_error="none";return true;
 }

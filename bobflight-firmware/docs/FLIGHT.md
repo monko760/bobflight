@@ -34,7 +34,11 @@ Live gains — `pid_update` / `rates_update` read `config_get()` each tick.
 | `pid_pitch_p` / `i` / `d` | same | pitch axis |
 | `pid_yaw_p` / `i` | same P/I | yaw D reuses `pid_roll_d` (MVP) |
 
-Also: DT `1/4000`, I limit `±50`. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
+Also: DT `1/4000`, I limit `±50`, output clamp `±0.4` with conditional I anti-windup.
+
+AirMode (`airmode` 0/1, default **0**): when off, low throttle (`<0.05`) resets I while armed; when on, I keeps integrating at idle. Always resets on disarm.
+
+Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
 
 ## Mixer
 

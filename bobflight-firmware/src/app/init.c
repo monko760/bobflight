@@ -270,7 +270,9 @@ bool app_init(void)
     /* Defaults and subsystem init must finish before restoring persistent settings. */
     (void)persist_load();
 
-    /* 6 scheduler — dummy 8 kHz / denom 2 */
+    /* Scheduler: host/bench path 1000 Hz / denom 1 until R3 first-flight.
+     * Kakute 4 kHz uses scheduler_init(8000, 2) + DWT us (Lead); do not
+     * claim 8 kHz here while this call stays 1000/1. */
     scheduler_init(1000, 1);
     return true;
 }

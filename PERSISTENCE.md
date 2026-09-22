@@ -1,3 +1,5 @@
+> **Schema 4:** adds `min_throttle` + `airmode` (176-byte payload). Schema 3 loads migrate with defaults (min_throttle=0.05, airmode=0) and stay dirty until Save. See `bobflight-firmware/docs/SETTINGS-PERSISTENCE.md`.
+
 > Calibration persistence update: current schema 2 adds validated, applied accelerometer correction. See [CALIBRATION-PERSISTENCE.md](CALIBRATION-PERSISTENCE.md) for migration, supported targets and power-cycle acceptance. Older schema-1 descriptions below exclude calibration; gyro bias, power and DShot remain excluded.
 
 > **Current image:** use [MAIN-BUILD.md](MAIN-BUILD.md). The sections below document earlier increments; the main Kakute image now permits verified flash Save while disarmed and inactive, and uses the configured ARM switch.

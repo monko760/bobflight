@@ -1,4 +1,7 @@
-# Settings persistence (schema 3)
+# Settings persistence (schema 4)
+
+Schema 4 extends schema 3 with `min_throttle` (float 0..0.2, default 0.05) and `airmode` (0/1, default 0). Schema 3 records load with these defaults and mark dirty until an explicit Save. Payload is 176 bytes (bytes 160–163 min_throttle, 164 airmode, 165–175 reserved). Not flight-qualified.
+
 
 Apply edits to the controller, then explicitly Save to controller. Save verifies flash readback; reboot does not save unapplied browser drafts or unsaved runtime changes. No automatic flash writes on startup or slider movement.
 

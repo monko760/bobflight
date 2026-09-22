@@ -8,6 +8,7 @@
 #define BOBFLIGHT_CONFIG_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +27,8 @@ typedef struct {
     float pid_pitch_d;
     float pid_yaw_p;
     float pid_yaw_i;
+    float min_throttle; /* armed idle floor 0..0.2; default 0.05 (BF-like suggestion) */
+    uint8_t airmode;    /* 0=off (bench-safe), 1=keep I integrating at idle */
 } bf_config_t;
 
 void config_init(void);
