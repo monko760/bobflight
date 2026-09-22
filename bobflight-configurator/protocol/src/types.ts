@@ -38,6 +38,7 @@ export type CliCommand =
   | "receiver_map AETR"
   | "receiver_map TAER"
   | "pid_diag" | "pid_diag status" | "pid_diag start" | "pid_diag start rx" | "pid_diag stop"
+  | "blackbox start" | "blackbox stop" | "blackbox status"
   | "sd probe" | "sd status" | "sd cancel"
   | "timing"
   | "power"

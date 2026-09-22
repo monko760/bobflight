@@ -32,6 +32,7 @@ typedef struct {
     uint8_t armed;
     uint8_t mode;
     uint8_t failsafe;
+    uint8_t pid_valid, gyro_valid, rx_fresh, output_healthy;
     uint32_t dropped;       /* Cumulative drops prior to this record */
 } flight_log_sample_t;
 

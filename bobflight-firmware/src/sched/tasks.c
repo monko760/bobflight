@@ -10,6 +10,10 @@
 #include "drivers/rx.h"
 #include "drivers/cli.h"
 #include "flight/pid.h"
+#if defined(BOBFLIGHT_MCU) || defined(BOBFLIGHT_CAPTURE_TASK_TEST)
+#include "flight/blackbox_capture.h"
+#include "flight/flight_recorder.h"
+#endif
 #include "flight/pid_diag.h"
 #include "flight/mixer.h"
 #include "flight/rates.h"
@@ -264,6 +268,11 @@ void loop_mixer_dshot(void)
     const float switch_output=bench_switch_output();
     if(switch_was_enabled)for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)g_motors[i]=switch_output;
     dshot_write(g_motors);
+#if defined(BOBFLIGHT_MCU) || defined(BOBFLIGHT_CAPTURE_TASK_TEST)
+    if(recorder_active())bb_capture_observe(last_pid_us,g_gyro_raw,g_gyro_filt,g_setpoint,&g_pid,g_motors,rc,
+        arming_state()==ARM_ARMED,(uint8_t)g_effective_mode,(uint8_t)failsafe_stage(),
+        sample_ok,rx_frame_fresh(),dshot_is_healthy());
+#endif
     bench_output_pending=false;
     for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)
         if(g_motors[i]>0.f)bench_output_pending=true;
