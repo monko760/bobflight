@@ -1,1 +1,28 @@
-@/tmp/push-file-1-1.txt
+/* SPDX-License-Identifier: Apache-2.0 */
+const assert=require('node:assert/strict');
+const {spawnSync}=require('node:child_process');const path=require('node:path');
+const {parseStorage,parseModes,parseConfigurationExport,parseSaveReply,canSaveStorage}=require('../../bobflight-configurator/protocol/dist');
+const binary=process.argv[2]?path.resolve(process.argv[2]):path.resolve(__dirname,'../../bobflight-firmware/build-contract/bobflight_host');
+const commands=['storage','diff all','dump all','mode_range ACRO 1 5 1300 1600','mode_range HORIZON 1 6 1600 1900','control_mode horizon','control_source aux','power_config 12.25 27.5 100 6 3.6 3.2 1500','dshot 600','storage','save','storage','diff all','dump all','modes'];
+const run=spawnSync(binary,[],{input:commands.join('\n')+'\n',encoding:'utf8',maxBuffer:1024*1024});assert.equal(run.status,0,run.stderr);
+const states=[...run.stdout.matchAll(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/g)].map(m=>parseStorage(m[0]));
+assert.equal(states.length,3);assert.equal(states[0].state,'defaults');assert.equal(states[1].dirty,true);assert.equal(states[2].state,'saved');assert.equal(states[2].dirty,false);assert.equal(states[2].backend,'host_sim');assert.equal(canSaveStorage(states[2],true,false),false,'simulation must not offer physical flash save');
+const backups=[...run.stdout.matchAll(/# bobflight_config: 1\r?\n[\s\S]*?# config_end: 1\r?\n/g)].map((m,i)=>parseConfigurationExport(m[0],i%2?'dump':'diff'));
+assert.equal(backups.length,4);assert.match(backups[3].raw,/power_config 12.25 27.5 100 6/);assert.match(backups[3].raw,/dshot 600/);assert(!backups[0].raw.includes('\r\nmode_range '));assert.equal(backups[3].modeCount,4);
+for(const command of ['mode_range ACRO 1 5 1300 1600','mode_range HORIZON 1 6 1600 1900','control_mode horizon'])assert(backups[2].raw.includes(command+'\r\n'));
+for(const e of backups){assert(Buffer.byteLength(e.raw)<1800);assert(!e.raw.includes('\r\narm\r\n'));assert(!e.raw.includes('\r\nsave\r\n'));}
+assert(!parseSaveReply('saved\r\n').ok);assert(!parseSaveReply('saved: host_sim verified\r\n').ok);assert(parseSaveReply('saved: flash verified\r\n').ok);
+assert.equal(states[2].schema,6);
+for(const invalid of ['storage_api: 1\r\n',run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0].replace('schema: 6','schema: 7')]){if(invalid!==undefined)assert.throws(()=>parseStorage(invalid));}
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 6','# schema: 7'),'dump'));
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# config_end: 1','arm\r\n# config_end: 1'),'dump'));
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('mode_range HORIZON 1 6 1600 1900','mode_range HORIZON 1 257 1600 1900'),'dump'));
+const actual=run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0];
+const ready=parseStorage(actual.replace('backend: host_sim','backend: flash'));
+assert(canSaveStorage(ready,true,false));assert(canSaveStorage({...ready,flightEnabled:true},true,false));for(const key of ['armed','benchActive','calibrationActive'])assert(!canSaveStorage({...ready,[key]:true},true,false));assert(!canSaveStorage(ready,false,false));assert(!canSaveStorage(ready,true,true));
+console.log('PASS real firmware → storage/export parsers: four modes, Horizon + manual selection, unsupported AUX refusal, defaults/deltas, dirty/verified simulation distinction, unsafe save locks, legacy/truncated/invalid exports, no arm/save in backups');
+
+assert.match(run.stdout,/control_source refused: manual only/);
+assert.match(backups[3].raw,/control_source manual\r\n/);
+assert(!backups[3].raw.includes('control_source aux'));
+console.log('PASS refused AUX command cannot corrupt saved manual source; Save remains available in main image while disarmed');
