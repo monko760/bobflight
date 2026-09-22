@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   // --- get all 12 ---
   const all = await client.getAllSettings();
   console.log("getAllSettings keys:", Object.keys(all).length);
-  assert(Object.keys(all).length === 12, "12 keys");
+  assert(Object.keys(all).length === SETTINGS_KEYS.length, `${SETTINGS_KEYS.length} keys`);
   for (const key of SETTINGS_KEYS) {
     assert(all[key] === DEFAULT_SETTINGS[key], `default ${key}=${all[key]}`);
     console.log(`  ${key}=${all[key]}`);

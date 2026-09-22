@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 const assert=require('node:assert/strict');
 const path=require('node:path');
-const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3}=require('../dist');
+const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3,STORAGE_SCOPE_V4}=require('../dist');
 const {mockSensorReply}=require('../dist/sensor-mock');
 const {loadUiTs}=require('./load-ui-ts.cjs');
 const {parseKeyValueSnapshot}=loadUiTs(path.resolve(__dirname,'../../ui/src/sensors/telemetry.ts'));
 function storage(schema,scope){return `storage_api: 1\nbackend: flash\nschema: ${schema}\nstate: saved\ndirty: 0\ngeneration: 2\nlast_error: none\nscope: ${scope}\narmed: 0\nbench_active: 0\ncalibration_active: 0\nflight_enabled: 0\nstorage_end: 1\n`;}
-for(const [schema,scope] of [[1,STORAGE_SCOPE],[2,STORAGE_SCOPE_V2],[3,STORAGE_SCOPE_V3]]){
+for(const [schema,scope] of [[1,STORAGE_SCOPE],[2,STORAGE_SCOPE_V2],[3,STORAGE_SCOPE_V3],[4,STORAGE_SCOPE_V4]]){
  const s=parseStorage(storage(schema,scope));assert.equal(s.schema,schema);assert(canSaveStorage(s,true,false));
  for(const key of ['armed','benchActive','calibrationActive'])assert(!canSaveStorage({...s,[key]:true},true,false));
  assert(canSaveStorage({...s,flightEnabled:true},true,false)); /* unified flight firmware: flight-enabled configuration is legitimately saveable */
@@ -30,12 +30,15 @@ const v3=backup.replace('# schema: 2','# schema: 3').replace(STORAGE_SCOPE_V2,ST
 assert.equal(parseConfigurationExport(v3,'dump').board,'kakute_f7_hdv');
 for(const bad of [v3.replace('dshot 600','dshot 1200'),v3.replace('12.25 27.5','NaN 27.5'),v3.replace('3.6 3.2','3.0 3.2'),v3.replace('100 6','100 7')])assert.throws(()=>parseConfigurationExport(bad,'dump'));
 console.log('PASS schema3 capability + bounded power/DShot export validation');
+const v4=v3.replace('# schema: 3','# schema: 4').replace(STORAGE_SCOPE_V3,STORAGE_SCOPE_V4);
+assert.equal(parseConfigurationExport(v4,'dump').modeCount,4);
+console.log('PASS schema4 capability (min_throttle/airmode scope)');
 
 // Render the actual save panel with old/new advertised capabilities.
 function nodes(t){return Array.isArray(t)?t.flatMap(nodes):t&&typeof t==='object'?[t,...nodes(t.props?.children)]:[];}
 function txt(t){return Array.isArray(t)?t.map(txt).join(''):t&&typeof t==='object'?txt(t.props?.children):String(t??'');}
 (async()=>{
- for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true]]){
+ for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true],[4,STORAGE_SCOPE_V4,true]]){
   let saves=0;
   const state=parseStorage(storage(schema,scope));
   const host={getConnectionStatus:()=> 'connected',sendCommand:async()=>storage(schema,scope),saveSettings:async()=>{saves++;}};

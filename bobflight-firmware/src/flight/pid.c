@@ -4,6 +4,10 @@
  *
  * Rate PID with runtime config gains. The task loop supplies measured PID
  * elapsed time via pid_set_dt; the default is retained for standalone callers.
+ *
+ * I-term: hard clamp ±I_LIMIT as a safety net, plus conditional integration
+ * (freeze) when the pre-clamp axis output would saturate at ±OUT_LIMIT.
+ * Clean-room; not flight-qualified.
  */
 #include "flight/pid.h"
 #include "flight/config.h"
@@ -12,6 +16,7 @@
 static float DT = 1.f / 4000.f;
 void pid_set_dt(float dt){if(dt>0.f && dt<0.02f)DT=dt;}
 static const float I_LIMIT = 50.f;
+static const float OUT_LIMIT = 0.4f; /* mixer-domain axis saturation for AW */
 
 static float g_i[3];
 static float g_prev_err[3];
@@ -66,12 +71,6 @@ void pid_update(const float gyro_dps[3], const float setpoint_dps[3],
     for (int a = 0; a < 3; a++) {
         if(!isfinite(gyro_dps[a]) || !isfinite(setpoint_dps[a])){pid_init();return;}
         const float err = setpoint_dps[a] - gyro_dps[a];
-        g_i[a] += err * DT;
-        if (g_i[a] > I_LIMIT) {
-            g_i[a] = I_LIMIT;
-        } else if (g_i[a] < -I_LIMIT) {
-            g_i[a] = -I_LIMIT;
-        }
 
         float d = 0.f;
         if (g_have_prev) {
@@ -80,13 +79,33 @@ void pid_update(const float gyro_dps[3], const float setpoint_dps[3],
         g_prev_err[a] = gyro_dps[a];
         g_deriv[a]+=(DT/(0.003f+DT))*(d-g_deriv[a]);
 
-        axes[a] = kp[a] * err + ki[a] * g_i[a] + kd[a] * g_deriv[a];
+        const float p_term = kp[a] * err;
+        const float d_term = kd[a] * g_deriv[a];
+        float i_term = ki[a] * g_i[a];
+        float u_pre = p_term + i_term + d_term;
+
+        /* Conditional integration: integrate only when the current (pre-clamp)
+         * output is not already driving further into ±OUT_LIMIT saturation.
+         * Hard I_LIMIT ±50 remains the safety net after any update. */
+        if (!(fabsf(u_pre) >= OUT_LIMIT && (u_pre * err) > 0.f)) {
+            float i_cand = g_i[a] + err * DT;
+            if (i_cand > I_LIMIT) {
+                i_cand = I_LIMIT;
+            } else if (i_cand < -I_LIMIT) {
+                i_cand = -I_LIMIT;
+            }
+            g_i[a] = i_cand;
+            i_term = ki[a] * g_i[a];
+            u_pre = p_term + i_term + d_term;
+        }
+
+        axes[a] = u_pre;
         if(g_trace_enabled){
             g_trace.dt=DT;g_trace.gyro[a]=gyro_dps[a];g_trace.setpoint[a]=setpoint_dps[a];g_trace.error[a]=err;
-            g_trace.p[a]=kp[a]*err;g_trace.i[a]=ki[a]*g_i[a];g_trace.d[a]=kd[a]*g_deriv[a];g_trace.sum[a]=axes[a];
+            g_trace.p[a]=p_term;g_trace.i[a]=i_term;g_trace.d[a]=d_term;g_trace.sum[a]=u_pre;
         }
-        if(axes[a]>0.4f)axes[a]=0.4f;
-        if(axes[a]< -0.4f)axes[a]=-0.4f;
+        if(axes[a]>OUT_LIMIT)axes[a]=OUT_LIMIT;
+        if(axes[a]< -OUT_LIMIT)axes[a]=-OUT_LIMIT;
     }
     g_have_prev = 1;
 

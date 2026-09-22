@@ -45,6 +45,7 @@ void dshot_write(const float m[4]){memcpy(motors,m,sizeof(motors));}
 
 
 #include "flight/pid.h"
+#include "flight/config.h"
 #include <math.h>
 static unsigned updates,sets,resets;static float measured_dt;
 void pid_init(void){resets++;}
@@ -88,5 +89,17 @@ int main(void){
  CHECK(arm==ARM_ARMED && fabsf(measured_dt-0.019999f)<1e-8f);
  /* 64-bit timing crosses a 32-bit microsecond boundary without reset. */
  now=0xfffffff0ull;prime();sample(1000,true);CHECK(arm==ARM_ARMED&&fabsf(measured_dt-0.001f)<1e-8f);
- puts("PASS real PID task: dividers1/2/4/8, elapsed delays, first/zero epoch, low-throttle reset, invalid/gap disarm and 32-bit boundary");return 0;
+ /* AirMode on: low throttle keeps integrating (no pid_init reset). */
+ config_init();
+ if(!config_set_key("airmode",1.f)){fprintf(stderr,"airmode set failed\n");return 1;}
+ prime();sample(1000,true);before=updates;
+ rc[3]=0.f;sample(1000,true); /* would reset without airmode */
+ CHECK(updates==before+1);
+ sample(1000,true);CHECK(updates==before+2);
+ /* Disarm still resets even with airmode. */
+ arm=ARM_DISARMED;loop_pid();
+ arm=ARM_ARMED;rc[3]=0.f;sample(1000,true); /* primes only */
+ before=updates;sample(1000,true);CHECK(updates==before+1);
+
+ puts("PASS real PID task: dividers1/2/4/8, elapsed delays, first/zero epoch, low-throttle reset, airmode idle integrate, invalid/gap disarm and 32-bit boundary");return 0;
 }

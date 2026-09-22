@@ -16,6 +16,7 @@
 #endif
 #include "flight/pid_diag.h"
 #include "flight/mixer.h"
+#include "flight/config.h"
 #include "flight/rates.h"
 #include "flight/arming.h"
 #include "flight/failsafe.h"
@@ -219,10 +220,15 @@ void loop_pid(void)
         horizon_setpoint(sticks,g_setpoint);
     else
         attitude_setpoint(sticks,g_setpoint);
-    if(arming_state()!=ARM_ARMED || sticks[3]<0.05f){
+    /* R2 AirMode: always reset I on disarm. At idle throttle, reset unless airmode. */
+    const bf_config_t *cfg = config_get();
+    const bool airmode_on = cfg && cfg->airmode;
+    if(arming_state()!=ARM_ARMED){
+        pid_init();g_pid=(pid_axis_out_t){0};have_pid_time=false;
+    } else if(sticks[3]<0.05f && !airmode_on){
         pid_init();g_pid=(pid_axis_out_t){0};have_pid_time=false;
     } else if(pid_first){
-        /* Prime after startup/disarm/low throttle; no invented first interval. */
+        /* Prime after startup/disarm/low-throttle (non-airmode); no invented first interval. */
         pid_init();g_pid=(pid_axis_out_t){0};
     } else {
         pid_set_dt((float)pid_elapsed*0.000001f);

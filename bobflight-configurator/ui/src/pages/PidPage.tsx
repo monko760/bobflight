@@ -26,6 +26,8 @@ function emptyPid(): PidConfig {
     pid_pitch_d: 0,
     pid_yaw_p: 0,
     pid_yaw_i: 0,
+    min_throttle: 0.05,
+    airmode: 0,
   };
 }
 
@@ -196,7 +198,7 @@ export function PidPage() {
 
     try {
       await ensureMockConnected(host);
-      // restoreDefaults resets all 12 keys (FW contract); refresh PID fields after.
+      // restoreDefaults resets all settings keys (FW contract); refresh PID fields after.
       await host.restoreDefaults();
       setMsg("defaults restored");
       await load();
@@ -214,7 +216,9 @@ export function PidPage() {
         {PID_KEYS.filter((k) =>
           (SETTINGS_KEYS as readonly string[]).includes(k),
         ).join(", ")}
-        .
+        . AirMode default <strong>off</strong> (props-off safe); enable for idle
+        I-term while armed. Min throttle default <strong>0.05</strong> (BF-like
+        idle suggestion; independent of arm gate). Not flight-qualified.
       </p>
 
       {!ready && !err && <p className="muted">Connecting / loading settings…</p>}
@@ -237,6 +241,39 @@ export function PidPage() {
         values={values}
         onChange={updateField}
       />
+
+      <fieldset className="tuning-axis">
+        <legend>Flight readiness (schema 4)</legend>
+        <div className="tuning-grid">
+          <div className="tuning-field">
+            <label htmlFor="airmode">AirMode</label>
+            <input
+              id="airmode"
+              type="checkbox"
+              checked={values.airmode === 1}
+              onChange={(e) =>
+                updateField("airmode", e.target.checked ? "1" : "0")
+              }
+            />
+          </div>
+          <div className="tuning-field">
+            <label htmlFor="min_throttle">Min throttle (0..0.2)</label>
+            <input
+              id="min_throttle"
+              type="number"
+              min={0}
+              max={0.2}
+              step="0.01"
+              value={values.min_throttle}
+              onChange={(e) => updateField("min_throttle", e.target.value)}
+            />
+          </div>
+        </div>
+        <p className="muted">
+          Enable AirMode + set Min throttle, then Save. Disarmed motors stay at 0.
+          ARMING_THROTTLE_MAX arm gate remains 0.05 independently.
+        </p>
+      </fieldset>
 
       <div className="row" style={{ marginTop: "1rem" }}>
         <button type="button" className="primary" onClick={() => void onSave()}>

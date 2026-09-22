@@ -12,6 +12,8 @@
 #define DEF_KP       0.002f
 #define DEF_KI       0.001f
 #define DEF_KD       0.00005f
+#define DEF_MIN_THR  0.05f
+#define DEF_AIRMODE  0
 
 static bf_config_t g_cfg = {
     .rate_max_roll = DEF_RATE_MAX,
@@ -26,6 +28,8 @@ static bf_config_t g_cfg = {
     .pid_pitch_d = DEF_KD,
     .pid_yaw_p = DEF_KP,
     .pid_yaw_i = DEF_KI,
+    .min_throttle = DEF_MIN_THR,
+    .airmode = DEF_AIRMODE,
 };
 
 void config_defaults(void)
@@ -42,6 +46,8 @@ void config_defaults(void)
     g_cfg.pid_pitch_d = DEF_KD;
     g_cfg.pid_yaw_p = DEF_KP;
     g_cfg.pid_yaw_i = DEF_KI;
+    g_cfg.min_throttle = DEF_MIN_THR;
+    g_cfg.airmode = DEF_AIRMODE;
 }
 
 void config_init(void)
@@ -107,13 +113,23 @@ static float *slot_for(const char *key)
     if (strcmp(key, "pid_yaw_i") == 0) {
         return &g_cfg.pid_yaw_i;
     }
+    if (strcmp(key, "min_throttle") == 0) {
+        return &g_cfg.min_throttle;
+    }
     return NULL;
 }
 
 bool config_get_key(const char *key, float *out)
 {
+    if (!key || !out) {
+        return false;
+    }
+    if (strcmp(key, "airmode") == 0) {
+        *out = (float)g_cfg.airmode;
+        return true;
+    }
     float *slot = slot_for(key);
-    if (!slot || !out) {
+    if (!slot) {
         return false;
     }
     *out = *slot;
@@ -122,11 +138,18 @@ bool config_get_key(const char *key, float *out)
 
 bool config_set_key(const char *key, float value)
 {
-    float *slot = slot_for(key);
-    if (!slot) {
+    if (!key || !isfinite(value)) {
         return false;
     }
-    if (!isfinite(value)) {
+    if (strcmp(key, "airmode") == 0) {
+        if (value != 0.f && value != 1.f) {
+            return false;
+        }
+        g_cfg.airmode = (uint8_t)value;
+        return true;
+    }
+    float *slot = slot_for(key);
+    if (!slot) {
         return false;
     }
     if (strncmp(key, "rate_max_", 9) == 0) {
@@ -135,6 +158,10 @@ bool config_set_key(const char *key, float value)
         }
     } else if (strcmp(key, "rate_expo") == 0) {
         if (value < 0.f || value > 1.f) {
+            return false;
+        }
+    } else if (strcmp(key, "min_throttle") == 0) {
+        if (value < 0.f || value > 0.2f) {
             return false;
         }
     } else if (value < 0.f || value > 10.f) {

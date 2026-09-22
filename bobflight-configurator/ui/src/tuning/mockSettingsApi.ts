@@ -40,6 +40,8 @@ export const PID_KEYS = [
   "pid_pitch_d",
   "pid_yaw_p",
   "pid_yaw_i",
+  "min_throttle",
+  "airmode",
 ] as const;
 
 export type RateKey = (typeof RATE_KEYS)[number];
