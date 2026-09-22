@@ -41,3 +41,28 @@ IR: `board-defs/.../kakute_f7_hdv.M1-M4-AF-DMA-LOCK.md` (`ir_verified=false`).
 - Polled IC is bring-up only; IRQ/DMA IC + tighter window next.
 - Settle-after-TC is coarse (CNT delta vs ARR); may need ESC-specific skew.
 - GPIO AF left to TX path (AF2 TIM3 / AF1 TIM1) — no remap in IC.
+
+## Lead CLI keys (Configurator freeze)
+
+Props-off only. RAM-only; not config schema. Default: bidir off.
+
+| CLI | Driver |
+|-----|--------|
+| `set dshot_bidir on|off` | `dshot_bidir_set_enabled` / `dshot_bidir_enabled` |
+| `get erpm_m1` … `get erpm_m4` | `dshot_erpm(0..3)` → `erpm_mN=<n>` if OK else `erpm_mN=none` |
+| `get dshot_telem_m1` … `get dshot_telem_m4` | `dshot_telem_status(0..3)` → `ok|crc_fail|invalid|timeout|stale|none` |
+
+Optional later: append period/age on telem get — not required for R0c.
+
+## Props-off field checklist
+
+1. Flash held build; props off; USB CLI connected.
+2. Confirm `get dshot_bidir` → `dshot_bidir=off`; all `get erpm_mN` → `erpm_mN=none`.
+3. `set dshot_bidir on`.
+4. Idle / low motor_test pulses (props-off). Poll each motor:
+   - `get dshot_telem_mN` → prefer `ok` (or expected `timeout` if ESC silent).
+   - `get erpm_mN` → numeric only when status `ok`.
+5. `set dshot_bidir off` → statuses `none`, eRPMs `none`.
+6. Do **not** raise throttle on CRC_FAIL / INVALID.
+
+See also `docs/DSHOT-R0B-M1-TELEM-SMOKE.md` (M1-only R0b checklist).
