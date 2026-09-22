@@ -24,6 +24,24 @@ export const MOCK_PORT_PATH = "mock://bobflight";
 const PRODUCT = "BobFlight";
 const VERSION = "0.1.0-skeleton";
 
+/** FW `dshot_telem_status_name` tokens (R0c / PR #52). */
+export type DshotTelemStatus =
+  | "ok"
+  | "crc_fail"
+  | "invalid"
+  | "timeout"
+  | "stale"
+  | "none";
+
+export const DSHOT_TELEM_STATUSES: readonly DshotTelemStatus[] = [
+  "ok",
+  "crc_fail",
+  "invalid",
+  "timeout",
+  "stale",
+  "none",
+] as const;
+
 export interface MockSerialOptions {
   /** If true, arm succeeds; otherwise FW refuse string. Default false (fail-closed). */
   gyroHealthy?: boolean;
@@ -31,6 +49,11 @@ export interface MockSerialOptions {
   boardId?: string;
   /** Explicit simulation only; default output-unavailable mock stays fail closed. */
   benchReady?: boolean;
+  /**
+   * R0c smoke: optional per-motor telem overrides (1..4) when bidir is on.
+   * Does not invent live eRPM; erpm is emitted only when status is `ok`.
+   */
+  dshotTelemByMotor?: Partial<Record<1 | 2 | 3 | 4, DshotTelemStatus>>;
 }
 
 /**
@@ -48,8 +71,10 @@ export class MockSerial extends EventEmitter {
   private receiver = new MockReceiver();
   private armed = false;
   private rebootRequested = false;
-  /** R0b RAM-only bidir flag (default off). */
+  /** R0c RAM-only bidir flag (default off). */
   private dshotBidir = false;
+  /** Optional telem overrides when bidir on (smoke fixtures). */
+  private readonly telemByMotor: Partial<Record<1 | 2 | 3 | 4, DshotTelemStatus>>;
   /** Numeric store mirroring bf_config_t floats. */
   private settings: Record<SettingsKey, number>;
   private readonly opts: Required<
@@ -70,6 +95,7 @@ export class MockSerial extends EventEmitter {
       failsafeActive: opts.failsafeActive ?? false,
       boardId: opts.boardId ?? "mock-board",
     };
+    this.telemByMotor = { ...(opts.dshotTelemByMotor ?? {}) };
     this.modesPorts.reset();
     this.dshotBidir = false;
     this.settings = cloneDefaultSettingValues();
@@ -227,27 +253,26 @@ export class MockSerial extends EventEmitter {
       this.emitData("defaults restored\r\n");
     } else if (line.startsWith("get ") || line === "get") {
       const key = line === "get" ? "" : line.slice(4).trim();
-      // R0b: M1 live-capable mock; M2–4 unknown until FW R0c (honest).
-      if (key === "erpm_m1") {
-        if (this.dshotBidir) {
-          // Sample eRPM when bidir on — not a fake idle 0 while unavailable.
-          this.emitData("erpm_m1=24600\r\n");
+      // R0c: M1–M4 first-class (FW PR #52). Wire:
+      //   get erpm_mN → erpm_mN=<n> if telem OK else erpm_mN=none
+      //   get dshot_telem_mN → ok|crc_fail|invalid|timeout|stale|none
+      const erpmMotor = /^erpm_m([1-4])$/.exec(key);
+      if (erpmMotor) {
+        const m = Number(erpmMotor[1]) as 1 | 2 | 3 | 4;
+        const st = this.r0cTelemStatus(m);
+        if (st === "ok") {
+          // Deterministic mock fixture only — not a live invent path.
+          this.emitData(`erpm_m${m}=${this.r0cMockErpm(m)}\r\n`);
         } else {
-          this.emitData("erpm_m1=none\r\n");
+          this.emitData(`erpm_m${m}=none\r\n`);
         }
         return;
       }
-      if (/^erpm_m[2-4]$/.test(key)) {
-        this.emitData("unknown key\r\n");
-        return;
-      }
-      if (key === "dshot_telem_m1") {
+      const telemMotor = /^dshot_telem_m([1-4])$/.exec(key);
+      if (telemMotor) {
+        const m = Number(telemMotor[1]) as 1 | 2 | 3 | 4;
         // FW returns status token only (no key= prefix) for telem.
-        this.emitData(this.dshotBidir ? "ok\r\n" : "none\r\n");
-        return;
-      }
-      if (/^dshot_telem_m[2-4]$/.test(key)) {
-        this.emitData("unknown key\r\n");
+        this.emitData(`${this.r0cTelemStatus(m)}\r\n`);
         return;
       }
       if (key === "dshot_bidir") {
@@ -300,6 +325,31 @@ export class MockSerial extends EventEmitter {
     } else {
       this.emitData("unknown — try help\r\n");
     }
+  }
+
+  /** Default bidir-on fixtures: cover ok/crc_fail/invalid/timeout; override for stale. */
+  private r0cTelemStatus(motor: 1 | 2 | 3 | 4): DshotTelemStatus {
+    if (!this.dshotBidir) return "none";
+    const forced = this.telemByMotor[motor];
+    if (forced) return forced;
+    const defaults: Record<1 | 2 | 3 | 4, DshotTelemStatus> = {
+      1: "ok",
+      2: "crc_fail",
+      3: "invalid",
+      4: "timeout",
+    };
+    return defaults[motor];
+  }
+
+  /** Mock eRPM fixture when status is ok (never invent for non-ok). */
+  private r0cMockErpm(motor: 1 | 2 | 3 | 4): number {
+    const fixtures: Record<1 | 2 | 3 | 4, number> = {
+      1: 24600,
+      2: 24700,
+      3: 24800,
+      4: 24900,
+    };
+    return fixtures[motor];
   }
 
   /** Test helper: whether reboot was requested (mirrors FW flag). */

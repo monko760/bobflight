@@ -228,15 +228,23 @@ export class MockBobFlightHost implements BobFlightHost {
   private modesPorts = new MockPortsModes();
   private receiver = new MockReceiver();
   private handle(cmd: CliCommand): string {
-    // R0b: M1 live-capable; M2–4 unknown until FW R0c (honest).
-    if (cmd === "get erpm_m1") {
-      return this.dshotBidir ? "erpm_m1=24600\r\n" : "erpm_m1=none\r\n";
+    // R0c: M1–M4 first-class (FW PR #52). Same wire as protocol MockSerial.
+    {
+      const erpm = /^get erpm_m([1-4])$/.exec(cmd);
+      if (erpm) {
+        const m = Number(erpm[1]);
+        const st = this.r0cTelemStatus(m as 1 | 2 | 3 | 4);
+        if (st === "ok") {
+          const fixtures: Record<number, number> = { 1: 24600, 2: 24700, 3: 24800, 4: 24900 };
+          return `erpm_m${m}=${fixtures[m]}\r\n`;
+        }
+        return `erpm_m${m}=none\r\n`;
+      }
+      const telem = /^get dshot_telem_m([1-4])$/.exec(cmd);
+      if (telem) {
+        return `${this.r0cTelemStatus(Number(telem[1]) as 1 | 2 | 3 | 4)}\r\n`;
+      }
     }
-    if (/^get erpm_m[2-4]$/.test(cmd)) return "unknown key\r\n";
-    if (cmd === "get dshot_telem_m1") {
-      return this.dshotBidir ? "ok\r\n" : "none\r\n";
-    }
-    if (/^get dshot_telem_m[2-4]$/.test(cmd)) return "unknown key\r\n";
     if (cmd === "get dshot_bidir") {
       return this.dshotBidir ? "dshot_bidir=on\r\n" : "dshot_bidir=off\r\n";
     }
@@ -310,6 +318,18 @@ export class MockBobFlightHost implements BobFlightHost {
       default:
         return "unknown — try help";
     }
+  }
+
+  /** Match protocol MockSerial default fixtures when bidir on. */
+  private r0cTelemStatus(motor: 1 | 2 | 3 | 4): "ok" | "crc_fail" | "invalid" | "timeout" | "stale" | "none" {
+    if (!this.dshotBidir) return "none";
+    const defaults: Record<1 | 2 | 3 | 4, "ok" | "crc_fail" | "invalid" | "timeout"> = {
+      1: "ok",
+      2: "crc_fail",
+      3: "invalid",
+      4: "timeout",
+    };
+    return defaults[motor];
   }
 
   setMockGates(opts: {
