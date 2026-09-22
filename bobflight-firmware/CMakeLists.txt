@@ -126,6 +126,7 @@ set(BF_COMMON_SOURCES
   src/flight/mode_range.c
   src/drivers/gyro.c src/drivers/sensor_calibration.c
   src/drivers/dshot.c
+  src/drivers/dshot_gcr.c
   src/drivers/rx.c
   src/drivers/crsf.c
   src/drivers/cli.c
@@ -317,6 +318,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src)
   target_compile_definitions(bobflight_dshot_frame_test PRIVATE BOBFLIGHT_HOST=1)
+
+  include(${CMAKE_SOURCE_DIR}/cmake/host_dshot_gcr.cmake)
 
   add_executable(bobflight_crsf_parse_test
     src/drivers/crsf.c
