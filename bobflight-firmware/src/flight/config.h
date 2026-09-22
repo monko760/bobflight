@@ -28,10 +28,10 @@ typedef struct {
     float pid_yaw_p;
     float pid_yaw_i;
     float pid_yaw_d;
-    float min_throttle;
-    uint8_t airmode;
-    float gyro_lpf_hz;
-    float dterm_lpf_hz;
+    float min_throttle; /* armed idle floor 0..0.2; default 0.05 (BF-like suggestion) */
+    uint8_t airmode;    /* 0=off (bench-safe), 1=keep I integrating at idle */
+    float gyro_lpf_hz;  /* soft gyro LPF; 0=off, else 10..1000; default 320 */
+    float dterm_lpf_hz; /* soft D-term LPF; 0=off, else 10..1000; default 53 */
 } bf_config_t;
 
 void config_init(void);
