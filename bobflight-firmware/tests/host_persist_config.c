@@ -12,7 +12,7 @@
 static board_t board={.board_id="kakute_f7_hdv",.rx_uart=6};
 static bool armed,bench,calibrating,supported=true,exists,write_failure,read_failure;
 static unsigned saves,rx_resets,freshness_resets,generation;
-static uint8_t image[176];static size_t image_len;static uint32_t image_board;
+static uint8_t image[184];static size_t image_len;static uint32_t image_board;
 const board_t *board_get(void){return &board;}
 bool board_select_rx_uart(unsigned u){if(!(u==1||u==2||u==3||u==4||u==6||u==7))return false;board.rx_uart=u;return true;}
 arm_state_t arming_state(void){return armed?ARM_ARMED:ARM_DISARMED;}
@@ -45,7 +45,7 @@ void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
 uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
 bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding){return binding==gyro_accel_calibration_binding()&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
-uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:4;}
+uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:5;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
  if(image_len==96&&n==128&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,96);return CONFIG_STORE_OK;}
  return config_store_load(id,p,n);
@@ -69,6 +69,11 @@ config_store_result_t config_store_load_v4(uint32_t id,void*p,size_t n){
  return config_store_load(id,p,n);
 }
 config_store_result_t config_store_save_v4(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
+config_store_result_t config_store_load_v5(uint32_t id,void*p,size_t n){
+ if((image_len==96||image_len==128||image_len==160||image_len==176)&&n==184&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,image_len);return CONFIG_STORE_OK;}
+ return config_store_load(id,p,n);
+}
+config_store_result_t config_store_save_v5(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
 /* Include the codec to validate the on-wire byte format, not just happy-path APIs. */
 #include "../src/drivers/persist.c"
 int main(void){
@@ -165,6 +170,19 @@ int main(void){
  for(unsigned offset=128;offset<160;offset+=4){memcpy(image,good,PAYLOAD_BYTES);put32(image+offset,0x7fc00000u);power_init();speed=300;assert(!persist_load());assert(power_config()->voltage_scale==11.f&&speed==300);}
  memcpy(image,good,PAYLOAD_BYTES);speed_failure=true;assert(!persist_load());assert(power_config()->voltage_scale==11.f);speed_failure=false;assert(persist_load());
  image_len=128;power_init();speed=300;persist_init();assert(persist_load());assert(power_config()->voltage_scale==11.f&&speed==300&&persist_dirty());assert(persist_save());
+ /* Schema4 payload migrates LPF defaults 320/53 and stays dirty until Save. */
+ {
+  assert(persist_save());
+  uint8_t schema4[176];memcpy(schema4,image,176);image_len=176;memcpy(image,schema4,176);
+  float g=0,d=0;assert(config_set_key("gyro_lpf_hz",999.f));assert(config_set_key("dterm_lpf_hz",999.f));
+  persist_init();assert(persist_load());
+  assert(config_get_key("gyro_lpf_hz",&g)&&g==320.f);assert(config_get_key("dterm_lpf_hz",&d)&&d==53.f);
+  assert(persist_dirty());assert(persist_save());assert(image_len==PAYLOAD_BYTES&&!persist_dirty());
+  assert(config_set_key("gyro_lpf_hz",400.f));assert(config_set_key("dterm_lpf_hz",0.f));assert(persist_save());
+  persist_init();assert(persist_load());assert(config_get_key("gyro_lpf_hz",&g)&&g==400.f);assert(config_get_key("dterm_lpf_hz",&d)&&d==0.f);
+  assert(!config_set_key("gyro_lpf_hz",5.f));assert(!config_set_key("dterm_lpf_hz",1001.f));
+ }
+
  supported=false;cal.accel_valid=true;before=saves;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"ram-only"));
  puts("PASS actual six-face solver -> codec -> cold restore, candidate/gyro exclusion, atomic malformed-cal refusal, dirty/save/error state, old-settings migration and unsupported target");
  puts("PASS codec offsets, validated atomic restore, repeated boot-init roundtrip, dirty tracking, guards, failed writes/readback, malformed fields and scope");

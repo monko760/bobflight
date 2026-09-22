@@ -33,12 +33,34 @@ Live gains — `pid_update` / `rates_update` read `config_get()` each tick.
 | `pid_roll_p` / `i` / `d` | `0.002` / `0.001` / `0.00005` | roll axis |
 | `pid_pitch_p` / `i` / `d` | same | pitch axis |
 | `pid_yaw_p` / `i` | same P/I | yaw D reuses `pid_roll_d` (MVP) |
+| `gyro_lpf_hz` | `320` | soft gyro LPF; `0`=off |
+| `dterm_lpf_hz` | `53` | soft D-term LPF; `0`=off |
 
 Also: DT `1/4000`, I limit `±50`, output clamp `±0.4` with conditional I anti-windup.
 
 AirMode (`airmode` 0/1, default **0**): when off, low throttle (`<0.05`) resets I while armed; when on, I keeps integrating at idle. Always resets on disarm.
 
 Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
+
+
+## Soft LPF keys — Filters R0 (schema 5)
+
+Runtime float keys (CLI `get`/`set`/`defaults`/`save`) for first-order low-pass cutoffs. Filter math wiring is Flight-owned; Lead exposes config + schema-5 persistence.
+
+```
+tau   = 1 / (2 * pi * fc)
+alpha = dt / (tau + dt)
+y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
+```
+
+`fc_hz = 0` disables the filter (passthrough, alpha = 1).
+
+| Key | Default | Range | Continuity note |
+|-----|---------|-------|-----------------|
+| `gyro_lpf_hz` | `320` | `0` = off, else `10..1000` | Matches prior hardcoded α≈0.3345 at `dt=1/4000` (`α = dt/(τ+dt)`, `τ=1/(2π·fc)` → fc≈320 Hz) |
+| `dterm_lpf_hz` | `53` | `0` = off, else `10..1000` | Matches prior D-term `τ=0.003` s (`fc=1/(2π·0.003)`≈53 Hz) |
+
+Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 5, 184 bytes).
 
 ## Mixer
 
