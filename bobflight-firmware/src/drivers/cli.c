@@ -177,7 +177,8 @@ static void cmd_receiver(void)
     char buf[768];
     const char *link=!rx_uart_bound()?"unbound":age==UINT32_MAX?"waiting":rx_frame_fresh()?"live":"lost";
     snprintf(buf,sizeof(buf),
-        "receiver_api: 1\r\nprotocol: CRSF\r\nuart: %u\r\nmap: %s\r\nlink: %s\r\nage_ms: %ld\r\nframes: %lu\r\ncrc_errors: %lu\r\nstream_resets: %lu\r\n"
+        "receiver_api: 1\r\nprotocol: CRSF\r\nuart: %u\r\nmap: %s\r\nlink: %s\r\n"
+        "age_ms: %ld\r\nframes: %lu\r\ncrc_errors: %lu\r\nstream_resets: %lu\r\n"
         "armed: %u\r\nbench_active: %u\r\nfailsafe: %u\r\n"
         "channels: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\r\n"
         "persistence: %s\r\nreceiver_end: 1\r\n",
