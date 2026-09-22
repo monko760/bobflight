@@ -49,7 +49,7 @@ modes
 receiver
 ```
 
-Expected: board `kakute_f7_hdv`, version `0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2-sdprobe1`, status `flight_mode: closed-loop-development`, `flight_enabled: 1` in modes/storage, initially disarmed, and supported flash storage. The status label describes the control capability of the single main image; it is not a second selectable build. Stop on a wrong board/version, failed storage restore, unexpected active output, or unreliable USB.
+Expected: board `kakute_f7_hdv`, version `0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2-sdprobe2`, status `flight_mode: closed-loop-development`, `flight_enabled: 1` in modes/storage, initially disarmed, and supported flash storage. The status label describes the control capability of the single main image; it is not a second selectable build. Stop on a wrong board/version, failed storage restore, unexpected active output, or unreliable USB.
 
 ## 3. Configure and confirm persistence on the same image
 

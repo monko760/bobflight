@@ -122,6 +122,16 @@ bool hal_gpio_read(hal_pin_t pin)
     if (!hal_pin_valid(pin)) {
         return false;
     }
+#if defined(BOBFLIGHT_HAVE_CMSIS)
+    /* Read the external pin, not the cached output latch. In particular,
+     * SD initialization samples MISO while it is configured as an input. */
+    unsigned port, num;
+    if (hal_f7_mmio_ok(pin, &port, &num)) {
+        hal_f7_gpio_regs_t *gpio = hal_f7_gpio(port);
+        return gpio && (gpio->IDR & (1u << num)) != 0u;
+    }
+#endif
+    /* Preserve the no-MMIO simulation fallback. */
     s = slot_for(pin, false);
     return s ? s->level : false;
 }

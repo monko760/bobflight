@@ -52,10 +52,16 @@ The SD-panel model tests cover explicit start, serialization, bounded status pol
 
 ## Installation and physical probe
 
-Use the single-image build and backup/DFU/recovery procedure in [MAIN-BUILD.md](MAIN-BUILD.md). Expected Kakute version suffix: `-sdprobe1`. Build firmware and configurator from this same branch. This change does not require a different bench/flight build profile.
+Use the single-image build and backup/DFU/recovery procedure in [MAIN-BUILD.md](MAIN-BUILD.md). Expected Kakute version suffix: `-sdprobe2`. Build firmware and configurator from this same branch. This change does not require a different bench/flight build profile.
 
 Before flashing, remove propellers, disconnect motor power, leave ARM inactive, back up `diff all` and `dump all`, retain the previous known-working image, and verify an independent recovery route. Preserve configuration flash. Use the existing guarded `bl` flow only with saved configuration; do not use `bl discard` to bypass unsaved changes or mass-erase configuration storage.
 
 After reconnecting, verify version, board identity, `storage` and saved configuration against the backup. In Blackbox, click **Check SD card** once. Expect a completed probe, roughly the card's marketed capacity, and a filesystem hint; keep the raw reply. A refusal/error is not a reason to format the card or bypass a guard. Stop on unexpected motor activity, reset, lost configuration or unreliable USB. No arming or flight test is required for this diagnostic.
 
 The next implementation milestone is safe filesystem-backed file creation and recording, then verified file retrieval. It remains unfinished.
+
+## sdprobe2: physical GPIO input correction
+
+The first physical probe reported `card-io-error`, error 8, before capacity was established. The F7 `hal_gpio_read` function returned its cached software output level even for inputs. Consequently SD MISO always read zero during GPIO-clocked initialization. A new regression compiles the actual GPIO and SD backend code against simulated registers: the original source reproduces error 8 on CMD0 despite a valid card R1=0x01 response; the corrected source reads IDR and advances to CMD8. The earlier backend test replaced GPIO reads with a stub and missed this integration defect.
+
+The fix reads the physical IDR only behind the existing MMIO permission guard and preserves the cached no-MMIO fallback. Invalid-pin and permission-denied tests remain covered. This is a verified software correction, not a claim that the physical card's full initialization or filesystem probe now succeeds. It makes no SD writes and changes no arming, motor, PID, failsafe or persistent-configuration behavior.
