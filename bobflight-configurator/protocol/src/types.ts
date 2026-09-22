@@ -64,7 +64,13 @@ export type CliCommand =
   | "dshot 600"
   | `receiver_uart ${1 | 2 | 3 | 4 | 6 | 7}`
   | `motor_test ${0 | 1 | 2 | 3 | 4}`
-  | `motor_pulse ${1 | 2 | 3 | 4} ${MotorPulsePercent}`;
+  | `motor_pulse ${1 | 2 | 3 | 4} ${MotorPulsePercent}`
+  // R0b DShot bidir / eRPM (RAM; FW PR #49) — patterned allow, not every get/set
+  | `get erpm_m${1 | 2 | 3 | 4}`
+  | `get dshot_telem_m${1 | 2 | 3 | 4}`
+  | "get dshot_bidir"
+  | "set dshot_bidir on"
+  | "set dshot_bidir off";
 
 export interface ConnectOptions {
   path: string;

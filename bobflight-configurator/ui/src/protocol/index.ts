@@ -28,6 +28,7 @@ export {
   isSettingsKey,
   DEFAULT_SETTINGS,
   SCHEMA5_FLOAT_KEYS,
+  isR0bDshotCliCommand,
 } from "@bobflight/protocol";
 export type { ParsedGetReply, ParsedSetReply, Schema5FloatKey } from "@bobflight/protocol";
 

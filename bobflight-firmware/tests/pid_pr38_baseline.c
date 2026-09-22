@@ -50,7 +50,7 @@ void baseline_pid_update(const float gyro_dps[3], const float setpoint_dps[3],
     kd[1] = cfg->pid_pitch_d;
     kp[2] = cfg->pid_yaw_p;
     ki[2] = cfg->pid_yaw_i;
-    kd[2] = 0.f;
+    kd[2] = cfg->pid_yaw_d;
 
     float axes[3];
     for (int a = 0; a < 3; a++) {

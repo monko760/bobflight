@@ -53,6 +53,7 @@ export class MockBobFlightHost implements BobFlightHost {
   private lastError: string | null = null;
   private lineListeners = new Set<(line: string) => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
+  private dshotBidir = false;
   private armed = false;
   private bench = new MockMotorBench();
   private gyroHealthy = false;
@@ -133,6 +134,7 @@ export class MockBobFlightHost implements BobFlightHost {
     }
     this.lastError = null;
     this.armed = false;
+    this.dshotBidir = false;
     this.bench.reset();
     this.setStatus("connecting");
     await delay(this.connectDelayMs);
@@ -152,11 +154,12 @@ export class MockBobFlightHost implements BobFlightHost {
     this.setStatus("disconnected");
     this.bench.disconnect();
     this.armed = false;
+    this.dshotBidir = false;
   }
 
   async sendCommand(cmd: CliCommand): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100)|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd)) {
+    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100)|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd) && !/^(get erpm_m[1-4]|get dshot_telem_m[1-4]|get dshot_bidir|set dshot_bidir (?:on|off))$/.test(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     if (this.status !== "connected") {
@@ -225,6 +228,26 @@ export class MockBobFlightHost implements BobFlightHost {
   private modesPorts = new MockPortsModes();
   private receiver = new MockReceiver();
   private handle(cmd: CliCommand): string {
+    // R0b: M1 live-capable; M2–4 unknown until FW R0c (honest).
+    if (cmd === "get erpm_m1") {
+      return this.dshotBidir ? "erpm_m1=24600\r\n" : "erpm_m1=none\r\n";
+    }
+    if (/^get erpm_m[2-4]$/.test(cmd)) return "unknown key\r\n";
+    if (cmd === "get dshot_telem_m1") {
+      return this.dshotBidir ? "ok\r\n" : "none\r\n";
+    }
+    if (/^get dshot_telem_m[2-4]$/.test(cmd)) return "unknown key\r\n";
+    if (cmd === "get dshot_bidir") {
+      return this.dshotBidir ? "dshot_bidir=on\r\n" : "dshot_bidir=off\r\n";
+    }
+    if (cmd === "set dshot_bidir on") {
+      this.dshotBidir = true;
+      return "ok dshot_bidir=on\r\n";
+    }
+    if (cmd === "set dshot_bidir off") {
+      this.dshotBidir = false;
+      return "ok dshot_bidir=off\r\n";
+    }
     if(cmd === "bl" || cmd === "bl discard") return "bl unavailable: mock transport has no ROM bootloader\r\n";
     const pm=this.modesPorts.handle(cmd,this.armed,this.bench.active);if(pm!==null)return pm;
     if(cmd === "pid_diag" || cmd.startsWith("pid_diag "))return "pid_diag_available: no\r\nreason: mock-no-hardware\r\nmotor_output: disabled\r\npid_diag_end: 1\r\n";

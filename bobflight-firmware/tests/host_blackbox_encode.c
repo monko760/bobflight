@@ -5,9 +5,8 @@
 #include <stdio.h>
 #include <math.h>
 #include <float.h>
-int main(int argc,char **argv){
- config_init();blackbox_metadata_t meta={500,1000,300,"0.2.0-encoder-fixture",config_get()};
- char header[4096];size_t h=blackbox_header(header,sizeof header,&meta);assert(h&&h<sizeof header);assert(strstr(header,"H Firmware revision:BobFlight 0.2.0-encoder-fixture"));assert(strstr(header,"H I interval:2\nH P interval:1/2\n"));assert(strstr(header,"H looptime:1000\n"));assert(strstr(header,"H BobFlight pid_roll_p:"));
+int main(int argc,char **argv){ config_init();blackbox_metadata_t meta={500,1000,300,"0.2.0-encoder-fixture",config_get()};
+ char header[4096];size_t h=blackbox_header(header,sizeof header,&meta);assert(h&&h<sizeof header);assert(strstr(header,"H Firmware revision:BobFlight 0.2.0-encoder-fixture"));assert(strstr(header,"H I interval:2\nH P interval:1/2\n"));assert(strstr(header,"H looptime:1000\n"));assert(strstr(header,"H BobFlight pid_roll_p:"));assert(strstr(header,"H BobFlight pid_yaw_d:"));
  char small[16];memset(small,0x5a,sizeof small);assert(!blackbox_header(small,sizeof small,&meta));for(unsigned n=0;n<sizeof small;n++)assert(small[n]==0x5a);
  meta.revision="bad\nH Firmware revision:Betaflight 4.5.0";assert(!blackbox_header(header,sizeof header,&meta));meta.revision="Betaflight 4.5.0";assert(!blackbox_header(header,sizeof header,&meta));meta.revision="0.2.0-encoder-fixture";meta.dshot_kbps=600;assert(blackbox_header(header,sizeof header,&meta));assert(strstr(header,"H motor_pwm_protocol:7\n"));meta.dshot_kbps=300;
  uint8_t out[256],sentinel[256];memset(out,0x5a,sizeof out);memcpy(sentinel,out,sizeof out);
