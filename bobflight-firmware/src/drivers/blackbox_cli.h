@@ -50,7 +50,7 @@ static void bbl_status(void){
 static bool cmd_blackbox(const char *line){
  if(strcmp(line,"blackbox start")&&strcmp(line,"blackbox stop")&&strcmp(line,"blackbox status"))return false;
  if(!strcmp(line,"blackbox start")){
-  if(blackbox_cli_busy()||sd_probe_busy(&cli_sd)||!sd_cli_guard()||persist_dirty()){
+  if(blackbox_cli_busy()||sd_read_busy()||sd_probe_busy(&cli_sd)||!sd_cli_guard()||persist_dirty()){
    cli_write_str("blackbox refused: disarm, stop motor tests/calibration/probe, save configuration, connect USB and finish any current recording\r\nblackbox_end: 1\r\n");return true;
   }
   sd_spi_io_t io;sd_spi_hw_cancel();
@@ -68,7 +68,8 @@ static bool cmd_blackbox(const char *line){
 /* Freeze file-header configuration and serialize maintenance against SD writes.
  * Normal arm/disarm and explicit motor-stop commands remain available. */
 static bool blackbox_cli_filter(const char *line){
- if(!blackbox_cli_busy())return false;
+ if(!blackbox_cli_busy()&&!sd_read_busy())return false;
+ if(!strncmp(line,"sd read",7))return false;
  const char *safe[]={"blackbox status","blackbox stop","blackbox start","arm","disarm","bench_stop","calibration_cancel","help","version","status","storage","calibration","control_mode","sensors","receiver","modes","ports","power","timing","pid_diag","pid_diag status","bench_status","diff","dump","diff all","dump all","sd probe","sd status","sd cancel"};
  for(unsigned i=0;i<sizeof safe/sizeof safe[0];i++)if(!strcmp(line,safe[i]))return false;
  cli_write_str("command refused: stop Blackbox recording and wait for done before configuration, calibration, motor tests, reboot or bootloader entry\r\n");

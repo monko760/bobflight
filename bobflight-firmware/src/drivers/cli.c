@@ -60,6 +60,7 @@ static void cmd_help(void)
     cli_write_str(
         "BobFlight CLI\r\n"
         "  blackbox start | blackbox stop | blackbox status - onboard FAT32 recording\r\n"
+        "  sd read <sector> - guarded read-only USB extraction after sd probe\r\n"
         "  sd probe | sd status | sd cancel - read-only SD capacity/filesystem diagnostic\r\n"
         "  help     - this text\r\n"
         "  control_mode [angle|acro|horizon] - manual control mode selection (explicit save available)\r\n"

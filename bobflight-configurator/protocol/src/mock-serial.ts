@@ -152,6 +152,7 @@ export class MockSerial extends EventEmitter {
     if(line === "bl" || line === "bl discard"){this.emitData("bl unavailable: mock transport has no ROM bootloader\r\n");return;}
     if(line === "pid_diag" || line.startsWith("pid_diag ")){this.emitData("pid_diag_available: no\r\nreason: mock-no-hardware\r\nmotor_output: disabled\r\npid_diag_end: 1\r\n");return;}
     if(line === "blackbox start" || line === "blackbox stop" || line === "blackbox status"){this.emitData("blackbox unavailable: mock has no physical SD card\r\nblackbox_end: 1\r\n");return;}
+    if(line.startsWith("sd read")){this.emitData("sd_data_error: unavailable-mock\r\nsd_data_end: 1\r\n");return;}
     if(line === "sd probe" || line === "sd status" || line === "sd cancel"){this.emitData("sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n");return;}
     if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
     const pm = this.modesPorts.handle(line,this.armed,this.bench.active);

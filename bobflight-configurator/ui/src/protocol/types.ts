@@ -49,6 +49,7 @@ export function parseCliInput(raw: string): CliCommand | null {
   const cmd = raw.trim().toLowerCase().replace(/ +/g, " ");
   // Preserve the existing explicit bench command spelling restriction.
   if ((cmd === "bench_switch" || cmd === "bench_stop") && raw.trim() !== cmd) return null;
+  if (/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) return cmd as CliCommand;
   return (ALLOWED_CLI_COMMANDS as readonly string[]).includes(cmd) ? cmd as CliCommand : null;
 }
 
