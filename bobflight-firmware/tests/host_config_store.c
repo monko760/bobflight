@@ -59,6 +59,27 @@ int main(void){
   puts("PASS schema3 -> schema4 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
  }
 
+ /* Schema4 -> schema5 migration with zero extension and write-cut retention. */
+ {
+  uint8_t old5[184],new5[184],out5[184];memset(old5,17,176);memset(old5+176,0,8);memset(new5,34,sizeof(new5));
+  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
+  assert(config_store_save_v4(19,old5,176)==CONFIG_STORE_OK);
+  assert(config_store_load_v5(19,out5,184)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==4);
+  for(unsigned j=176;j<184;j++)assert(out5[j]==0);
+  memcpy(baseline,flash,sizeof(flash));
+  for(int cut=0;cut<=256;cut++){
+   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
+   config_store_result_t r=config_store_save_v5(19,new5,184);write_budget=-1;
+   assert(config_store_load_v5(19,out5,184)==CONFIG_STORE_OK);
+   if(r==CONFIG_STORE_OK)assert(!memcmp(out5,new5,184)&&config_store_loaded_schema()==5);
+   else assert((!memcmp(out5,old5,176)&&config_store_loaded_schema()==4)||(!memcmp(out5,new5,184)&&config_store_loaded_schema()==5));
+  }
+  assert(config_store_save_v4(19,old5,176)==CONFIG_STORE_INVALID);
+  unsigned saved_erases=erases;assert(config_store_save_v5(19,new5,184)==CONFIG_STORE_OK&&erases==saved_erases);
+  puts("PASS schema4 -> schema5 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
+ }
+
+
  uint8_t old[128],next[128],out[128];memset(old,17,128);memset(next,34,128);memset(flash,255,sizeof(flash));
  assert(config_store_load(19,out,128)==CONFIG_STORE_EMPTY);assert(config_store_save(19,old,128)==CONFIG_STORE_OK);assert(config_store_generation()==1);assert(config_store_load(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,old,128));
  unsigned e=erases,w=writes;assert(config_store_save(19,old,128)==CONFIG_STORE_OK);assert(erases==e&&writes==w);memcpy(baseline,flash,sizeof(flash));

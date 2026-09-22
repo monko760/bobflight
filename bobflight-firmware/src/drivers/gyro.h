@@ -62,6 +62,8 @@ const float *gyro_latest_dps(void);
 bool gyro_sample(float dps[3]);
 bool gyro_is_healthy(void);
 void gyro_filter(const float in_dps[3], float out_dps[3]);
+/** Sample period for soft gyro LPF (seconds). Default 1/4000. */
+void gyro_filter_set_dt(float dt);
 /** "dummy" | "no-cs" | "no-spi" | "unbound" | "bf-derived" | "ok" */
 const char *gyro_bind_state(void);
 

@@ -1,6 +1,10 @@
-# Settings persistence (schema 4)
+# Settings persistence (schema 5)
 
-Schema 4 extends schema 3 with `min_throttle` (float 0..0.2, default 0.05) and `airmode` (0/1, default 0). Schema 3 records load with these defaults and mark dirty until an explicit Save. Payload is 176 bytes (bytes 160–163 min_throttle, 164 airmode, 165–175 reserved). Not flight-qualified.
+Schema 5 extends schema 4 with soft LPF cutoffs `gyro_lpf_hz` (float, default **320**) and `dterm_lpf_hz` (float, default **53**). Range for each: **0** (off) or **10..1000**. Schema 4 (and older) records load with these defaults and mark dirty until an explicit Save.
+
+Payload is **184** bytes: schema-4 bytes 0–175 unchanged (160–163 `min_throttle`, 164 `airmode`, **165–175 remain reserved / zero — do not overload**), then **176–179** `gyro_lpf_hz`, **180–183** `dterm_lpf_hz`. `MAX_PAYLOAD` is 192.
+
+Schema 4 was 176 bytes (`min_throttle` + `airmode`). Not flight-qualified.
 
 
 Apply edits to the controller, then explicitly Save to controller. Save verifies flash readback; reboot does not save unapplied browser drafts or unsaved runtime changes. No automatic flash writes on startup or slider movement.
@@ -20,7 +24,7 @@ Apply edits to the controller, then explicitly Save to controller. Save verifies
 | Flasher / Connect | Connection/flash actions remain explicit; no automatic reconnect, reflash or controller write after reboot. |
 | Blackbox | USB recordings remain browser-session data and must be downloaded. Recorder activity is not restored. |
 
-Save panels require the connected firmware to advertise the relevant scope. Older schemas remain readable by the configurator; they cannot claim to save Power/DShot. Unsupported targets (including current T-Motor F722) still refuse flash storage. Scope is capability, not evidence that current drafts were saved.
+Save panels require the connected firmware to advertise the relevant scope. Older schemas remain readable by the configurator; they cannot claim to save Power/DShot/LPF filters. Unsupported targets (including current T-Motor F722) still refuse flash storage. Scope is capability, not evidence that current drafts were saved.
 
 ## Format and compatibility
 
@@ -32,6 +36,6 @@ Diff/dump exports include Power and DShot commands, including defaults for those
 
 ## Owner acceptance
 
-After installing matching firmware/configurator, confirm `storage` reports schema 3 and backend flash. Set Receiver UART/map as needed and Apply each change, set a distinct Power value and Apply, then Save to controller. Confirm saved/dirty 0. Disconnect all controller power, reconnect, and check applied values, Modes and calibration. DShot persistence can be checked by selecting a supported alternate rate with motors stopped, saving, and power cycling; no motor test is necessary.
+After installing matching firmware/configurator, confirm `storage` reports schema 5 and backend flash. Set Receiver UART/map as needed and Apply each change, set a distinct Power value and Apply, then Save to controller. Confirm saved/dirty 0. Disconnect all controller power, reconnect, and check applied values, Modes and calibration. DShot persistence can be checked by selecting a supported alternate rate with motors stopped, saving, and power cycling; no motor test is necessary.
 
 Expected Kakute version: `0.2.0-prototype-switchbench2-bl1-calstore2-piddiag2`. Save failure, unsupported storage or missing calibration is not success; retain the diagnostic output instead of erasing or repeatedly saving. Physical power-cycle acceptance is still required; software tests cannot verify the attached board.

@@ -5,6 +5,7 @@
  * Cascade + background task bodies.
  */
 #include "sched/tasks.h"
+#include "sched/scheduler.h"
 #include "drivers/gyro.h"
 #include "drivers/dshot.h"
 #include "drivers/rx.h"
@@ -158,6 +159,13 @@ void loop_gyro(void)
 
 void loop_filter(void)
 {
+    /* Soft gyro LPF runs at PID cadence (gyro_hz / pid_process_denom). */
+    const scheduler_stats_t *st = scheduler_stats();
+    float dt = 1.f / 4000.f;
+    if (st && st->gyro_hz > 0u && st->pid_process_denom > 0u) {
+        dt = (float)st->pid_process_denom / (float)st->gyro_hz;
+    }
+    gyro_filter_set_dt(dt);
     gyro_filter(g_gyro_raw, g_gyro_filt);
 }
 

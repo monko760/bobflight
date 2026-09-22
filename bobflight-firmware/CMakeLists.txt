@@ -112,7 +112,7 @@ set(BF_COMMON_SOURCES
   src/app/init.c
   src/sched/scheduler.c
   src/sched/tasks.c
-  src/flight/pid.c
+  src/flight/pid.c src/flight/filter.c
   src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/blackbox_capture.c src/flight/blackbox_session.c
   src/drivers/sd_spi.c src/drivers/sd_probe.c src/drivers/fat32_log.c
   src/flight/pid_diag.c src/flight/pid_diag_core.c
@@ -144,7 +144,7 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
-  add_executable(bobflight_capture_test src/flight/blackbox_capture.c src/flight/flight_recorder.c src/flight/pid.c src/flight/config.c tests/host_blackbox_capture.c)
+  add_executable(bobflight_capture_test src/flight/blackbox_capture.c src/flight/flight_recorder.c src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_blackbox_capture.c)
   target_link_libraries(bobflight_capture_test m)
   add_test(NAME blackbox_production_capture COMMAND bobflight_capture_test)
   add_executable(bobflight_recorder_test src/flight/flight_recorder.c tests/host_flight_recorder.c)
@@ -154,7 +154,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_blackbox_encode_test src/flight/blackbox_encode.c src/flight/config.c tests/host_blackbox_encode.c)
   target_link_libraries(bobflight_blackbox_encode_test m)
   add_test(NAME blackbox_encode COMMAND bobflight_blackbox_encode_test)
-  add_executable(bobflight_pid_trace_test src/flight/pid.c src/flight/config.c tests/pid_pr38_baseline.c tests/host_pid_trace.c)
+  add_executable(bobflight_pid_trace_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/pid_pr38_baseline.c tests/host_pid_trace.c)
   target_link_libraries(bobflight_pid_trace_test m)
   add_test(NAME pid_trace_bit_exact COMMAND bobflight_pid_trace_test)
   add_executable(bobflight_sd_probe_test src/drivers/sd_probe.c src/drivers/sd_spi.c tests/host_sd_probe.c)
@@ -177,7 +177,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/sched/scheduler.c src/sched/tasks.c
     src/drivers/rx.c src/drivers/crsf.c src/drivers/dshot.c
     src/flight/arming.c src/flight/failsafe.c src/flight/attitude.c
-    src/flight/config.c src/flight/pid.c src/flight/rates.c
+    src/flight/config.c src/flight/pid.c src/flight/filter.c src/flight/rates.c
     src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c)
   target_compile_definitions(bobflight_failsafe_integration_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_failsafe_integration_test m)
@@ -192,14 +192,14 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
       COMMAND bobflight_failsafe_integration_test ${fs_case})
   endforeach()
   add_executable(bobflight_pid_diag_task_test tests/host_pid_diag_task.c
-    src/sched/tasks.c src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c
+    src/sched/tasks.c src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c src/flight/filter.c
     src/flight/mixer.c src/flight/attitude.c src/flight/config.c src/flight/rates.c
     src/flight/mode_range.c src/flight/horizon.c)
   target_compile_definitions(bobflight_pid_diag_task_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_pid_diag_task_test m)
   add_test(NAME pid_diag_task COMMAND bobflight_pid_diag_task_test)
   add_executable(bobflight_pid_diag_test tests/host_pid_diag.c
-    src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c src/flight/config.c src/flight/rates.c)
+    src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c src/flight/filter.c src/flight/config.c src/flight/rates.c)
   target_compile_definitions(bobflight_pid_diag_test PRIVATE BOBFLIGHT_FLIGHT_ENABLE=1)
   target_link_libraries(bobflight_pid_diag_test m)
   add_test(NAME pid_diag_normal COMMAND bobflight_pid_diag_test)
@@ -225,7 +225,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_persist_config_test tests/host_persist_config.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
   target_link_libraries(bobflight_persist_config_test m)
   add_test(NAME persist_config COMMAND bobflight_persist_config_test)
-  add_executable(bobflight_pid_aw_test src/flight/pid.c src/flight/config.c tests/host_pid_aw.c)
+  add_executable(bobflight_pid_aw_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_pid_aw.c)
   target_link_libraries(bobflight_pid_aw_test m)
   add_test(NAME pid_aw COMMAND bobflight_pid_aw_test)
   add_executable(bobflight_mixer_idle_test src/flight/mixer.c src/flight/config.c tests/host_mixer_idle.c)
@@ -274,6 +274,17 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     BOBFLIGHT_HOST=1
     BOBFLIGHT_BOARD_ID="${BOBFLIGHT_BOARD}")
   message(STATUS "BobFlight: host smoke target 'bobflight_host'")
+
+  add_executable(bobflight_filter_test
+    src/flight/filter.c
+    src/flight/config.c
+    tests/host_filter.c)
+  target_include_directories(bobflight_filter_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(bobflight_filter_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_filter_test m)
+  add_test(NAME filter_lpf_math COMMAND bobflight_filter_test)
 
   add_executable(bobflight_rates_math_test
     src/flight/rates.c
@@ -369,7 +380,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_attitude_test m)
   add_executable(bobflight_pid_mpu_freshness_test tests/host_pid_mpu_freshness.c
     src/drivers/gyro.c src/drivers/sensor_calibration.c src/flight/pid_diag.c
-    src/flight/pid_diag_core.c src/flight/pid.c src/flight/config.c src/flight/rates.c)
+    src/flight/pid_diag_core.c src/flight/pid.c src/flight/filter.c src/flight/config.c src/flight/rates.c)
   target_compile_definitions(bobflight_pid_mpu_freshness_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_pid_mpu_freshness_test m)
   add_test(NAME pid_mpu_freshness COMMAND bobflight_pid_mpu_freshness_test)
@@ -381,7 +392,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_mpu6000_relaxed_test m)
   add_test(NAME mpu6000_relaxed COMMAND bobflight_mpu6000_relaxed_test)
   add_executable(bobflight_bench_safety_test
-    src/sched/tasks.c src/flight/pid.c src/flight/mixer.c
+    src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/mixer.c
     src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c)
   target_compile_definitions(bobflight_bench_safety_test PRIVATE BOBFLIGHT_HOST=1)
   target_sources(bobflight_bench_safety_test PRIVATE src/flight/rates.c)
@@ -392,7 +403,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME dshot_timer COMMAND bobflight_dshot_timer_test)
   add_test(NAME cli_bench_protocol COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_cli_bench.py $<TARGET_FILE:bobflight_host>)
-  foreach(check rates_math arming_edges failsafe dshot_frame dshot_speed crsf_parse gyro_inject cascade_inject attitude mpu6000 bench_safety)
+  foreach(check filter rates_math arming_edges failsafe dshot_frame dshot_speed crsf_parse gyro_inject cascade_inject attitude mpu6000 bench_safety)
     add_test(NAME ${check} COMMAND bobflight_${check}_test)
   endforeach()
 
@@ -403,7 +414,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME flight_modes_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_flight_modes_cli.py $<TARGET_FILE:bobflight_host>)
   add_executable(bobflight_control_mode_test
-    src/sched/tasks.c src/flight/pid.c src/flight/attitude.c
+    src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/attitude.c
     src/flight/rates.c src/flight/config.c tests/host_control_mode.c)
   target_compile_definitions(bobflight_control_mode_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_FLIGHT_ENABLE=1)
   target_sources(bobflight_control_mode_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
@@ -424,18 +435,18 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME blackbox_actual_cascade COMMAND bobflight_blackbox_task_test)
   add_executable(bobflight_blackbox_session_test tests/host_blackbox_session.c
     src/flight/blackbox_session.c src/flight/blackbox_capture.c src/flight/flight_recorder.c
-    src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+    src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)
   target_link_libraries(bobflight_blackbox_session_test m)
   add_test(NAME blackbox_session_end_to_end COMMAND bobflight_blackbox_session_test)
   add_executable(bobflight_blackbox_cli_test tests/host_blackbox_cli.c
     src/drivers/sd_spi.c src/drivers/sd_probe.c src/drivers/fat32_log.c
     src/flight/blackbox_session.c src/flight/blackbox_capture.c src/flight/flight_recorder.c
-    src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+    src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)
   target_link_libraries(bobflight_blackbox_cli_test m)
   add_test(NAME blackbox_cli_guards COMMAND bobflight_blackbox_cli_test)
   add_executable(bobflight_blackbox_card_test tests/host_blackbox_card.c
     src/drivers/fat32_log.c src/flight/blackbox_session.c src/flight/blackbox_capture.c
-    src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+    src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)
   target_link_libraries(bobflight_blackbox_card_test m)
   add_test(NAME blackbox_real_fat32_file COMMAND bobflight_blackbox_card_test)
   set_tests_properties(blackbox_real_fat32_file PROPERTIES TIMEOUT 30)
@@ -447,7 +458,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   set_tests_properties(blackbox_root_boundary_preservation PROPERTIES TIMEOUT 30)
   add_executable(bobflight_blackbox_corruption_test tests/host_blackbox_corruption.c
     src/drivers/fat32_log.c src/flight/blackbox_session.c src/flight/blackbox_capture.c
-    src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/config.c)
+    src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)
   target_link_libraries(bobflight_blackbox_corruption_test m)
   add_test(NAME blackbox_independent_corruption_guards COMMAND bobflight_blackbox_corruption_test)
   set_tests_properties(blackbox_independent_corruption_guards PROPERTIES TIMEOUT 30)
@@ -455,7 +466,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME fat32_new_log_preservation COMMAND bobflight_fat32_test)
   set_tests_properties(blackbox_actual_cascade blackbox_session_end_to_end fat32_new_log_preservation PROPERTIES TIMEOUT 30)
   add_executable(bobflight_cascade_inject_test
-    src/flight/pid.c
+    src/flight/pid.c src/flight/filter.c
   src/flight/attitude.c
     src/flight/mixer.c
     src/flight/rates.c

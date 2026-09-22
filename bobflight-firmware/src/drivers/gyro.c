@@ -15,10 +15,13 @@
 #include "board/board.h"
 #include "hal/hal.h"
 #include "flight/arming.h"
+#include "flight/config.h"
+#include "flight/filter.h"
 
 #include <string.h>
 #include <math.h>
 static float g_acc[3], g_latest[3], g_filter[3];
+static float g_filter_dt = 1.f / 4000.f;
 static sensor_calibration_t g_cal;
 static uint8_t g_sensor_id;
 static bool g_manual;
@@ -426,15 +429,30 @@ const char *gyro_bind_state(void)
     return g_bind;
 }
 
+void gyro_filter_set_dt(float dt)
+{
+    if (dt > 0.f && dt < 0.02f) {
+        g_filter_dt = dt;
+    }
+}
+
 void gyro_filter(const float in_dps[3], float out_dps[3])
 {
     if (!in_dps || !out_dps) {
         return;
     }
 #if BOBFLIGHT_HOST
+    /* Host inject/cascade tests expect bit-exact passthrough. */
     memcpy(out_dps, in_dps, 3 * sizeof(float));
 #else
-    for(unsigned i=0;i<3;i++){g_filter[i]+=0.3345f*(in_dps[i]-g_filter[i]);out_dps[i]=g_filter[i];}
+    {
+        const bf_config_t *cfg = config_get();
+        const float fc = cfg ? cfg->gyro_lpf_hz : 320.f;
+        const float alpha = filter_lpf_alpha(fc, g_filter_dt);
+        for (unsigned i = 0; i < 3; i++) {
+            out_dps[i] = filter_lpf_step(&g_filter[i], in_dps[i], alpha);
+        }
+    }
 #endif
 }
 
