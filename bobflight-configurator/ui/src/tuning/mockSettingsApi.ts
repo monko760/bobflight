@@ -1,4 +1,4 @@
-import {getFilters,getPid,getRates,FILTERS_DEFAULTS,PID_DEFAULTS,RATES_DEFAULTS,resetFilters,resetPid,resetRates,setFilters,setPid,setRates,type FiltersConfig,type PidConfig,type RatesConfig} from "./mockTuningStore";
+import {getFilters,getPid,getRates,FILTERS_DEFAULTS,PID_DEFAULTS,RATES_DEFAULTS,resetFilters,resetPid,resetRates,setFilters,setPid,setRates} from "./mockTuningStore";
 export const RATE_KEYS=["rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo"] as const;
 export const PID_KEYS=["pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d","pid_yaw_p","pid_yaw_i","pid_yaw_d","min_throttle","airmode"] as const;
 export const FILTER_KEYS=["gyro_lpf_hz","dterm_lpf_hz"] as const;
