@@ -128,10 +128,10 @@ void dshot_write(const float motor[DSHOT_MOTOR_COUNT])
             n = 1.f;
         }
         /* DShot throttle 48..2047; 0 = disarmed command. Dummy never bursts.
-         * R0b: request telem on M1 (motor 0) when bidir enabled so ESC replies. */
+         * R0c: request telem on M1–M4 when bidir enabled so ESCs reply. */
         th = (n <= 0.f) ? 0u : (uint16_t)(48u + (unsigned)(n * (2047u - 48u)));
         {
-            bool telem = (i == 0u) && dshot_bidir_enabled();
+            bool telem = dshot_bidir_enabled();
             g_last_pkt[i] = dshot_encode_packet_ex(th, telem);
         }
         if (g_tim[i]) {
@@ -139,9 +139,10 @@ void dshot_write(const float motor[DSHOT_MOTOR_COUNT])
             if(!hal_tim_dma_start_burst(g_tim[i], g_burst[i], DSHOT_BURST_LEN)) {g_output_ok=false; arming_disarm();}
         }
     }
-    /* Listen-after-TX on M1 (same pin); TX TIM3_UP DMA path unchanged. */
+    /* Listen-after-TX on M1–M4; TX TIM3_UP / TIM1_UP DMA paths unchanged. */
     if (dshot_bidir_enabled()) {
-        dshot_telem_m1_arm_listen();
+        dshot_telem_arm_listen_all();
+        dshot_telem_poll_all();
     }
 }
 
