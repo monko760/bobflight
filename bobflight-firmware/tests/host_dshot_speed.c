@@ -21,7 +21,9 @@ static unsigned rate_calls;
 bool bench_motor_active(void) { return bench_active; }
 
 bool dshot_bidir_enabled(void) { return false; }
-void dshot_telem_m1_arm_listen(void) {}
+void dshot_telem_arm_listen(unsigned motor) { (void)motor; }
+void dshot_telem_arm_listen_all(void) {}
+void dshot_telem_poll_all(void) {}
 
 const float *rx_channels(void)
 {
