@@ -24,19 +24,19 @@ export function parseBenchHelp(text: string): BenchCapabilities {
   return { individual: has("motor_test"), pulse: has("motor_pulse"), sequence: has("motor_seq"), dshot: has("dshot") };
 }
 export function parseDshot(text: string): 300 | 600 {
-  const match = /^dshot: (300|600) kbps\\s*$/m.exec(text);
+  const match = /^dshot: (300|600) kbps\s*$/m.exec(text);
   if (!match || /refused|unknown|unsupported|failed/i.test(text)) throw new Error("DShot rate readback unavailable");
   return Number(match[1]) as 300 | 600;
 }
 export function assertBenchAck(cmd: CliCommand, text: string): void {
   if (/refused|unknown|unsupported|failed/i.test(text)) throw new Error(text.trim());
   const expected = cmd === "motor_seq"
-    ? /^sequence running: RR FR RL FL, 1s each - watch spin direction\\s*$/m
+    ? /^sequence running: RR FR RL FL, 1s each - watch spin direction\s*$/m
     : cmd.startsWith("motor_pulse ")
-      ? /^motor pulse accepted \\(one second maximum\\)\\s*$/m
+      ? /^motor pulse accepted \(one second maximum\)\s*$/m
     : cmd.startsWith("motor_test ")
-      ? /^motor test accepted \\(one second maximum\\)\\s*$/m
-      : new RegExp(`^dshot: switched to ${cmd.slice(6)} kbps\\\\s*$`, "m");
+      ? /^motor test accepted \(one second maximum\)\s*$/m
+      : new RegExp(`^dshot: switched to ${cmd.slice(6)} kbps\\s*$`, "m");
   if (!expected.test(text)) throw new Error(`No recognized acknowledgment for ${cmd}; motor state is unknown. Use Stop / disconnect battery if needed.`);
 }
 export interface BenchState {
@@ -59,7 +59,7 @@ export function benchBlockReason(s: BenchState, now: number): string | null {
   // Legacy firmware hardcodes DShot300 in motor_output even when running at 600.
   // Treat it only as output-health evidence; rate comes from the dshot command.
   if (!/^DShot(?:300|600)? ready$/.test(s.status.motor_output ?? "") ||
-      s.status.dshot_bound !== "4/4" || !/^allowed(?:\\s|$)/.test(s.status.mmio ?? ""))
+      s.status.dshot_bound !== "4/4" || !/^allowed(?:\s|$)/.test(s.status.mmio ?? ""))
     return "Four healthy motor outputs and permitted hardware access are required.";
   if (!s.propsOff) return "Confirm all props are removed and the frame is secured.";
   if (now < s.estimatedUntil) return "Test window active (estimated). Stop is always available.";
