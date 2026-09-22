@@ -258,8 +258,12 @@ async function main() {
     assert.deepEqual(parseErpmReply(1, "erpm_m1=none"), { value: null, detail: "Waiting telem" });
     assert.deepEqual(parseErpmReply(2, "erpm_m2=24700"), { value: 24700, detail: "Live" });
     assert.equal(parseErpmReply(3, "erpm_m3=0").value, 0); // real zero only when FW says so
-    assert.equal(parseTelemReply("crc_fail\r\n"), "crc_fail");
+    assert.equal(parseTelemReply("crc_fail\\r\\n"), "crc_fail");
     assert.equal(detailForTelemStatus("timeout"), "Timeout");
+    assert.equal(detailForTelemStatus("ok"), "Telem ok, no eRPM");
+    // Live only with a finite parsed value — never beside value:null
+    assert.notEqual(detailForTelemStatus("ok"), "Live");
+    assert.equal(parseErpmReply(1, "erpm_m1=none").detail === "Live" && parseErpmReply(1, "erpm_m1=none").value === null, false);
     assert.equal(emptyErpmCells()[4].detail, "Waiting telem");
     assert.notEqual(emptyErpmCells()[2].detail, "Waiting FW R0c");
   });
