@@ -223,6 +223,67 @@ bool hal_tim_dma_set_bit_rate(uint32_t hz)
     return hz == 300000u || hz == 600000u;
 }
 
+/* ---- DShot M1 IC (host: test inject / no TIM) ---- */
+static uint16_t *g_m1_ic_buf;
+static size_t g_m1_ic_cap;
+static size_t g_m1_ic_n;
+static uint16_t g_m1_ic_bit_ticks = 1u;
+static bool g_m1_ic_armed;
+
+bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap)
+{
+    if (!edge_buf || cap == 0u) {
+        return false;
+    }
+    g_m1_ic_buf = edge_buf;
+    g_m1_ic_cap = cap;
+    g_m1_ic_n = 0u;
+    g_m1_ic_armed = true;
+    return true;
+}
+
+size_t hal_dshot_m1_ic_take(void)
+{
+    size_t n;
+    if (!g_m1_ic_armed) {
+        return 0u;
+    }
+    g_m1_ic_armed = false;
+    n = g_m1_ic_n;
+    g_m1_ic_n = 0u;
+    return n;
+}
+
+void hal_dshot_m1_ic_cancel(void)
+{
+    g_m1_ic_armed = false;
+    g_m1_ic_n = 0u;
+    g_m1_ic_buf = NULL;
+    g_m1_ic_cap = 0u;
+}
+
+uint16_t hal_dshot_m1_ic_bit_period_ticks(void)
+{
+    return g_m1_ic_bit_ticks == 0u ? 1u : g_m1_ic_bit_ticks;
+}
+
+/** Host-test helper: queue synthetic edge deltas for the next take(). */
+void hal_host_dshot_m1_ic_inject(const uint16_t *deltas, size_t n, uint16_t bit_ticks)
+{
+    size_t i;
+    g_m1_ic_bit_ticks = bit_ticks == 0u ? 1u : bit_ticks;
+    if (!g_m1_ic_armed || !g_m1_ic_buf) {
+        return;
+    }
+    if (n > g_m1_ic_cap) {
+        n = g_m1_ic_cap;
+    }
+    for (i = 0u; i < n; i++) {
+        g_m1_ic_buf[i] = deltas[i];
+    }
+    g_m1_ic_n = n;
+}
+
 bool hal_exti_attach(hal_pin_t pin, hal_exti_cb_t cb, void *ctx)
 {
     (void)pin;

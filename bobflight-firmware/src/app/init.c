@@ -251,6 +251,7 @@ bool app_init(void)
     /* 4 motors safe */
     motor_safe_idle();
     dshot_init();
+    dshot_bidir_set_enabled(false); /* R0b default: bidir off */
 
     /* 5 SPI/EXTI/TIM objects — drivers no-op if invalid pins */
     gyro_init();
