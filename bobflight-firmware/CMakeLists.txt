@@ -162,7 +162,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME sd_readonly_probe COMMAND bobflight_sd_probe_test)
   add_executable(bobflight_sd_read_cli_test src/drivers/sd_probe.c src/drivers/sd_spi.c tests/host_sd_read_cli.c)
   add_test(NAME sd_read_cli_guards COMMAND bobflight_sd_read_cli_test)
-  add_executable(bobflight_sd_cli_test src/drivers/sd_probe.c src/drivers/sd_spi.c tests/host_sd_read_cli.c)
+  add_executable(bobflight_sd_cli_test src/drivers/sd_probe.c src/drivers/sd_spi.c tests/host_sd_cli.c)
   add_test(NAME sd_cli_guards COMMAND bobflight_sd_cli_test)
   add_executable(bobflight_sd_gpio_input_test tests/host_sd_gpio_input.c src/drivers/sd_spi.c)
   add_test(NAME sd_real_gpio_input COMMAND bobflight_sd_gpio_input_test)
@@ -302,6 +302,10 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/failsafe.c
     tests/host_arming_edges.c)
   target_link_libraries(bobflight_arming_edges_test m)
+  target_include_directories(bobflight_arming_edges_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(bobflight_arming_edges_test PRIVATE BOBFLIGHT_HOST=1)
 
   add_executable(bobflight_failsafe_test
     src/flight/arming.c
@@ -332,6 +336,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_compile_definitions(bobflight_dshot_frame_test PRIVATE BOBFLIGHT_HOST=1)
 
   include(${CMAKE_SOURCE_DIR}/cmake/host_dshot_gcr.cmake)
+  include(${CMAKE_SOURCE_DIR}/cmake/host_dshot_telem.cmake)
 
   add_executable(bobflight_crsf_parse_test
     src/drivers/crsf.c
@@ -468,7 +473,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_blackbox_corruption_test m)
   add_test(NAME blackbox_independent_corruption_guards COMMAND bobflight_blackbox_corruption_test)
   set_tests_properties(blackbox_independent_corruption_guards PROPERTIES TIMEOUT 30)
-  add_executable(bobflight_fat32_test tests/host_fat32_log.c src/flight/fat32_log.c)
+  add_executable(bobflight_fat32_test tests/host_fat32_log.c src/drivers/fat32_log.c)
   add_test(NAME fat32_new_log_preservation COMMAND bobflight_fat32_test)
   set_tests_properties(blackbox_actual_cascade blackbox_session_end_to_end fat32_new_log_preservation PROPERTIES TIMEOUT 30)
   add_executable(bobflight_cascade_inject_test
@@ -517,6 +522,7 @@ else()
     src/hal/stm32f7/hal_adc.c
     src/hal/stm32f7/hal_uart.c
     src/hal/stm32f7/hal_tim_dma.c
+    src/hal/stm32f7/hal_tim_ic.c
     src/hal/stm32f7/hal_exti.c
     src/hal/stm32f7/hal_usb_cdc.c
     src/hal/stm32f7/hal_flash.c
