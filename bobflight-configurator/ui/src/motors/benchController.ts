@@ -3,7 +3,7 @@
  * Command acknowledgments are NOT motor/RPM telemetry.
  */
 import type { BobFlightHost, CliCommand, ParsedStatus, MotorPulsePercent } from "../protocol/types";
-import { emptyErpmCells, erpmCommand, parseErpmReply, type ErpmCell } from "./erpmTelemetry";
+import { emptyErpmCells, erpmCommand, telemCommand, parseErpmReply, parseTelemReply, detailForTelemStatus, type ErpmCell } from "./erpmTelemetry";
 
 export const STATUS_MAX_AGE_MS = 1500;
 export const MAX_PULSE_PERCENT = 100;
@@ -44,7 +44,7 @@ export interface BenchState {
   capabilities: BenchCapabilities | null; rate: 300 | 600 | null;
   propsOff: boolean; stationary: boolean; busy: boolean; actionPending: boolean; stopping: boolean;
   pulsePercent: Record<MotorNumber, MotorPulsePercent>;
-  /** Live eRPM cells (M1 R0b-capable; M2–4 honest-unavailable until FW R0c). */
+  /** Live eRPM cells (M1–M4 R0c first-class; null when telem not OK). */
   erpm: Record<MotorNumber, ErpmCell>;
   estimatedUntil: number; testLabel: string; reply: string; error: string;
 }
@@ -139,14 +139,26 @@ export class BenchController {
           if (this.valid(g)) this.patch({ rate: null, error: e instanceof Error ? e.message : String(e) });
         }
       }
-      // Live eRPM while page visible + connected (serialized with status).
+      // Live eRPM M1–M4 (R0c). Telem polled only when erpm is none — enrich detail,
+      // never invent a numeric eRPM from status alone.
       const next = { ...this.state.erpm };
       for (const motor of [1, 2, 3, 4] as const) {
         if (!this.valid(g)) return;
         try {
           const reply = await this.host.sendCommand(erpmCommand(motor));
           if (!this.valid(g)) return;
-          next[motor] = parseErpmReply(motor, reply);
+          let cell = parseErpmReply(motor, reply);
+          if (cell.value === null) {
+            try {
+              const telemRaw = await this.host.sendCommand(telemCommand(motor));
+              if (!this.valid(g)) return;
+              const st = parseTelemReply(telemRaw);
+              if (st) cell = { value: null, detail: detailForTelemStatus(st) };
+            } catch {
+              // Keep erpm-derived detail if telem read races.
+            }
+          }
+          next[motor] = cell;
         } catch {
           // Leave prior cell on transient in-flight / disconnect races.
         }

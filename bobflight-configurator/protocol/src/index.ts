@@ -38,7 +38,8 @@ export {
   MockSerial,
   MOCK_PORT_PATH,
 } from "./mock-serial";
-export type { MockSerialOptions } from "./mock-serial";
+export type { MockSerialOptions, DshotTelemStatus } from "./mock-serial";
+export { DSHOT_TELEM_STATUSES } from "./mock-serial";
 export {
   AutoTransportFactory,
   MockTransportFactory,

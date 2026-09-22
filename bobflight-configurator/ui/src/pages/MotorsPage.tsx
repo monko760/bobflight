@@ -54,7 +54,7 @@ export function MotorsPage() {
   const readiness = state.status?.motor_output && / ready$/.test(state.status.motor_output) ? "Ready (driver reports)" : "Unavailable / unknown";
   const rate = state.rate ? `DShot${state.rate}` : "Unknown";
   return <section className="panel motor-bench" aria-labelledby="motor-title">
-    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={state.busy||state.stopping}/>
+    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={state.actionPending || state.stopping}/>
     <div className="motor-heading">
       <div><p className="motor-eyebrow">PROPS-OFF WORKBENCH</p><h2 id="motor-title">Motor tests</h2><p className="muted">Verify wiring and rotation, one motor at a time. These controls do not arm the aircraft.</p></div>
       <button className="danger motor-stop" disabled={!state.connected} onClick={() => void controller.stop()}>{state.stopping ? "Stop requested…" : "Stop all motor tests"}</button>
@@ -112,9 +112,9 @@ export function MotorsPage() {
           <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
           {poleMessage && <p role="status">{poleMessage}</p>}
         </section>
-        <section className="motor-option-panel"><h3>eRPM &amp; bidirectional DShot</h3>
-          <p><strong>M1 eRPM telemetry (R0b).</strong> When bidirectional DShot is enabled on the controller and M1 telem is OK, the M1 cell shows live electrical RPM. M2–M4 stay unavailable until firmware R0c indexed telem.</p>
-          <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Full four-motor telem is not claimed yet.</p>
+        <section className="motor-option-panel"><h3>eRPM & bidirectional DShot</h3>
+          <p><strong>M1–M4 eRPM telemetry (R0c).</strong> When bidirectional DShot is enabled on the controller and a motor's telem is OK, that cell shows live electrical RPM. Otherwise the cell stays unavailable (<code>erpm_mN=none</code>) — never an invented zero.</p>
+          <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Poll <code>get erpm_m1</code>…<code>m4</code> and <code>get dshot_telem_mN</code> only.</p>
         </section>
         <section className="motor-option-panel"><h3>Motor sequence</h3><p>M1 rear-right → M2 front-right → M3 rear-left → M4 front-left.</p>
           <p className="muted">One-second pulses at 8%, with 0.7-second gaps. Check each motor individually first.</p>
@@ -129,6 +129,6 @@ export function MotorsPage() {
       {state.reply && <p>{state.reply}</p>}
       {state.error && <p className="fail" role="alert">{state.error}</p>}
     </div>
-    <p className="muted">eRPM is shown only from controller telem (M1 on R0b). No spin direction or sequence progress is measured. Stop waits for any in-flight USB command; navigation and hiding this page request a best-effort stop, not a guaranteed emergency shutdown. If anything keeps spinning, disconnect battery power.</p>
+    <p className="muted">eRPM is shown only from controller telem (M1–M4 on R0c). No spin direction or sequence progress is measured. Stop waits for any in-flight USB command; navigation and hiding this page request a best-effort stop, not a guaranteed emergency shutdown. If anything keeps spinning, disconnect battery power.</p>
   </section>;
 }

@@ -37,7 +37,8 @@ async function main() {
   await client.connect({ path: 'mock://bobflight' });
   await new Promise((r) => setTimeout(r, 60));
   assert.match(await client.sendCommand('get erpm_m1'), /erpm_m1=none/);
-  assert.match(await client.sendCommand('get erpm_m4'), /unknown key/);
+  // R0c: m2..m4 first-class — none when bidir off (not unknown key).
+  assert.match(await client.sendCommand('get erpm_m4'), /erpm_m4=none/);
   assert.match((await client.sendCommand('get dshot_telem_m1')).trim(), /^none$/);
   assert.match(await client.sendCommand('get dshot_bidir'), /dshot_bidir=off/);
   assert.match(await client.sendCommand('set dshot_bidir on'), /ok dshot_bidir=on/);
