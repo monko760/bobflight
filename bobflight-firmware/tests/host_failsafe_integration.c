@@ -44,6 +44,8 @@ bool board_mmio_permitted(void){return true;}
 void hal_gpio_init(hal_pin_t p,hal_gpio_mode_t m){(void)p;(void)m;}
 void hal_gpio_write(hal_pin_t p,bool v){(void)p;(void)v;}
 bool hal_tim_dma_set_bit_rate(uint32_t h){return h==300000 || h==600000;}
+bool dshot_bidir_enabled(void){return false;}
+void dshot_telem_m1_arm_listen(void){}
 hal_tim_dma_t *hal_tim_dma_open_cfg(const hal_tim_dma_cfg_t *c){(void)c;REQUIRE(opens<4);slots[opens].index=opens;return &slots[opens++];}
 bool hal_tim_dma_start_burst(hal_tim_dma_t *s,const uint16_t *w,size_t n){
  REQUIRE(n==20);unsigned p=0;for(unsigned j=0;j<16;j++){REQUIRE(w[j]==3||w[j]==6);p=(p<<1)|(w[j]==6);}
