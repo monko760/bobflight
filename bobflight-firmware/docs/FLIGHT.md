@@ -33,11 +33,11 @@ Live gains — `pid_update` / `rates_update` read `config_get()` each tick.
 | `rate_expo` | `0.30` | 0 = linear, 1 = max expo |
 | `pid_roll_p` / `i` / `d` | `0.002` / `0.001` / `0.00005` | roll axis |
 | `pid_pitch_p` / `i` / `d` | same | pitch axis |
-| `pid_yaw_p` / `i` | same P/I | yaw D reuses `pid_roll_d` (MVP) |
+| `pid_yaw_p` / `i` / `d` | same P/I / `0.00005` | yaw D same path + dterm LPF (schema 6) |
 | `gyro_lpf_hz` | `320` | soft gyro LPF; `0`=off |
 | `dterm_lpf_hz` | `53` | soft D-term LPF; `0`=off |
 
-Also: DT `1/4000`, I limit `±50`, output clamp `±0.4` with conditional I anti-windup.
+Also: DT `1/4000`, I limit ±50, output clamp ±0.4 with conditional I anti-windup.
 
 AirMode (`airmode` 0/1, default **0**): when off, low throttle (`<0.05`) resets I while armed; when on, I keeps integrating at idle. Always resets on disarm.
 
@@ -58,11 +58,11 @@ y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
 | Key | Default | Range | Continuity note |
 |-----|---------|-------|-----------------|
 | `gyro_lpf_hz` | `320` | `0` = off, else `10..1000` | Matches prior hardcoded α≈0.3345 at `dt=1/4000` (`α = dt/(τ+dt)`, `τ=1/(2π·fc)` → fc≈320 Hz) |
-| `dterm_lpf_hz` | `53` | `0` = off, else `10..1000` | Matches prior D-term `τ=0.003` s (`fc=1/(2π·0.003)`≈53 Hz) |
+| `dterm_lpf_hz` | `53` | `0` = off, else `10..1000` | Matches prior D-term τ=0.003 s (`fc=1/(2π·0.003)≈53 Hz) |
 
 Gyro LPF `dt` comes from the scheduler PID cadence (`pid_process_denom / gyro_hz`, default 2/8000 → 1/4000). D-term LPF uses the live `pid_set_dt` period (default `1/4000`).
 
-Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 5, 184 bytes; bytes 176–179 `gyro_lpf_hz`, 180–183 `dterm_lpf_hz`).
+Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 6, 188 bytes; 176–179 `gyro_lpf_hz`, 180–183 `dterm_lpf_hz`, 184–187 `pid_yaw_d`).
 
 Host unit test: `bobflight_filter_test` / `scripts/test_flight_host_math.sh`.
 
@@ -93,3 +93,39 @@ F7 V2 bf-derived bind has no gyro whoami yet → gyro stays unhealthy → arm st
 ## Dual-IR
 
 Ship/treat as flight-ready when dual-IR unblocks. Host default dummy remains fail-closed; F7V2 is explicit bf-derived pins-only IR.
+
+## Yaw D bring-up (props-off)
+
+> **FLASH HELD.** Validate yaw D offline / CLI get-set only. No flight maneuvers.
+> No props-on. Do not arm for gain checks.
+
+Schema 6 adds independent `pid_yaw_d` (persist bytes 184–187; default `0.00005`).
+Yaw D uses the same D-term path + `dterm_lpf_hz` LPF as roll/pitch (see table above).
+
+### Acceptance (no board / host)
+
+| Check | How | PASS |
+|-------|-----|------|
+| Key exists | host persist / config tests (`pid_yaw_d` in schema 6) | set/get/save/load round-trip |
+| Range refuse | `set pid_yaw_d` out of range | refused (see `host_persist_config`) |
+| Filter continuity | `bobflight_filter_test` / flight host math | PASS |
+| Zero-output PID path | `pid_diag` (when on-target CDC available) | runs without motor output |
+
+### Acceptance (CDC CLI — when flash hold lifts; props off)
+
+```text
+status          # arm: disarmed; props still OFF
+get pid_yaw_d
+set pid_yaw_d 0.0001
+get pid_yaw_d   # expect ok readback
+# optional: save — only if Lead wants persist proof; still props-off / disarmed
+defaults        # or restore prior value; disarmed, motors stopped
+```
+
+**Not in scope:** stick yaw doublets, hover, or any maneuver that implies props-on.
+Cross-link DShot telem smokes only if RPM feedback is needed later —
+[`DSHOT-R0B-M1-TELEM-SMOKE.md`](./DSHOT-R0B-M1-TELEM-SMOKE.md) (Kakute worktree).
+
+Main worktree `docs/FLIGHT.md` may still say yaw D reuses `pid_roll_d` (MVP) until
+this branch merges — treat **this** file as source of truth for schema 6 yaw D.
+

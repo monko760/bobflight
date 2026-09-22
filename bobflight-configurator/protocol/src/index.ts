@@ -21,6 +21,7 @@ export type {
 export {
   BobFlightCliClient,
   enumeratePorts,
+  isR0bDshotCliCommand,
 } from "./client";
 
 export { parseStatus, parseVersionLine } from "./parse-status";
@@ -49,6 +50,7 @@ export {
 export {
   SETTINGS_KEYS,
   SCHEMA5_FLOAT_KEYS,
+  SCHEMA6_FLOAT_KEYS,
   DEFAULT_SETTINGS,
   DEFAULT_SETTING_VALUES,
   cloneDefaultSettings,
@@ -65,6 +67,7 @@ export {
 export type {
   SettingsKey,
   Schema5FloatKey,
+  Schema6FloatKey,
   ParsedGetReply,
   ParsedSetReply,
 } from "./settings";

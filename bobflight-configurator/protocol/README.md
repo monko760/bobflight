@@ -53,8 +53,15 @@ Arm fail-closed gate (`failClosed`): gyro_ok:no and/or failsafe:ACTIVE only. arm
 - save -> saved CRLF | save failed CRLF
 - defaults -> defaults restored CRLF (RAM only; does not auto-save)
 
-Keys: rate_max_roll/pitch/yaw, rate_expo, pid_roll_p/i/d, pid_pitch_p/i/d, pid_yaw_p/i.
+Keys: rate_max_roll/pitch/yaw, rate_expo, pid_roll_p/i/d, pid_pitch_p/i/d, pid_yaw_p/i/d.
 
+
+
+## Storage schema (host contract)
+
+Schema 5 payload is 184 bytes (includes gyro/dterm LPF). Schema 6 is **188** bytes:
+`pid_yaw_d` LE float at bytes **184..187** (default `0.00005`, validate `0..10` finite).
+Migration 5→6 writes that default; reserved 165–175 and LPF 176–183 are left untouched.
 
 ## Web Serial (browser)
 

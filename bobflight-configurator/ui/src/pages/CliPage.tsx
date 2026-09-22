@@ -31,7 +31,7 @@ export function CliPage() {
     const cmd = parseCliInput(input);
     if (!cmd) {
       setUiMessage(
-        `Rejected: only exact commands allowed (${ALLOWED_CLI_COMMANDS.join(", ")}).`,
+        "Rejected: command not allowlisted. Exact verbs plus patterned get/set for erpm_m1..m4, dshot_telem_m1..m4, and dshot_bidir (on|off) are accepted.",
       );
       return;
     }
@@ -69,8 +69,13 @@ export function CliPage() {
       <p><strong>PID diagnostics — no motor output:</strong> props removed, USB only. Send <code>pid_diag start</code> for zero rate demand, or <code>pid_diag start rx</code> for live receiver rate demand. Read <code>pid_diag</code> snapshots while gently rotating the board; <code>pid_diag stop</code> ends the session. This is an isolated Acro/rate calculation, not live stabilization or flight arming. No accelerometer calibration is required. Sessions expire after 60 seconds; invalid gyro, receiver loss in RX mode, calibration, motor activity or USB loss invalidates/stops the diagnostic. Do not run the motor commands below during this test.</p>
       <p>Props-off switch test: remove all propellers, connect USB and ESC power, put throttle and AUX1 low, then send <code>bench_switch</code>. AUX1 high runs all four motors at 8% for up to three seconds. AUX1 low stops them. Send <code>bench_stop</code> to cancel. Receiver/USB loss or raised throttle cancels the session; it also expires after 60 seconds. Flight remains disarmed and gyro readiness is not required.</p>
       <p className="muted">
-        Exact commands only: {ALLOWED_CLI_COMMANDS.join(", ")}. Arm / disarm /
-        reboot and bl (including bl discard) always ask for confirmation.
+        Allowlisted exact commands: {ALLOWED_CLI_COMMANDS.join(", ")}.
+        Patterned get/set also accepted for eRPM / DShot telem / bidir:{" "}
+        <code>get erpm_m1</code>…<code>get erpm_m4</code>,{" "}
+        <code>get dshot_telem_m1</code>…<code>get dshot_telem_m4</code>,{" "}
+        <code>get dshot_bidir</code>, <code>set dshot_bidir on</code> |{" "}
+        <code>set dshot_bidir off</code>. Arm / disarm / reboot and bl
+        (including bl discard) always ask for confirmation.
       </p>
       <pre className="console" ref={logRef}>
         {cliLines.length === 0 ? (
