@@ -1,4 +1,4 @@
-/* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 Robert Leclercq  SPDX-License-Identifier: Apache-2.0 */
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { loadUiTs } = require('./load-ui-ts.cjs');
