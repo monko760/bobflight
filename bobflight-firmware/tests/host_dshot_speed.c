@@ -20,6 +20,9 @@ static bool bench_active;
 static unsigned rate_calls;
 bool bench_motor_active(void) { return bench_active; }
 
+bool dshot_bidir_enabled(void) { return false; }
+void dshot_telem_m1_arm_listen(void) {}
+
 const float *rx_channels(void)
 {
     return g_rc;

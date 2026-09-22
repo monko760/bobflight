@@ -72,8 +72,8 @@ static void cmd_help(void)
         "  mode_range <ARM|ANGLE|ACRO|HORIZON> <0|1> <1..12> <min> <max> - configure mode range\r\n"
         "  power - battery readings and configuration\r\n"
         "  power_config <divider> <mV/A or 0> <offset_mV> <cells or 0> <warn_V> <critical_V> <mAh> - until reboot\r\n"
-        "  get      - get <key>\r\n"
-        "  set      - set <key> <value>\r\n"
+        "  get      - get <key> (incl. erpm_m1, dshot_telem_m1, dshot_bidir)\r\n"
+        "  set      - set <key> <value> (dshot_bidir on|off is RAM-only)\r\n"
         "  storage  - backend, dirty state and verified-save status\r\n"
         "  save     - verify/write supported settings to controller flash\r\n"
         "  diff all / dump all - export changed / all supported settings\r\n"
@@ -209,11 +209,50 @@ static void cmd_power(void)
     cli_write_str(buf);
 }
 
+static const char *dshot_telem_status_name(dshot_telem_status_t st)
+{
+    switch (st) {
+    case DSHOT_TELEM_OK: return "ok";
+    case DSHOT_TELEM_CRC_FAIL: return "crc_fail";
+    case DSHOT_TELEM_INVALID: return "invalid";
+    case DSHOT_TELEM_TIMEOUT: return "timeout";
+    case DSHOT_TELEM_STALE: return "stale";
+    case DSHOT_TELEM_NONE:
+    default: return "none";
+    }
+}
+
 static void cmd_get(const char *key)
 {
     float v;
     char buf[64];
-    if (!key || !config_get_key(key, &v)) {
+    if (!key) {
+        cli_write_str("unknown key\r\n");
+        return;
+    }
+    /* R0b DShot bidir / M1 eRPM — RAM-only; not config schema. */
+    if (strcmp(key, "erpm_m1") == 0) {
+        if (dshot_m1_telem_status() == DSHOT_TELEM_OK) {
+            snprintf(buf, sizeof(buf), "erpm_m1=%lu\r\n",
+                     (unsigned long)dshot_m1_erpm());
+        } else {
+            cli_write_str("erpm_m1=none\r\n");
+            return;
+        }
+        cli_write_str(buf);
+        return;
+    }
+    if (strcmp(key, "dshot_telem_m1") == 0) {
+        snprintf(buf, sizeof(buf), "%s\r\n",
+                 dshot_telem_status_name(dshot_m1_telem_status()));
+        cli_write_str(buf);
+        return;
+    }
+    if (strcmp(key, "dshot_bidir") == 0) {
+        cli_write_str(dshot_bidir_enabled() ? "dshot_bidir=on\r\n" : "dshot_bidir=off\r\n");
+        return;
+    }
+    if (!config_get_key(key, &v)) {
         cli_write_str("unknown key\r\n");
         return;
     }
@@ -233,6 +272,22 @@ static void cmd_set(const char *key, const char *valstr)
     }
     if (!valstr || !*valstr) {
         cli_write_str("set failed\r\n");
+        return;
+    }
+    /* R0b: dshot_bidir on|off (RAM). Bad token → set failed. */
+    if (strcmp(key, "dshot_bidir") == 0) {
+        bool on;
+        if (strcmp(valstr, "on") == 0) {
+            on = true;
+        } else if (strcmp(valstr, "off") == 0) {
+            on = false;
+        } else {
+            cli_write_str("set failed\r\n");
+            return;
+        }
+        dshot_bidir_set_enabled(on);
+        snprintf(buf, sizeof(buf), "ok dshot_bidir=%s\r\n", on ? "on" : "off");
+        cli_write_str(buf);
         return;
     }
     v = strtof(valstr, &end);

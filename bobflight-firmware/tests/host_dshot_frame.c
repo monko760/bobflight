@@ -11,6 +11,10 @@ bool bench_motor_active(void) { return false; }
 arm_state_t arming_state(void) { return ARM_DISARMED; }
 bool hal_tim_dma_set_bit_rate(uint32_t hz) { return hz==300000u || hz==600000u; }
 
+/* R0b symbols referenced from dshot_write path */
+bool dshot_bidir_enabled(void) { return false; }
+void dshot_telem_m1_arm_listen(void) {}
+
 
 #include <stdio.h>
 #include <string.h>

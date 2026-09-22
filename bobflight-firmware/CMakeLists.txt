@@ -127,6 +127,7 @@ set(BF_COMMON_SOURCES
   src/drivers/gyro.c src/drivers/sensor_calibration.c
   src/drivers/dshot.c
   src/drivers/dshot_gcr.c
+  src/drivers/dshot_telem.c
   src/drivers/rx.c
   src/drivers/crsf.c
   src/drivers/cli.c
@@ -301,6 +302,10 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/failsafe.c
     tests/host_arming_edges.c)
   target_link_libraries(bobflight_arming_edges_test m)
+  target_include_directories(bobflight_arming_edges_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(bobflight_arming_edges_test PRIVATE BOBFLIGHT_HOST=1)
 
   add_executable(bobflight_failsafe_test
     src/flight/arming.c
@@ -331,6 +336,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_compile_definitions(bobflight_dshot_frame_test PRIVATE BOBFLIGHT_HOST=1)
 
   include(${CMAKE_SOURCE_DIR}/cmake/host_dshot_gcr.cmake)
+  include(${CMAKE_SOURCE_DIR}/cmake/host_dshot_telem.cmake)
 
   add_executable(bobflight_crsf_parse_test
     src/drivers/crsf.c
@@ -516,6 +522,7 @@ else()
     src/hal/stm32f7/hal_adc.c
     src/hal/stm32f7/hal_uart.c
     src/hal/stm32f7/hal_tim_dma.c
+    src/hal/stm32f7/hal_tim_ic.c
     src/hal/stm32f7/hal_exti.c
     src/hal/stm32f7/hal_usb_cdc.c
     src/hal/stm32f7/hal_flash.c
