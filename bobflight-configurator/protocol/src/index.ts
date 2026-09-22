@@ -74,7 +74,7 @@ export {
   WebSerialTransportFactory,
   WebSerialPort,
   isWebSerialAvailable,
-  webUsbUnavailableReason,
+  webSerialUnavailableReason,
   pathForWebSerialPort,
 } from "./web-serial";
 export type {
@@ -106,7 +106,6 @@ export { MockFlasher } from "./flasher/mock-flasher";
 export {
   WebUsbDfuFlasher,
   isWebUsbAvailable,
-  webUsbUnavailableReason,
   ST_DFU_VID,
   ST_DFU_PID,
   DEFAULT_ALT,
