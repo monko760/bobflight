@@ -21,6 +21,7 @@ export type {
 export {
   BobFlightCliClient,
   enumeratePorts,
+  isR0bDshotCliCommand,
 } from "./client";
 
 export { parseStatus, parseVersionLine } from "./parse-status";
@@ -73,7 +74,7 @@ export {
   WebSerialTransportFactory,
   WebSerialPort,
   isWebSerialAvailable,
-  webSerialUnavailableReason,
+  webUsbUnavailableReason,
   pathForWebSerialPort,
 } from "./web-serial";
 export type {
