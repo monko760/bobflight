@@ -2,8 +2,9 @@
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
  *
- * R0b M1 listen-after-TX telemetry: edge/bit assemble → dshot_gcr → eRPM
- * snapshot. Clean-room; reuses R0a GCR decode. HAL IC is Kakute M1 only.
+ * R0c M1–M4 listen-after-TX telemetry: edge/bit assemble → dshot_gcr → eRPM
+ * snapshot. Clean-room; reuses R0a GCR decode. HAL IC is Kakute M1–M4.
+ * poll_all uses parallel IC collect (listen-window sharpen vs sequential take).
  */
 #include "drivers/dshot_telem.h"
 #include "drivers/dshot_gcr.h"
@@ -11,16 +12,25 @@
 
 #include <string.h>
 
-#define M1_IC_EDGE_CAP 64u
+#define IC_EDGE_CAP 64u
+
+typedef struct {
+    bool listen_armed;
+    dshot_telem_status_t sample_status;
+    uint32_t erpm;
+    uint32_t period_us;
+    uint32_t last_ok_ms;
+    bool have_ok;
+    uint16_t edges[IC_EDGE_CAP];
+} dshot_telem_slot_t;
 
 static bool g_bidir;
-static bool g_listen_armed;
-static dshot_telem_status_t g_sample_status = DSHOT_TELEM_NONE;
-static uint32_t g_erpm;
-static uint32_t g_period_us;
-static uint32_t g_last_ok_ms;
-static bool g_have_ok;
-static uint16_t g_edges[M1_IC_EDGE_CAP];
+static dshot_telem_slot_t g_slot[DSHOT_TELEM_MOTOR_COUNT];
+
+static bool motor_ok(unsigned motor)
+{
+    return motor < DSHOT_TELEM_MOTOR_COUNT;
+}
 
 static dshot_telem_status_t map_gcr_status(dshot_gcr_status_t st)
 {
@@ -38,35 +48,43 @@ static dshot_telem_status_t map_gcr_status(dshot_gcr_status_t st)
     }
 }
 
-static void store_result(const dshot_gcr_result_t *r)
+static void store_result(dshot_telem_slot_t *s, const dshot_gcr_result_t *r)
 {
-    g_sample_status = map_gcr_status(r->status);
+    s->sample_status = map_gcr_status(r->status);
     if (r->status == DSHOT_GCR_OK) {
-        g_erpm = r->erpm;
-        g_period_us = r->period_us;
-        g_last_ok_ms = hal_millis();
-        g_have_ok = true;
+        s->erpm = r->erpm;
+        s->period_us = r->period_us;
+        s->last_ok_ms = hal_millis();
+        s->have_ok = true;
     } else if (r->status == DSHOT_GCR_STALE) {
-        g_erpm = 0u;
-        g_period_us = 0u;
+        s->erpm = 0u;
+        s->period_us = 0u;
         /* Keep last_ok_ms so age helpers still work. */
     } else {
-        g_erpm = 0u;
-        g_period_us = 0u;
+        s->erpm = 0u;
+        s->period_us = 0u;
     }
+}
+
+static void clear_slot(dshot_telem_slot_t *s)
+{
+    s->listen_armed = false;
+    s->sample_status = DSHOT_TELEM_NONE;
+    s->erpm = 0u;
+    s->period_us = 0u;
+    s->have_ok = false;
+    s->last_ok_ms = 0u;
 }
 
 void dshot_bidir_set_enabled(bool on)
 {
+    unsigned m;
     g_bidir = on;
     if (!on) {
-        g_listen_armed = false;
-        g_sample_status = DSHOT_TELEM_NONE;
-        g_erpm = 0u;
-        g_period_us = 0u;
-        g_have_ok = false;
-        g_last_ok_ms = 0u;
-        hal_dshot_m1_ic_cancel();
+        for (m = 0u; m < DSHOT_TELEM_MOTOR_COUNT; m++) {
+            clear_slot(&g_slot[m]);
+        }
+        hal_dshot_ic_cancel_all();
     }
 }
 
@@ -75,64 +93,73 @@ bool dshot_bidir_enabled(void)
     return g_bidir;
 }
 
-uint32_t dshot_m1_telem_age_ms(void)
+uint32_t dshot_telem_age_ms(unsigned motor)
 {
+    dshot_telem_slot_t *s;
     uint32_t now;
-    if (!g_bidir || !g_have_ok) {
+    if (!g_bidir || !motor_ok(motor)) {
+        return 0u;
+    }
+    s = &g_slot[motor];
+    if (!s->have_ok) {
         return 0u;
     }
     now = hal_millis();
-    if (now < g_last_ok_ms) {
+    if (now < s->last_ok_ms) {
         return 0u; /* clock wrap: treat as fresh */
     }
-    return now - g_last_ok_ms;
+    return now - s->last_ok_ms;
 }
 
-dshot_telem_status_t dshot_m1_telem_status(void)
+dshot_telem_status_t dshot_telem_status(unsigned motor)
 {
-    if (!g_bidir) {
+    dshot_telem_slot_t *s;
+    if (!g_bidir || !motor_ok(motor)) {
         return DSHOT_TELEM_NONE;
     }
-    if (g_have_ok && dshot_m1_telem_age_ms() > DSHOT_TELEM_STALE_MS) {
+    s = &g_slot[motor];
+    if (s->have_ok && dshot_telem_age_ms(motor) > DSHOT_TELEM_STALE_MS) {
         return DSHOT_TELEM_STALE;
     }
-    return g_sample_status;
+    return s->sample_status;
 }
 
-uint32_t dshot_m1_erpm(void)
+uint32_t dshot_erpm(unsigned motor)
 {
-    if (dshot_m1_telem_status() != DSHOT_TELEM_OK) {
+    if (dshot_telem_status(motor) != DSHOT_TELEM_OK) {
         return 0u;
     }
-    return g_erpm;
+    return g_slot[motor].erpm;
 }
 
-uint32_t dshot_m1_telem_period_us(void)
+uint32_t dshot_telem_period_us(unsigned motor)
 {
-    if (dshot_m1_telem_status() != DSHOT_TELEM_OK) {
+    if (dshot_telem_status(motor) != DSHOT_TELEM_OK) {
         return 0u;
     }
-    return g_period_us;
+    return g_slot[motor].period_us;
 }
 
-void dshot_telem_m1_ingest_gcr21(uint32_t bits21)
+void dshot_telem_ingest_gcr21(unsigned motor, uint32_t bits21)
 {
     dshot_gcr_result_t r;
-    if (!g_bidir) {
+    if (!g_bidir || !motor_ok(motor)) {
         return;
     }
     r = dshot_gcr_decode_21(bits21);
-    store_result(&r);
+    store_result(&g_slot[motor], &r);
 }
 
-void dshot_telem_m1_note_timeout(void)
+void dshot_telem_note_timeout(unsigned motor)
 {
-    if (!g_bidir) {
+    dshot_telem_slot_t *s;
+    if (!g_bidir || !motor_ok(motor)) {
         return;
     }
-    g_sample_status = DSHOT_TELEM_TIMEOUT;
-    g_erpm = 0u;
-    g_period_us = 0u;
+    s = &g_slot[motor];
+    s->sample_status = DSHOT_TELEM_TIMEOUT;
+    s->erpm = 0u;
+    s->period_us = 0u;
 }
 
 /*
@@ -141,19 +168,19 @@ void dshot_telem_m1_note_timeout(void)
  * Round each delta to an integer number of telem bit periods; append that
  * many bits, then flip the level. Collect the low 21 bits MSB-first.
  */
-bool dshot_telem_m1_ingest_edge_deltas(const uint16_t *deltas, size_t n,
-                                       uint16_t bit_period_ticks)
+bool dshot_telem_ingest_edge_deltas(unsigned motor, const uint16_t *deltas,
+                                    size_t n, uint16_t bit_period_ticks)
 {
     uint32_t bits21 = 0u;
     unsigned got = 0u;
     unsigned level = 0u; /* wire idle-low assumption after TX release */
     size_t i;
 
-    if (!g_bidir) {
+    if (!g_bidir || !motor_ok(motor)) {
         return false;
     }
     if (!deltas || n == 0u || bit_period_ticks == 0u) {
-        dshot_telem_m1_note_timeout();
+        dshot_telem_note_timeout(motor);
         return false;
     }
 
@@ -172,46 +199,71 @@ bool dshot_telem_m1_ingest_edge_deltas(const uint16_t *deltas, size_t n,
     }
 
     if (got < 21u) {
-        dshot_telem_m1_note_timeout();
+        dshot_telem_note_timeout(motor);
         return false;
     }
 
-    dshot_telem_m1_ingest_gcr21(bits21 & 0x1FFFFFu);
+    dshot_telem_ingest_gcr21(motor, bits21 & 0x1FFFFFu);
     return true;
 }
 
-void dshot_telem_m1_arm_listen(void)
+void dshot_telem_arm_listen(unsigned motor)
 {
-    if (!g_bidir) {
+    dshot_telem_slot_t *s;
+    if (!g_bidir || !motor_ok(motor)) {
         return;
     }
-    memset(g_edges, 0, sizeof(g_edges));
-    if (!hal_dshot_m1_ic_arm(g_edges, M1_IC_EDGE_CAP)) {
-        dshot_telem_m1_note_timeout();
-        g_listen_armed = false;
+    s = &g_slot[motor];
+    memset(s->edges, 0, sizeof(s->edges));
+    if (!hal_dshot_ic_arm(motor, s->edges, IC_EDGE_CAP)) {
+        dshot_telem_note_timeout(motor);
+        s->listen_armed = false;
         return;
     }
-    g_listen_armed = true;
+    s->listen_armed = true;
 }
 
-void dshot_telem_m1_poll(void)
+void dshot_telem_arm_listen_all(void)
 {
+    unsigned m;
+    for (m = 0u; m < DSHOT_TELEM_MOTOR_COUNT; m++) {
+        dshot_telem_arm_listen(m);
+    }
+}
+
+void dshot_telem_poll(unsigned motor)
+{
+    dshot_telem_slot_t *s;
     size_t n;
     uint16_t bit_ticks;
 
-    if (!g_bidir || !g_listen_armed) {
+    if (!g_bidir || !motor_ok(motor)) {
         return;
     }
-    n = hal_dshot_m1_ic_take();
-    g_listen_armed = false;
+    s = &g_slot[motor];
+    if (!s->listen_armed) {
+        return;
+    }
+    n = hal_dshot_ic_take(motor);
+    s->listen_armed = false;
     if (n < 2u) {
-        dshot_telem_m1_note_timeout();
+        dshot_telem_note_timeout(motor);
         return;
     }
-    bit_ticks = hal_dshot_m1_ic_bit_period_ticks();
+    bit_ticks = hal_dshot_ic_bit_period_ticks(motor);
     if (bit_ticks == 0u) {
-        dshot_telem_m1_note_timeout();
+        dshot_telem_note_timeout(motor);
         return;
     }
-    (void)dshot_telem_m1_ingest_edge_deltas(g_edges, n, bit_ticks);
+    (void)dshot_telem_ingest_edge_deltas(motor, s->edges, n, bit_ticks);
+}
+
+void dshot_telem_poll_all(void)
+{
+    unsigned m;
+    /* One parallel IC collect so M1–M4 share the listen window (R0c sharpen). */
+    hal_dshot_ic_collect();
+    for (m = 0u; m < DSHOT_TELEM_MOTOR_COUNT; m++) {
+        dshot_telem_poll(m);
+    }
 }
