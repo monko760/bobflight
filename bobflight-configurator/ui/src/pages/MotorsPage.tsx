@@ -54,7 +54,7 @@ export function MotorsPage() {
   const readiness = state.status?.motor_output && / ready$/.test(state.status.motor_output) ? "Ready (driver reports)" : "Unavailable / unknown";
   const rate = state.rate ? `DShot${state.rate}` : "Unknown";
   return <section className="panel motor-bench" aria-labelledby="motor-title">
-    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={state.busy||state.stopping}/>
+    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={state.actionPending || state.stopping}/>
     <div className="motor-heading">
       <div><p className="motor-eyebrow">PROPS-OFF WORKBENCH</p><h2 id="motor-title">Motor tests</h2><p className="muted">Verify wiring and rotation, one motor at a time. These controls do not arm the aircraft.</p></div>
       <button className="danger motor-stop" disabled={!state.connected} onClick={() => void controller.stop()}>{state.stopping ? "Stop requested…" : "Stop all motor tests"}</button>
@@ -112,7 +112,7 @@ export function MotorsPage() {
           <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
           {poleMessage && <p role="status">{poleMessage}</p>}
         </section>
-        <section className="motor-option-panel"><h3>eRPM &amp; bidirectional DShot</h3>
+        <section className="motor-option-panel"><h3>eRPM & bidirectional DShot</h3>
           <p><strong>M1–M4 eRPM telemetry (R0c).</strong> When bidirectional DShot is enabled on the controller and a motor's telem is OK, that cell shows live electrical RPM. Otherwise the cell stays unavailable (<code>erpm_mN=none</code>) — never an invented zero.</p>
           <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Poll <code>get erpm_m1</code>…<code>m4</code> and <code>get dshot_telem_mN</code> only.</p>
         </section>
