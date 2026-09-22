@@ -35,6 +35,18 @@ import {
   type SettingsKey,
 } from "./settings";
 
+
+/** R0b patterned CLI: get erpm_m1..4 / dshot_telem_m1..4 / get|set dshot_bidir on|off. */
+export function isR0bDshotCliCommand(cmd: string): boolean {
+  return (
+    /^get erpm_m[1-4]$/.test(cmd) ||
+    /^get dshot_telem_m[1-4]$/.test(cmd) ||
+    cmd === "get dshot_bidir" ||
+    cmd === "set dshot_bidir on" ||
+    cmd === "set dshot_bidir off"
+  );
+}
+
 const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "help", "ports", "modes", "storage", "save", "diff all", "dump all",
   "version", "sd probe", "sd status", "sd cancel",
@@ -268,7 +280,7 @@ export class BobFlightCliClient {
     opts?: SendCommandOptions
   ): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd)) {
+    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);

@@ -21,6 +21,7 @@ export type {
 export {
   BobFlightCliClient,
   enumeratePorts,
+  isR0bDshotCliCommand,
 } from "./client";
 
 export { parseStatus, parseVersionLine } from "./parse-status";
