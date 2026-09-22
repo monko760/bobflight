@@ -47,11 +47,13 @@ hal_tim_dma_t *hal_tim_dma_open(unsigned tim, unsigned channel) { (void)tim; (vo
 bool hal_tim_dma_start_burst(hal_tim_dma_t *t, const uint16_t *words, size_t n)
 { (void)t; (void)words; (void)n; return false; }
 
-bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap)
-{ (void)edge_buf; (void)cap; return false; }
-size_t hal_dshot_m1_ic_take(void) { return 0; }
-void hal_dshot_m1_ic_cancel(void) {}
-uint16_t hal_dshot_m1_ic_bit_period_ticks(void) { return 1u; }
+bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap)
+{ (void)motor; (void)edge_buf; (void)cap; return false; }
+void hal_dshot_ic_collect(void) {}
+size_t hal_dshot_ic_take(unsigned motor) { (void)motor; return 0; }
+void hal_dshot_ic_cancel(unsigned motor) { (void)motor; }
+void hal_dshot_ic_cancel_all(void) {}
+uint16_t hal_dshot_ic_bit_period_ticks(unsigned motor) { (void)motor; return 1u; }
 
 
 bool hal_exti_attach(hal_pin_t pin, hal_exti_cb_t cb, void *ctx)
