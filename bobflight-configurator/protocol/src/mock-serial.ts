@@ -48,6 +48,8 @@ export class MockSerial extends EventEmitter {
   private receiver = new MockReceiver();
   private armed = false;
   private rebootRequested = false;
+  /** R0b RAM-only bidir flag (default off). */
+  private dshotBidir = false;
   /** Numeric store mirroring bf_config_t floats. */
   private settings: Record<SettingsKey, number>;
   private readonly opts: Required<
@@ -69,6 +71,7 @@ export class MockSerial extends EventEmitter {
       boardId: opts.boardId ?? "mock-board",
     };
     this.modesPorts.reset();
+    this.dshotBidir = false;
     this.settings = cloneDefaultSettingValues();
   }
 
@@ -224,6 +227,33 @@ export class MockSerial extends EventEmitter {
       this.emitData("defaults restored\r\n");
     } else if (line.startsWith("get ") || line === "get") {
       const key = line === "get" ? "" : line.slice(4).trim();
+      // R0b: M1 live-capable mock; M2–4 unknown until FW R0c (honest).
+      if (key === "erpm_m1") {
+        if (this.dshotBidir) {
+          // Sample eRPM when bidir on — not a fake idle 0 while unavailable.
+          this.emitData("erpm_m1=24600\r\n");
+        } else {
+          this.emitData("erpm_m1=none\r\n");
+        }
+        return;
+      }
+      if (/^erpm_m[2-4]$/.test(key)) {
+        this.emitData("unknown key\r\n");
+        return;
+      }
+      if (key === "dshot_telem_m1") {
+        // FW returns status token only (no key= prefix) for telem.
+        this.emitData(this.dshotBidir ? "ok\r\n" : "none\r\n");
+        return;
+      }
+      if (/^dshot_telem_m[2-4]$/.test(key)) {
+        this.emitData("unknown key\r\n");
+        return;
+      }
+      if (key === "dshot_bidir") {
+        this.emitData(this.dshotBidir ? "dshot_bidir=on\r\n" : "dshot_bidir=off\r\n");
+        return;
+      }
       if (!isSettingsKey(key)) {
         this.emitData("unknown key\r\n");
       } else {
@@ -239,6 +269,18 @@ export class MockSerial extends EventEmitter {
       }
       const key = rest.slice(0, sp).trim();
       const valueTok = rest.slice(sp + 1).trim();
+      if (key === "dshot_bidir") {
+        if (valueTok === "on") {
+          this.dshotBidir = true;
+          this.emitData("ok dshot_bidir=on\r\n");
+        } else if (valueTok === "off") {
+          this.dshotBidir = false;
+          this.emitData("ok dshot_bidir=off\r\n");
+        } else {
+          this.emitData("set failed\r\n");
+        }
+        return;
+      }
       if (!isSettingsKey(key)) {
         this.emitData("unknown key\r\n");
         return;
