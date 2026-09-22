@@ -68,3 +68,12 @@ __pycache__/
 
 # Experimental onboard recorder implementation and acceptance guide.
 !/BLACKBOX_RECORDING.md
+
+# Read-only PC log extraction utilities; keep locally installed toolchains ignored.
+!/tools/
+/tools/*
+!/tools/download_blackbox.py
+!/tools/test_download_blackbox.py
+!/tools/test_download_pipeline.py
+
+!/USB-LOG-EXPORT.md

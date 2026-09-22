@@ -46,5 +46,8 @@ int main(void){
  output[0]=0;assert(cmd_blackbox("blackbox stop"));
  for(unsigned i=0;i<10000&&blackbox_cli_busy();i++){now+=10;blackbox_cli_poll();}
  assert(!blackbox_cli_busy()&&bbl.phase==BBS_DONE&&!g_mock.write_commands);assert(!strcmp(bbl.reason,"stopped-before-file-creation"));
+ usb=true;sd_cli_read_active=true;output[0]=0;unsigned prior_binds=binds;
+ assert(cmd_blackbox("blackbox start")&&strstr(output,"refused")&&binds==prior_binds);
+ output[0]=0;assert(blackbox_cli_filter("bl"));assert(!blackbox_cli_filter("disarm"));sd_cli_read_active=false;
  puts("PASS onboard CLI: arm/motor/calibration/USB/save/bootloader start guards, no duplicate start, exclusive card ownership, framed maintenance refusals, disconnect continuity and pre-file stop with zero writes");
 }

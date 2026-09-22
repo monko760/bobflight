@@ -57,5 +57,6 @@ int main(int argc,char **argv){
  while(pos<size){assert(cluster>=4&&++clusters<100);for(unsigned j=0;j<32&&pos<size;j++){size_t n=size-pos;if(n>512)n=512;memcpy(extracted+pos,sector(DATA_LBA+(cluster-2)*32+j),n);pos+=n;}uint32_t fat_sector=32+cluster/128;assert(!memcmp(sector(fat_sector),sector(fat_sector+FAT_SECTORS),512));cluster=get32(sector(fat_sector)+(cluster%128)*4)&0x0fffffff;}
  assert(cluster>=0x0ffffff8);assert(clusters==(size+16383u)/16384u);assert(!memcmp(expected,extracted,size));assert(get32(sector(32)+4)&0x08000000);assert(!memcmp(sector(32),sector(32+FAT_SECTORS),512));
  if(argc>1){FILE *f=fopen(argv[1],"wb");assert(f);assert(fwrite(extracted,1,size,f)==size);assert(fclose(f)==0);}
+ if(argc>2){FILE *f=fopen(argv[2],"wb");assert(f);uint8_t v[4];put32(v,CARD_SECTORS);assert(fwrite(v,1,4,f)==4);put32(v,count);assert(fwrite(v,1,4,f)==4);for(unsigned k=0;k<count;k++){put32(v,stored[k].lba);assert(fwrite(v,1,4,f)==4);assert(fwrite(stored[k].data,1,512,f)==512);}assert(!fclose(f));}
  printf("PASS real FAT32 end-to-end: 600 PID samples, %u-byte BFL00001.BBL extracted by directory/chain, %u clusters, %u reads/%u writes, delayed transfers, existing file preserved, mirrors match and clean close\n",size,clusters,reads,writes);
 }

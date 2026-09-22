@@ -227,7 +227,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
                 {onboard.snapshot.frames.toLocaleString()} frames (encoded;
                 committed when state is done)
               </dd>
-              <dt>Sampling rate</dt>
+              <dt>Target sampling rate</dt>
               <dd>{onboard.snapshot.rateHz} Hz</dd>
               <dt>Status detail / reason</dt>
               <dd>{onboard.snapshot.reason || 'None reported'}</dd>
@@ -272,25 +272,27 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
               </dl>
             </fieldset>
 
+            {onboard.snapshot.dropped > 0 && <p role="alert">Samples were lost during recording. An empty final queue does not undo those losses. Preserve the file and final status for diagnosis; do not treat this as a complete tuning log.</p>}
             <p>
               <button
                 disabled
-                title="Requires powered-off SD card removal. No USB file transfer API is available."
+                title="Use the PC USB extraction utility or an SD card reader. The integrated button is not implemented yet."
               >
-                Download .bbl (retrieve via SD card reader)
+                Download .bbl (PC utility or SD card reader)
               </button>
             </p>
             <p className="muted">
-              <strong>Log retrieval:</strong> Downloads are unavailable over USB
-              because no file-transfer API exists in firmware. Retrieve{' '}
-              <code>.bbl</code> files after state is <code>done</code> by
-              powering off the aircraft, removing the SD card, and reading it with an
-              external SD card reader. USB mass-storage / drive mode is not supported.
+              <strong>Log retrieval:</strong> With firmware ending in <code>-sdread1</code>,
+              disconnect the configurator and use <code>tools/download_blackbox.py</code>
+              on your PC to copy a named existing log over USB, including after reboot.
+              See <code>USB-LOG-EXPORT.md</code>. This integrated download button and USB
+              mass-storage mode are not implemented. Alternatively, after state is
+              <code> done</code>, power off and use an external SD card reader.
             </p>
 
             <p className="muted">
               <strong>Motor commands & Blackbox Explorer:</strong> Onboard logs
-              record actual motor commands sent to ESCs (not motor RPM). When
+              record requested mixer motor commands (not motor RPM). When
               analyzing logs in Blackbox Explorer, plot direct setpoint and{' '}
               <code>bobflightError</code> rather than legacy computed fields.
             </p>

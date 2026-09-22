@@ -69,6 +69,7 @@ export class ResponseCollector {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private hardTimer: ReturnType<typeof setTimeout> | null = null;
   private settled = false;
+  private receivedChars = 0;
   private readonly resolve: (text: string) => void;
   private readonly reject: (err: Error) => void;
   private readonly idleMs: number;
@@ -91,6 +92,13 @@ export class ResponseCollector {
 
   push(text: string): void {
     if (this.settled) return;
+    // Bound retained input even if a device never sends the expected terminator.
+    // The CLI protocol is ASCII; this is a conservative UTF-16 storage bound.
+    if (text.length > 65536 - this.receivedChars) {
+      this.cancel(new Error("CLI response exceeds 65536-character limit"));
+      return;
+    }
+    this.receivedChars += text.length;
     this.chunks.push(text);
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.endMarker) {
