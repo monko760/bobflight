@@ -3,6 +3,7 @@
  * Command acknowledgments are NOT motor/RPM telemetry.
  */
 import type { BobFlightHost, CliCommand, ParsedStatus, MotorPulsePercent } from "../protocol/types";
+import { emptyErpmCells, erpmCommand, parseErpmReply, type ErpmCell } from "./erpmTelemetry";
 
 export const STATUS_MAX_AGE_MS = 1500;
 export const MAX_PULSE_PERCENT = 100;
@@ -43,11 +44,13 @@ export interface BenchState {
   capabilities: BenchCapabilities | null; rate: 300 | 600 | null;
   propsOff: boolean; stationary: boolean; busy: boolean; actionPending: boolean; stopping: boolean;
   pulsePercent: Record<MotorNumber, MotorPulsePercent>;
+  /** Live eRPM cells (M1 R0b-capable; M2–4 honest-unavailable until FW R0c). */
+  erpm: Record<MotorNumber, ErpmCell>;
   estimatedUntil: number; testLabel: string; reply: string; error: string;
 }
 const initial = (): BenchState => ({ connected: false, visible: true, status: null, statusAt: -Infinity,
   capabilities: null, rate: null, propsOff: false, stationary: false, busy: false, actionPending: false, stopping: false,
-  pulsePercent: zeroSliders(), estimatedUntil: 0, testLabel: "", reply: "", error: "" });
+  pulsePercent: zeroSliders(), erpm: emptyErpmCells(), estimatedUntil: 0, testLabel: "", reply: "", error: "" });
 export function benchBlockReason(s: BenchState, now: number): string | null {
   if (!s.connected) return "Connect a flight controller over USB.";
   if (!s.visible) return "Motor controls are locked while this page is hidden.";
@@ -128,9 +131,27 @@ export class BenchController {
         this.patch({ capabilities: parseBenchHelp(help) });
       }
       if (this.state.capabilities?.dshot) {
-        const raw = await this.host.sendCommand("dshot");
-        if (this.valid(g)) this.patch({ rate: parseDshot(raw) });
+        try {
+          const raw = await this.host.sendCommand("dshot");
+          if (this.valid(g)) this.patch({ rate: parseDshot(raw) });
+        } catch (e) {
+          // Rate readback failure must not block eRPM polling.
+          if (this.valid(g)) this.patch({ rate: null, error: e instanceof Error ? e.message : String(e) });
+        }
       }
+      // Live eRPM while page visible + connected (serialized with status).
+      const next = { ...this.state.erpm };
+      for (const motor of [1, 2, 3, 4] as const) {
+        if (!this.valid(g)) return;
+        try {
+          const reply = await this.host.sendCommand(erpmCommand(motor));
+          if (!this.valid(g)) return;
+          next[motor] = parseErpmReply(motor, reply);
+        } catch {
+          // Leave prior cell on transient in-flight / disconnect races.
+        }
+      }
+      if (this.valid(g)) this.patch({ erpm: next });
     });
   }
   /** A slider only prepares a setpoint: no USB command, no timer, no motor start. */
@@ -207,3 +228,5 @@ export class BenchController {
     return p;
   }
 }
+
+export type { ErpmCell };

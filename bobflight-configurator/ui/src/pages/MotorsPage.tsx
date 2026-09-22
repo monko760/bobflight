@@ -81,7 +81,7 @@ export function MotorsPage() {
         <div className="motor-front">↑ FRONT · TOP VIEW</div>
         {MOTOR_POSITIONS.map(({ motor, name, position }) => <div key={motor} className={`motor-card ${position}`}>
           <span className="motor-number">M{motor}</span><strong>{name}</strong>
-          <div className="motor-rpm"><span>RPM</span><strong aria-label={`Motor ${motor} RPM unavailable`}>—</strong><small>No telemetry</small></div>
+          <div className="motor-rpm"><span>eRPM</span><strong aria-label={state.erpm[motor].value !== null ? `Motor ${motor} eRPM ${state.erpm[motor].value}` : `Motor ${motor} eRPM unavailable`}>{state.erpm[motor].value !== null ? state.erpm[motor].value : "—"}</strong><small>{state.erpm[motor].detail}</small></div>
           <label className="motor-slider-label" htmlFor={`motor-level-${motor}`}>Prepared command <output>{state.pulsePercent[motor]}%</output></label>
           <input className="motor-level" id={`motor-level-${motor}`} type="range" min="0" max={MAX_PULSE_PERCENT} step="1" value={state.pulsePercent[motor]}
             aria-valuetext={`${state.pulsePercent[motor]} percent command; not RPM or measured power`}
@@ -112,9 +112,9 @@ export function MotorsPage() {
           <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
           {poleMessage && <p role="status">{poleMessage}</p>}
         </section>
-        <section className="motor-option-panel"><h3>RPM &amp; bidirectional DShot</h3>
-          <p><strong>Not available in this firmware.</strong> The current driver transmits DShot but does not receive ESC replies.</p>
-          <p className="muted">RPM fields stay blank—not zero or an estimate from the slider. Bidirectional support needs compatible ESC firmware and a new receive/capture driver; mechanical RPM also needs the motor pole count.</p>
+        <section className="motor-option-panel"><h3>eRPM &amp; bidirectional DShot</h3>
+          <p><strong>M1 eRPM telemetry (R0b).</strong> When bidirectional DShot is enabled on the controller and M1 telem is OK, the M1 cell shows live electrical RPM. M2–M4 stay unavailable until firmware R0c indexed telem.</p>
+          <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Full four-motor telem is not claimed yet.</p>
         </section>
         <section className="motor-option-panel"><h3>Motor sequence</h3><p>M1 rear-right → M2 front-right → M3 rear-left → M4 front-left.</p>
           <p className="muted">One-second pulses at 8%, with 0.7-second gaps. Check each motor individually first.</p>
@@ -129,6 +129,6 @@ export function MotorsPage() {
       {state.reply && <p>{state.reply}</p>}
       {state.error && <p className="fail" role="alert">{state.error}</p>}
     </div>
-    <p className="muted">No measured RPM, spin direction, or sequence progress is available. Stop waits for any in-flight USB command; navigation and hiding this page request a best-effort stop, not a guaranteed emergency shutdown. If anything keeps spinning, disconnect battery power.</p>
+    <p className="muted">eRPM is shown only from controller telem (M1 on R0b). No spin direction or sequence progress is measured. Stop waits for any in-flight USB command; navigation and hiding this page request a best-effort stop, not a guaranteed emergency shutdown. If anything keeps spinning, disconnect battery power.</p>
   </section>;
 }

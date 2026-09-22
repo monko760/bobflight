@@ -60,7 +60,7 @@ export function parseErpmReply(motor: MotorNumber, raw: string): ErpmCell {
   if (!Number.isFinite(n)) {
     return { value: null, detail: "Waiting telem" };
   }
-  return { value: n, detail: "eRPM" };
+  return { value: n, detail: "Live" };
 }
 
 export function erpmCommand(motor: MotorNumber): `get erpm_m${MotorNumber}` {
