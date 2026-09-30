@@ -227,6 +227,13 @@ export class MockBobFlightHost implements BobFlightHost {
 
   async saveSettings(): Promise<void> { throw new Error("Demo/RAM settings are not stored on a controller"); }
 
+  /**
+   * Test hook: models a flash-verified save of the loop-rate setting (the value
+   * the next reboot applies). The demo host's saveSettings() still refuses, so
+   * in demo mode a reboot drops an unsaved loop-rate change, as on the FC.
+   */
+  simulateVerifiedSave(): void { this.loopRateSetting.save(); }
+
   async restoreDefaults(): Promise<Record<SettingsKey, string>> {
     this.requireConnected();
     this.settings = cloneDefaultSettings();

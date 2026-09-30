@@ -81,9 +81,10 @@ export function onboardEffectiveHz(s: Pick<OnboardSnapshot, 'api' | 'rateHz'>): 
   return isOnboardApi2(s) ? s.rateHz : null;
 }
 
-/** api 1 FC: its fixed target as sent in `blackbox_rate_hz` (own row); null on api 2+ (row hidden). */
+/** api 1 FC: its fixed target as sent in `blackbox_rate_hz` (own row). null (row hidden) on api 2+ and
+ * on any api that is not exactly 1 (non-integer, NaN, 0): an unknown api never claims the api 1 target. */
 export function describeOnboardApi1Target(s: Pick<OnboardSnapshot, 'api' | 'rateHz'>): string | null {
-  return isOnboardApi2(s) ? null : formatOnboardHz(s.rateHz);
+  return s.api === 1 ? formatOnboardHz(s.rateHz) : null;
 }
 
 /** Effective rate; the auto-lowered note appears only for that reported reason. */

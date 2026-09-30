@@ -6,8 +6,34 @@
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {spawnSync}=require('node:child_process');
-const {ResponseCollector,parseLoopStatus,loopRateView,parseStatus,parseLoopRateGetReply,parseLoopRateSetReply,parseLoopRateReport,loopRateSettingView}=require('../../bobflight-configurator/protocol/dist');
+const fs=require('node:fs');
+const {ResponseCollector,parseLoopStatus,loopRateView,parseStatus,parseLoopRateGetReply,parseLoopRateSetReply,parseLoopRateReport,loopRateSettingView,
+ MockLoopRateSetting,LOOP_RATE_ARMED_LINE,LOOP_RATE_INVALID_LINE,loopRateUnsupportedLine}=require('../../bobflight-configurator/protocol/dist');
 const binary=process.argv[2]?path.resolve(process.argv[2]):path.resolve(__dirname,'../../bobflight-firmware/build-contract/bobflight_host');
+const no8kBinary=process.argv[3]?path.resolve(process.argv[3]):path.resolve(__dirname,'../../bobflight-firmware/build-contract-tmotor/bobflight_host');
+/* Board without the 8 kHz gyro path (tmotor_f7_v2 host build) vs the Configurator's
+ * "1000/1-no8k" mock: the replies to get / refused set 8000 / refused set 4000 /
+ * loop_rate / set 1000 must be byte-identical (CRLF included), so the mock's
+ * refusal line IS the FW line. The armed and invalid lines are checked against
+ * the FW source (the host build cannot arm without a healthy gyro). */
+function no8kFlow(){
+ assert.ok(fs.existsSync(no8kBinary),`tmotor_f7_v2 host build missing: ${no8kBinary}`);
+ const cmds=['get loop_rate_hz','set loop_rate_hz 8000','set loop_rate_hz 4000','loop_rate','get loop_rate_hz','set loop_rate_hz 1000'];
+ const r=spawnSync(no8kBinary,[],{input:cmds.join('\n')+'\n',encoding:'utf8',maxBuffer:1024*1024,timeout:60000});
+ assert.equal(r.status,0,r.stdout+r.stderr);
+ let scenario='1000/1-no8k';const mock=new MockLoopRateSetting(()=>scenario);
+ const expected=cmds.map(c=>mock.handle(c,false)).join('');
+ assert.ok(r.stdout.includes(expected),`FW tmotor_f7_v2 replies differ from the no-8k mock.\n--- mock ---\n${JSON.stringify(expected)}\n--- fw ---\n${JSON.stringify(r.stdout.slice(0,1200))}`);
+ const refusal=loopRateUnsupportedLine('8000','tmotor_f7_v2');
+ assert.equal(parseLoopRateSetReply(refusal+'\r\n','8000').message,refusal,'FW refusal shown verbatim');
+ const cli=fs.readFileSync(path.resolve(__dirname,'../../bobflight-firmware/src/drivers/cli.c'),'utf8');
+ const setBody=cli.slice(cli.indexOf('static void cmd_set('),cli.indexOf('v = strtof(valstr, &end);',cli.indexOf('static void cmd_set(')));
+ assert.ok(setBody.includes(`cli_write_str("${LOOP_RATE_ARMED_LINE}\\r\\n")`),'FW cmd_set armed line == LOOP_RATE_ARMED_LINE');
+ assert.ok(setBody.indexOf('ARM_ARMED')<setBody.indexOf('loop_rate_hz'),'FW checks armed before the loop_rate_hz value (mock order)');
+ assert.ok(setBody.includes(`cli_write_str("${LOOP_RATE_INVALID_LINE}\\r\\n")`),'FW invalid line == LOOP_RATE_INVALID_LINE');
+ assert.ok(setBody.includes('"set failed: loop_rate_hz %lu not supported on %s (no 8 kHz gyro path)\\r\\n"'),'FW unsupported format == loopRateUnsupportedLine');
+ console.log('PASS firmware tmotor_f7_v2 (no 8 kHz gyro path) -> Configurator no-8k mock: get, refused set 8000/4000, loop_rate and set 1000 byte-identical; armed/invalid lines match FW source.');
+}
 /* Persisted loop_rate_hz over the real FW CLI: get, invalid set rejected, set 8000
  * (pending, save + reboot note), save, host warm reboot (process-local flash kept),
  * then status loop_target_hz shows the applied rate. */
@@ -62,5 +88,6 @@ setTimeout(()=>{
  const repEnd=out.indexOf('loop_rate_end: 1',end);assert.ok(repEnd>end);const boot=parseLoopRateReport(out.slice(end,repEnd+'loop_rate_end: 1'.length));assert.equal(boot.settingHz,'4000','Kakute default loop_rate_hz is 4000');
  assert.equal(boot.bootSettingHz,'4000');assert.equal(boot.pendingReboot,false);assert.equal(boot.reason,'setting');
  settingFlow();
+ no8kFlow();
  console.log(`PASS firmware status -> Configurator loop-rate readout: target ${v.items[0].value}, actual ${v.items[1].value}, overruns ${v.items[2].value}. Host build, not a hardware rate claim.`);
 },20);

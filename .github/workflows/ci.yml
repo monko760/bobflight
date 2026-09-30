@@ -91,7 +91,10 @@ jobs:
       - name: Firmware to configurator Blackbox status api 2 (SD throughput model)
         run: node ../.github/scripts/blackbox-status-contract.cjs
       - name: Firmware status loop keys and loop_rate_hz setting to Setup loop-rate contract
-        run: node ../.github/scripts/loop-status-contract.cjs
+        run: |
+          cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract-tmotor -DBOBFLIGHT_BOARD=tmotor_f7_v2
+          cmake --build ../bobflight-firmware/build-contract-tmotor --target bobflight_host -j 4
+          node ../.github/scripts/loop-status-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
@@ -104,6 +107,8 @@ jobs:
         run: npm --prefix ui run test:storage
       - name: Setup loop-rate readout and 1k/4k/8k selector (poll, mocks, wiring) tests
         run: npm --prefix ui run test:loop-rate
+      - name: Setup loop-rate poll starts after an in-flight command (SetupPage render test)
+        run: npm --prefix ui run test:setup-poll
       - name: Zero-output PID diagnostic CLI and framing tests
         run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests

@@ -46,8 +46,8 @@ async function main(){
   assert.equal(LOOP_LABELS.actual,'Loop actual (Hz, last ~1 s)');assert.doesNotMatch(LOOP_LABELS.actual,/boot/i);
   assert.equal(LOOP_LABELS.target,'Loop target (Hz)');assert.equal(LOOP_LABELS.overruns,'Loop overruns (since boot)');
  });
- await test('mock status scenarios 1000/1, 8000/2, 8000/1, 8000/1-guard, unavailable and missing over the real client',async()=>{
-  const expected={'missing':['unknown','unknown','unknown'],'1000/1':['1000','999','1'],'8000/2':['4000','3998','9007199254740993'],'unavailable':['4000','unknown','0'],'8000/1':['8000','7996','4'],'8000/1-guard':['4000','4000','16384']};
+ await test('mock status scenarios 1000/1, 8000/2, 8000/1, 8000/1-guard, 1000/1-no8k, unavailable and missing over the real client',async()=>{
+  const expected={'missing':['unknown','unknown','unknown'],'1000/1':['1000','999','1'],'8000/2':['4000','3998','9007199254740993'],'unavailable':['4000','unknown','0'],'8000/1':['8000','7996','4'],'8000/1-guard':['4000','4000','16384'],'1000/1-no8k':['1000','1000','0']};
   assert.deepEqual(Object.keys(expected).sort(),[...LOOP_RATE_MOCK_SCENARIOS].sort());
   for(const scenario of LOOP_RATE_MOCK_SCENARIOS){
    const client=new BobFlightCliClient(new MockTransportFactory(scenario==='missing'?undefined:{loopRateScenario:scenario}));

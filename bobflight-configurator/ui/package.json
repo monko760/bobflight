@@ -16,6 +16,7 @@
     "test:sensors": "esbuild scripts/test-sensors.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-sensors.bundle.mjs && node scripts/test-sensors.bundle.mjs",
     "test:storage": "esbuild scripts/test-storage-panel.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-storage-panel.bundle.mjs && node scripts/test-storage-panel.bundle.mjs",
     "test:loop-rate": "esbuild scripts/test-loop-rate.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-loop-rate.bundle.mjs && node scripts/test-loop-rate.bundle.mjs",
+    "test:setup-poll": "node scripts/run-setup-loop-poll.mjs",
     "test:sd": "node scripts/test-sd-card.cjs && node scripts/test-sd-probe.cjs"
   },
   "dependencies": {
