@@ -23,8 +23,9 @@ int main(void){
  now=0;gyro=pid=0;scheduler_init(8000,2);
  for(unsigned i=0;i<4;i++){now=i*125;scheduler_run();}
  CHECK(gyro==4&&pid==2&&s->pid_interval_last_us==250&&s->gyro_interval_last_us==125);
- now=1250;scheduler_run();CHECK(s->skipped_deadlines==6&&pid==2);
- now=1375;scheduler_run();CHECK(pid==3&&s->pid_interval_last_us==1000);
+ /* First slot runs the cascade; a late slot keeps the divider phase. */
+ now=1250;scheduler_run();CHECK(s->skipped_deadlines==6&&pid==3&&s->pid_interval_last_us==1000);
+ now=1375;scheduler_run();CHECK(pid==3);
  now=0;gyro_cost=150;filter_cost=10;pid_cost=20;mix_cost=10;
  scheduler_init(8000,1);scheduler_run();CHECK(s->overruns==1&&s->gyro_exec_max_us==150&&s->cascade_exec_max_us==190);
  scheduler_run();CHECK(s->overruns==2);scheduler_run();CHECK(s->skipped_deadlines==1);

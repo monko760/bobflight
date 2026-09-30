@@ -19,6 +19,12 @@ hal_spi_bus_t *hal_spi_open(unsigned bus_index)
     (void)bus_index;
     return NULL;
 }
+uint32_t hal_spi_set_hz(hal_spi_bus_t *bus, uint32_t max_hz)
+{
+    (void)bus;
+    (void)max_hz;
+    return 0u;
+}
 bool hal_spi_transfer(hal_spi_bus_t *bus, hal_pin_t cs,
                       const uint8_t *tx, uint8_t *rx, size_t len)
 {

@@ -31,6 +31,7 @@ void hal_delay_ms(uint32_t ms){(void)ms;}
 bool bench_motor_active(void){return false;}
 bool rx_frame_fresh(void){return false;}
 const float *rx_channels(void){static float rc[16];return rc;}
+uint32_t hal_spi_set_hz(hal_spi_bus_t *bus,uint32_t max_hz){(void)bus;return max_hz;}
 bool hal_spi_transfer(hal_spi_bus_t *bus,hal_pin_t cs,const uint8_t *tx,uint8_t *rx,size_t n){
  (void)bus;(void)cs;memset(rx,0,n);
  if(tx[0]&128){for(size_t i=1;i<n;i++)rx[i]=registers[(tx[0]&127)+i-1];}
