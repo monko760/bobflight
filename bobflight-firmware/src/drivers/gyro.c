@@ -23,6 +23,9 @@
 #include <string.h>
 #include <math.h>
 static float g_acc[3], g_latest[3], g_filter[3];
+/* Manual gyro notches (2 x 3 axes), in series after the soft gyro LPF. */
+static filter_notch_bank_t g_notch;
+static void gyro_notch_refresh(void);
 /* Until the first loop_filter() call: the scheduler's fallback PID period. */
 static float g_filter_dt = (float)SCHEDULER_DEFAULT_PID_DENOM / (float)SCHEDULER_DEFAULT_GYRO_HZ;
 static sensor_calibration_t g_cal;
@@ -320,6 +323,9 @@ void gyro_init(void)
     memset(g_acc,0,sizeof(g_acc));
     memset(g_latest,0,sizeof(g_latest));
     memset(g_filter,0,sizeof(g_filter));
+    /* Notch coefficients at init (from the current settings and filter dt). */
+    filter_notch_bank_init(&g_notch);
+    gyro_notch_refresh();
     g_spi = NULL;
     g_cs = HAL_PIN_INVALID;
     g_healthy = false;
@@ -481,13 +487,52 @@ void gyro_filter_set_dt(float dt)
     }
 }
 
+float gyro_filter_sample_hz(void)
+{
+    return 1.f / g_filter_dt;
+}
+
+/* Recompute notch coefficients when a notch setting or the filter dt (PID
+ * cadence from the scheduler) changed; otherwise a handful of compares. The
+ * settings are never modified here: an invalid/above-nyquist notch is only
+ * disabled at runtime and reported. Cooperative scheduler: the CLI and the
+ * PID cascade never preempt each other, so the CLI may refresh too. */
+static void gyro_notch_refresh(void)
+{
+    const bf_config_t *cfg = config_get();
+    const float center[FILTER_NOTCH_COUNT] = {cfg ? cfg->gyro_notch1_hz : 0.f, cfg ? cfg->gyro_notch2_hz : 0.f};
+    const float cutoff[FILTER_NOTCH_COUNT] = {cfg ? cfg->gyro_notch1_cutoff_hz : 0.f, cfg ? cfg->gyro_notch2_cutoff_hz : 0.f};
+    (void)filter_notch_bank_update(&g_notch, center, cutoff, g_filter_dt);
+}
+
+bool gyro_notch_status(unsigned idx, bool *active, const char **reason)
+{
+    if (idx < 1u || idx > FILTER_NOTCH_COUNT) {
+        return false;
+    }
+    gyro_notch_refresh();
+    const filter_notch_reason_t r = g_notch.reason[idx - 1u];
+    if (active) *active = r == FILTER_NOTCH_OK;
+    if (reason) *reason = filter_notch_reason_name(r);
+    return true;
+}
+
+uint32_t gyro_notch_recomputes(void)
+{
+    return g_notch.recomputes;
+}
+
 void gyro_filter(const float in_dps[3], float out_dps[3])
 {
     if (!in_dps || !out_dps) {
         return;
     }
+    /* Same point in the chain for both: LPF, then the notches in series.
+     * Coefficients follow the loop rate (g_filter_dt) and the settings. */
+    gyro_notch_refresh();
 #if BOBFLIGHT_HOST
-    /* Host inject/cascade tests expect bit-exact passthrough. */
+    /* Host inject/cascade tests expect bit-exact passthrough (the notch DSP
+     * itself is covered by the filter_notch host test). */
     memcpy(out_dps, in_dps, 3 * sizeof(float));
 #else
     {
@@ -497,6 +542,7 @@ void gyro_filter(const float in_dps[3], float out_dps[3])
         for (unsigned i = 0; i < 3; i++) {
             out_dps[i] = filter_lpf_step(&g_filter[i], in_dps[i], alpha);
         }
+        filter_notch_bank_apply(&g_notch, out_dps);
     }
 #endif
 }
