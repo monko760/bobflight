@@ -11,6 +11,7 @@ import { MockPortsModes, isModeRangeCommand, isControlSourceCommand } from "@bob
 import {
   SETTINGS_KEYS,
   MockMotorBench,
+  MockOnboardBlackbox,
   mockSensorReply,
   cloneDefaultSettings,
   type SettingsKey,
@@ -56,6 +57,8 @@ export class MockBobFlightHost implements BobFlightHost {
   private dshotBidir = false;
   private armed = false;
   private bench = new MockMotorBench();
+  /** Onboard Blackbox (status api 2). Default "none": honest no-SD-card reply. */
+  readonly blackbox = new MockOnboardBlackbox("none");
   private gyroHealthy = false;
   private failsafeActive = false;
   private connectDelayMs: number;
@@ -259,7 +262,7 @@ export class MockBobFlightHost implements BobFlightHost {
     if(cmd === "bl" || cmd === "bl discard") return "bl unavailable: mock transport has no ROM bootloader\r\n";
     const pm=this.modesPorts.handle(cmd,this.armed,this.bench.active);if(pm!==null)return pm;
     if(cmd === "pid_diag" || cmd.startsWith("pid_diag "))return "pid_diag_available: no\r\nreason: mock-no-hardware\r\nmotor_output: disabled\r\npid_diag_end: 1\r\n";
-    if(cmd === "blackbox start" || cmd === "blackbox stop" || cmd === "blackbox status")return "blackbox unavailable: mock has no physical SD card\r\nblackbox_end: 1\r\n";
+    {const bb=this.blackbox.handle(cmd,this.armed);if(bb!==null)return bb;}
     if(cmd.startsWith("sd read"))return "sd_data_error: unavailable-mock\r\nsd_data_end: 1\r\n";
     if(cmd === "sd probe" || cmd === "sd status" || cmd === "sd cancel")return "sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n";
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
