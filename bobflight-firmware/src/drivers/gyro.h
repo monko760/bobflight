@@ -70,6 +70,13 @@ void gyro_filter(const float in_dps[3], float out_dps[3]);
 /** Sample period for soft gyro LPF (seconds); set every PID cycle from the
  * scheduler's gyro_hz / pid_process_denom. */
 void gyro_filter_set_dt(float dt);
+/** Actual gyro-filter sample rate (1 / filter dt = PID cadence), Hz. */
+float gyro_filter_sample_hz(void);
+/** Runtime state of manual notch idx (1|2): active and reason token
+ * ("off" | "ok" | "above-nyquist" | "invalid"). False for a bad idx. */
+bool gyro_notch_status(unsigned idx, bool *active, const char **reason);
+/** Notch coefficient recomputations since boot (diagnostics/tests). */
+uint32_t gyro_notch_recomputes(void);
 /** "dummy" | "no-cs" | "no-spi" | "unbound" | "bf-derived" | "ok" */
 const char *gyro_bind_state(void);
 
