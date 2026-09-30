@@ -20,7 +20,7 @@ new Function(
   ).outputText
 )(mod.exports, require, mod);
 
-const { OnboardController, parseOnboardReply, describeOnboardRate, describeOnboardDrops, formatOnboardHz, formatOnboardDropPct, formatOnboardRateReason, onboardAutoLowered } = mod.exports;
+const { OnboardController, parseOnboardReply, describeOnboardRate, describeOnboardDrops, formatOnboardHz, formatOnboardDropPct, formatOnboardRateReason, onboardAutoLowered, onboardEffectiveHz, describeOnboardApi1Target, ONBOARD_API1_TARGET_LABEL } = mod.exports;
 
 const makeReply = (state, active = 1, file = 'BFL00001.BBL') => `blackbox_api: 1\r
 blackbox_state: ${state}\r
@@ -108,7 +108,12 @@ blackbox_end: 1\r
   assert.equal(formatOnboardHz(lossy1.requestedHz), 'unknown');
   assert.equal(formatOnboardRateReason(lossy1.rateReason), 'unknown');
   assert.equal(formatOnboardDropPct(lossy1.dropPct), 'unknown');
-  assert.equal(describeOnboardRate(lossy1), '500 Hz'); // the FC's own blackbox_rate_hz
+  // An api 1 FC does not report an effective rate: "unknown", never its fixed 500 Hz target.
+  assert.equal(describeOnboardRate(lossy1), 'unknown');
+  assert.equal(onboardEffectiveHz(lossy1), null);
+  // Its fixed target (blackbox_rate_hz) goes in a separate, explicitly labelled row.
+  assert.equal(ONBOARD_API1_TARGET_LABEL, 'Target sampling rate (api 1 FC; effective rate not reported)');
+  assert.equal(describeOnboardApi1Target(lossy1), '500 Hz');
   assert.equal(onboardAutoLowered(lossy1), false);
   // api 1 keys that happen to carry api 2 names are still ignored for api 1.
   const v1extra = parseOnboardReply(makeReply('done', 0).replace('blackbox_end: 1', 'blackbox_drop_pct: 9.9\r\nblackbox_end: 1'));
@@ -117,6 +122,7 @@ blackbox_end: 1\r
   const v1norate = parseOnboardReply(makeReply('done', 0).replace('blackbox_rate_hz: 500\r\n', ''));
   assert.equal(v1norate.rateHz, null);
   assert.equal(describeOnboardRate(v1norate), 'unknown');
+  assert.equal(describeOnboardApi1Target(v1norate), 'unknown');
 
   // 5c. api 2 (frozen contract): effective rate, requested rate, reason, pct.
   const makeV2 = ({ state = 'recording', active = 1, frames = 5306, dropped = 92, rate = 250, requested = 500, reason = 'auto-lowered-card-slow', pct = '1.7', extra = '' } = {}) => `blackbox_api: 2\r
@@ -152,6 +158,19 @@ ${extra}blackbox_end: 1\r
   assert.equal(v2ok.rateHz, 500); assert.equal(v2ok.requestedHz, 500); assert.equal(v2ok.dropPct, '0.0');
   assert.equal(describeOnboardRate(v2ok), '500 Hz'); assert.equal(onboardAutoLowered(v2ok), false);
   assert.equal(describeOnboardDrops(v2ok), '0 dropped (0.0%)');
+  // api 2 reports the effective rate; the api 1 target row is hidden.
+  assert.equal(onboardEffectiveHz(v2ok), 500); assert.equal(describeOnboardApi1Target(v2ok), null);
+  assert.equal(onboardEffectiveHz(v2), 250); assert.equal(describeOnboardApi1Target(v2), null);
+  // Unknown api: no effective rate either.
+  assert.equal(onboardEffectiveHz({ api: NaN, rateHz: 500 }), null);
+
+  // 5d. BlackboxPage wiring: rates and drop % come from the helpers; the page computes nothing.
+  const page = fs.readFileSync(path.join(__dirname, '../src/pages/BlackboxPage.tsx'), 'utf8');
+  assert.match(page, /<dd>\{describeOnboardRate\(onboard\.snapshot\)\}<\/dd>/);
+  assert.match(page, /\{describeOnboardApi1Target\(onboard\.snapshot\) !== null && \(\s*<>\s*<dt>\{ONBOARD_API1_TARGET_LABEL\}<\/dt>\s*<dd>\{describeOnboardApi1Target\(onboard\.snapshot\)\}<\/dd>/);
+  assert.match(page, /formatOnboardDropPct\(onboard\.snapshot\.dropPct\)/);
+  assert.match(page, /\{onboardAutoLowered\(onboard\.snapshot\) && \(/);
+  assert.doesNotMatch(page, /onboard\.snapshot\.(dropped|frames)\s*[*\/+-]|[*\/+-]\s*onboard\.snapshot\.(dropped|frames)|formatDropPct/);
   assert.equal(parseOnboardReply(makeV2({ rate: 125, pct: '28.4', dropped: 788, frames: 1988 })).rateHz, 125);
   // The FC's own percent string is shown verbatim, even if counters would round differently.
   assert.equal(parseOnboardReply(makeV2({ pct: '1.8' })).dropPct, '1.8');
