@@ -4,6 +4,8 @@ import { Recorder, QUERIES, csv, type Query } from '../blackbox/recorder';
 import { SdCardController, type SdCommand } from '../blackbox/sd-card';
 import {
   OnboardController,
+  ONBOARD_API1_TARGET_LABEL,
+  describeOnboardApi1Target,
   describeOnboardRate,
   formatOnboardDropPct,
   formatOnboardHz,
@@ -237,6 +239,12 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
               </dd>
               <dt>Effective logging rate</dt>
               <dd>{describeOnboardRate(onboard.snapshot)}</dd>
+              {describeOnboardApi1Target(onboard.snapshot) !== null && (
+                <>
+                  <dt>{ONBOARD_API1_TARGET_LABEL}</dt>
+                  <dd>{describeOnboardApi1Target(onboard.snapshot)}</dd>
+                </>
+              )}
               <dt>Requested logging rate</dt>
               <dd>{formatOnboardHz(onboard.snapshot.requestedHz)}</dd>
               <dt>Rate reason</dt>
