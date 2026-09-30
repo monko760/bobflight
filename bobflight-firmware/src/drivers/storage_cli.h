@@ -12,15 +12,15 @@
 /* These commands report stored configuration, never telemetry or arm state as settings. */
 static void cmd_storage(void)
 {
-    char buf[600];
+    char buf[700];
     unsigned flight_enabled=0;
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
     flight_enabled=1;
 #endif
     int n = snprintf(buf, sizeof(buf),
-        "storage_api: 1\r\nbackend: %s\r\nschema: 7\r\nstate: %s\r\n"
+        "storage_api: 1\r\nbackend: %s\r\nschema: 8\r\nstate: %s\r\n"
         "dirty: %u\r\ngeneration: %lu\r\nlast_error: %s\r\n"
-        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz\r\n"
+        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz\r\n"
         "armed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nflight_enabled: %u\r\nstorage_end: 1\r\n",
         persist_backend(), persist_state(), persist_dirty() ? 1u : 0u,
         (unsigned long)persist_generation(), persist_last_error(),
@@ -60,14 +60,18 @@ static void cmd_config_export(bool full)
         {"pid_roll_d", .00005f}, {"pid_pitch_p", .002f}, {"pid_pitch_i", .001f},
         {"pid_pitch_d", .00005f}, {"pid_yaw_p", .002f}, {"pid_yaw_i", .001f},
         {"pid_yaw_d", .00005f},
-        {"min_throttle", .05f}, {"airmode", 0.f}, {"gyro_lpf_hz", 320.f}, {"dterm_lpf_hz", 53.f}
+        {"min_throttle", .05f}, {"airmode", 0.f}, {"gyro_lpf_hz", 320.f}, {"dterm_lpf_hz", 53.f},
+        /* Schema 8 notches: cutoff before centre so a pasted export replays
+         * onto defaults (a nonzero centre needs its cutoff first). */
+        {"gyro_notch1_cutoff_hz", 0.f}, {"gyro_notch1_hz", 0.f},
+        {"gyro_notch2_cutoff_hz", 0.f}, {"gyro_notch2_hz", 0.f}
     };
-    char out[1800]; size_t used = 0;
+    char out[1800]; size_t used = 0; /* Configurator rejects > 1800 */
     const board_t *b = board_get();
     bool ok = export_append(out, sizeof(out), &used,
-        "# bobflight_config: 1\r\n# schema: 7\r\n# board: %s\r\n"
+        "# bobflight_config: 1\r\n# schema: 8\r\n# board: %s\r\n"
         "# firmware: %s\r\n# kind: %s\r\n# mode_count: %u\r\n"
-        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz\r\n"
+        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz\r\n"
         "# excludes: gyro_calibration\r\n",
         b ? b->board_id : "unknown", BOBFLIGHT_VERSION_STRING, full ? "dump" : "diff", (unsigned)MODE_COUNT);
     gyro_calibration_info_t cal;gyro_calibration_info(&cal);

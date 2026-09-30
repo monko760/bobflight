@@ -11,7 +11,7 @@
 #define COMMIT_BYTES 32u
 #define RECORD_BYTES (HEADER+MAX_PAYLOAD+COMMIT_BYTES)
 #define HEADER 32u
-#define MAX_PAYLOAD 192u /* schema7 uses all 192 bytes */
+#define MAX_PAYLOAD 208u /* schema8 uses all 208 bytes */
 #define MAGIC 0x42464346u
 #define SEAL 0x51A7C0DEu
 static uint32_t generation, loaded_schema;
@@ -33,8 +33,12 @@ static bool known_v6(const uint8_t*p,uint32_t board){
 static bool known_v7(const uint8_t*p,uint32_t board){
  return known_v6(p,board)||record_valid(p,board,192,7);
 }
+static bool known_v8(const uint8_t*p,uint32_t board){
+ return known_v7(p,board)||record_valid(p,board,208,8);
+}
 static bool acceptable(const uint8_t*p,uint32_t board,size_t n,unsigned version){
  if(version<=1)return valid(p,board,n);
+ if(version>=8)return record_valid(p,board,208,8)||record_valid(p,board,192,7)||record_valid(p,board,188,6)||record_valid(p,board,184,5)||record_valid(p,board,176,4)||record_valid(p,board,160,3)||record_valid(p,board,128,2)||record_valid(p,board,96,1);
  if(version>=7)return record_valid(p,board,192,7)||record_valid(p,board,188,6)||record_valid(p,board,184,5)||record_valid(p,board,176,4)||record_valid(p,board,160,3)||record_valid(p,board,128,2)||record_valid(p,board,96,1);
  if(version>=6)return record_valid(p,board,188,6)||record_valid(p,board,184,5)||record_valid(p,board,176,4)||record_valid(p,board,160,3)||record_valid(p,board,128,2)||record_valid(p,board,96,1);
  if(version>=5)return record_valid(p,board,184,5)||record_valid(p,board,176,4)||record_valid(p,board,160,3)||record_valid(p,board,128,2)||record_valid(p,board,96,1);
@@ -63,7 +67,8 @@ static bool read_slot(uint32_t offset,uint8_t *p,size_t n,unsigned version){
  if(!hal_flash_read(offset,p,HEADER)){memset(p,255,RECORD_BYTES);return false;}
  size_t tail=0;
  if(rd(p)==MAGIC){
-  if(version>=7&&rd(p+4)==7&&rd(p+12)==192)tail=192+COMMIT_BYTES;
+  if(version>=8&&rd(p+4)==8&&rd(p+12)==208)tail=208+COMMIT_BYTES;
+  else if(version>=7&&rd(p+4)==7&&rd(p+12)==192)tail=192+COMMIT_BYTES;
   else if(version>=6&&rd(p+4)==6&&rd(p+12)==188)tail=188+COMMIT_BYTES;
   else if(version>=5&&rd(p+4)==5&&rd(p+12)==184)tail=184+COMMIT_BYTES;
   else if(version>=4&&rd(p+4)==4&&rd(p+12)==176)tail=176+COMMIT_BYTES;
@@ -87,6 +92,7 @@ static bool recognized_for_version(const uint8_t*p,uint32_t board,unsigned versi
  if(rd(p)!=MAGIC)return true; /* empty/erased handled elsewhere */
  if(rd(p+8)!=board)return false;
  if(version<=1)return rd(p+4)==1&&rd(p+12)!=0; /* length checked by caller */
+ if(version>=8)return known_v8(p,board);
  if(version>=7)return known_v7(p,board);
  if(version>=6)return known_v6(p,board);
  if(version>=5)return known_v5(p,board);
@@ -128,3 +134,5 @@ config_store_result_t config_store_load_v6(uint32_t b,void*p,size_t n){return n=
 config_store_result_t config_store_save_v6(uint32_t b,const void*p,size_t n){return n==188?save(b,p,n,6):CONFIG_STORE_INVALID;}
 config_store_result_t config_store_load_v7(uint32_t b,void*p,size_t n){return n==192?load(b,p,n,7):CONFIG_STORE_INVALID;}
 config_store_result_t config_store_save_v7(uint32_t b,const void*p,size_t n){return n==192?save(b,p,n,7):CONFIG_STORE_INVALID;}
+config_store_result_t config_store_load_v8(uint32_t b,void*p,size_t n){return n==208?load(b,p,n,8):CONFIG_STORE_INVALID;}
+config_store_result_t config_store_save_v8(uint32_t b,const void*p,size_t n){return n==208?save(b,p,n,8):CONFIG_STORE_INVALID;}
