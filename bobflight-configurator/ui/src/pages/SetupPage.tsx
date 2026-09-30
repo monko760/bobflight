@@ -1,3 +1,4 @@
+/* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
@@ -15,6 +16,7 @@ import { LoopRatePoller, type LoopRatePollState } from "../setup/loopRatePoller"
 import { LoopRateReasonCard } from "../setup/LoopRateReasonCard";
 import {
   LOOP_RATE_SETTING_EMPTY,
+  LoopTargetWatcher,
   readLoopRateSetting,
   saveLoopRate,
   selectLoopRate,
@@ -58,10 +60,13 @@ export function SetupPage() {
     () => new LoopRatePoller(() => host.sendCommand("status"), setLoopPoll),
     [host],
   );
+  // Bumped after every action: pauseLoopPoll() disables the poller directly, and
+  // busy true->false can batch into one render when the action fails instantly.
+  const [loopPollKick, setLoopPollKick] = useState(0);
   useEffect(() => {
     loopPoller.setEnabled(connected && !busy && !postFlashGate);
     if (!connected) loopPoller.reset();
-  }, [loopPoller, connected, busy, postFlashGate]);
+  }, [loopPoller, connected, busy, postFlashGate, loopPollKick]);
   useEffect(() => () => loopPoller.setEnabled(false), [loopPoller]);
   const loop = loopRateView(loopPoll.raw === null ? null : parseLoopStatus(loopPoll.raw));
 
@@ -92,6 +97,7 @@ export function SetupPage() {
     } finally {
       setLoopSettingRead(true);
       setBusy(false);
+      setLoopPollKick((k) => k + 1);
     }
   }
   useEffect(() => {
@@ -103,6 +109,18 @@ export function SetupPage() {
     if (!loopSettingRead && !busy && !postFlashGate) void runLoopRateAction(() => readLoopRateSetting(host));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected, loopSettingRead, busy, postFlashGate, host]);
+  // A runtime fallback changes the polled target without any selector action:
+  // re-read the report so the reason card never pairs a new target with a
+  // stale reason token. Deferred while busy (the effect re-runs when idle).
+  const loopTargetWatcher = useMemo(() => new LoopTargetWatcher(), []);
+  useEffect(() => {
+    if (!connected) {
+      loopTargetWatcher.reset();
+      return;
+    }
+    if (busy || postFlashGate) return;
+    if (loopTargetWatcher.changed(loopTarget)) setLoopSettingRead(false);
+  }, [loopTargetWatcher, connected, loopTarget, busy, postFlashGate]);
   // restoreDefaults exists on BobFlightHost and is safe when connected (mock + serial).
   const canRestoreDefaults =
     connected && !busy && typeof host.restoreDefaults === "function";
@@ -130,6 +148,7 @@ export function SetupPage() {
       setActionErr(msg);
     } finally {
       setBusy(false);
+      setLoopPollKick((k) => k + 1);
     }
   }
 
@@ -154,6 +173,7 @@ export function SetupPage() {
       setActionErr(msg);
     } finally {
       setBusy(false);
+      setLoopPollKick((k) => k + 1);
     }
   }
 
@@ -307,9 +327,15 @@ export function SetupPage() {
             Re-read
           </button>
         </div>
-        <div className="status-card" style={{ marginTop: "0.5rem" }}>
-          <div className="k">Loop-rate setting</div>
-          <div className="v">{connected ? loopSelector.display : LOOP_RATE_SETTING_UNKNOWN}</div>
+        <div className="status-grid" style={{ marginTop: "0.5rem" }}>
+          <div className="status-card">
+            <div className="k">Selected (controller RAM)</div>
+            <div className="v">{connected ? loopSelector.display : LOOP_RATE_SETTING_UNKNOWN}</div>
+          </div>
+          <div className="status-card">
+            <div className="k">Applied at boot</div>
+            <div className="v">{connected ? loopSelector.bootDisplay : LOOP_RATE_SETTING_UNKNOWN}</div>
+          </div>
         </div>
         <LoopRateReasonCard report={loopSetting.report} connected={connected} />
         {connected &&

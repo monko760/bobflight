@@ -93,14 +93,28 @@ fallback. It is never the requested setting.
 the boot setting), `loop_rate_active`, `loop_rate_reason`, guard level, gyro
 ODR, gyro SPI Hz, and `loop_rate_end: 1`.
 
-The Configurator's Setup → Loop rate section does two things:
+The Configurator's Setup → Loop rate section:
 - It shows the status values exactly as sent. A missing key, `unavailable`, a
   duplicated key or a malformed value shows "unknown".
 - It has a 1 kHz / 4 kHz / 8 kHz selector. The selector reads and writes
-  `loop_rate_hz` and saves through the existing verified save flow. It always
-  states that a change needs Save + reboot, shows a pending change, and shows
-  "unknown" (disabled) on an older FC. When the applied target differs from
-  the boot setting, it names the firmware's reason.
+  `loop_rate_hz` and saves through the existing verified save flow. After
+  every `set` it re-reads `get loop_rate_hz` and `loop_rate`, so a refused
+  value never shows as selected. Firmware refusals (`set failed: armed`,
+  `set failed: loop_rate_hz <v> not supported on <board> (no 8 kHz gyro path)`)
+  are shown verbatim.
+- Two rows: "Selected (controller RAM)" is `get loop_rate_hz`, and "Applied at
+  boot" is `loop_rate_boot_setting_hz` from `loop_rate` ("unknown" if absent).
+- When the FC reports the setting, it states that a change takes effect after
+  Save + reboot. While a change is pending, the Pending banner says this
+  instead. An older FC shows "unknown" (disabled) and gets no reboot note.
+- When the applied target differs from the boot setting, it names the
+  firmware's reason. This also applies while a change is pending, because a
+  pending RAM change does not alter the boot setting. If the `loop_rate`
+  report cannot be parsed, it says that pending reboot and fallback are
+  unknown.
+- The Configurator mocks reboot into the saved value only; an unsaved RAM
+  change is dropped, as on the FC. The "1000/1-no8k" mock (tmotor_f7_v2)
+  answers byte-for-byte like the tmotor_f7_v2 host build (checked in CI).
 
 ## Fallback policy (`loop_rate_select`)
 

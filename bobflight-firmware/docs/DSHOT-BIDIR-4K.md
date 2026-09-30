@@ -1,5 +1,7 @@
 # DShot bidirectional eRPM at a 4 kHz loop (B2)
 
+Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
+
 Status: host-tested, **flash held**. Kakute F7 HDV M1–M4. Stacked on #57
 (loop-rate selector). CLI keys unchanged: `dshot_bidir`, `erpm_m1..m4`,
 `dshot_telem_m1..m4` (`ok|crc_fail|invalid|timeout|stale|none`). No config

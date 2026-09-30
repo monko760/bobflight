@@ -8,8 +8,11 @@ import { mockLoopStatusLines, LOOP_RATE_MOCK_SCENARIOS, type LoopRateMockScenari
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { parseCliInput } from "../src/protocol/types";
 import { storageBlocked } from "../src/motors/motorsStorage";
-import { loopRateSettingView, parseLoopRateReport, LOOP_RATE_OPTIONS, loopRateReasonView, LOOP_RATE_REASON_TEXT } from "../../protocol/src/loop-rate-setting";
-import { readLoopRateSetting, selectLoopRate, saveLoopRate, LOOP_RATE_SETTING_EMPTY, LOOP_RATE_SAVED_MESSAGE, LOOP_RATE_SET_MESSAGE, type LoopRateSettingHost } from "../src/setup/loopRateSetting";
+import { loopRateSettingView, parseLoopRateReport, LOOP_RATE_OPTIONS, loopRateUnsupportedLine, LOOP_RATE_ARMED_LINE, loopRateReasonView, LOOP_RATE_REASON_TEXT } from "../../protocol/src/loop-rate-setting";
+import { readLoopRateSetting, selectLoopRate, saveLoopRate, LoopTargetWatcher, LOOP_RATE_SETTING_EMPTY, LOOP_RATE_SAVED_MESSAGE, LOOP_RATE_SET_MESSAGE, type LoopRateSettingHost } from "../src/setup/loopRateSetting";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LoopRateReasonCard } from "../src/setup/LoopRateReasonCard";
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log(`PASS ${name}`); }
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -78,11 +81,12 @@ async function main() {
     host.next = null; await timers.tick(); poller.setEnabled(false); poller.reset();
     assert.deepEqual(poller.state, { raw: null, error: "" });
   });
-  await test("UI MockBobFlightHost scenarios 1000/1, 8000/2, 8000/1, 8000/1-guard, unavailable, missing (older FC)", async () => {
+  await test("UI MockBobFlightHost scenarios 1000/1, 8000/2, 8000/1, 8000/1-guard, 1000/1-no8k, unavailable, missing (older FC)", async () => {
     const expected: Record<LoopRateMockScenario, string[]> = {
       "missing": ["unknown", "unknown", "unknown"], "1000/1": ["1000", "999", "1"],
       "8000/2": ["4000", "3998", "9007199254740993"], "unavailable": ["4000", "unknown", "0"],
       "8000/1": ["8000", "7996", "4"], "8000/1-guard": ["4000", "4000", "16384"],
+      "1000/1-no8k": ["1000", "1000", "0"],
       "bidir-4k": ["4000", "3999", "2"], "bidir-8k-capped": ["4000", "3997", "3"], "bidir-capture-failed": ["1000", "1000", "0"],
       "bidir-older-fc": ["1000", "1000", "0"], "reason-missing": ["4000", "3999", "2"],
     };
@@ -144,7 +148,7 @@ async function main() {
     assert.deepEqual(state.get, { kind: "value", value: "4000" });
     let view = loopRateSettingView(state.get, state.report, parseLoopStatus(await host.sendCommand("status")).targetHz);
     assert.equal(view.display, "4 kHz"); assert.equal(view.pendingReboot, false); assert.equal(view.supported, true);
-    assert.ok(view.notices.some(n => /takes effect after Save \+ reboot/.test(n)), "reboot needed is always stated");
+    assert.ok(view.notices.some(n => /takes effect after Save \+ reboot/.test(n)), "reboot needed is stated when the FC reports the setting");
     state = await selectLoopRate(host, state, "8000");
     assert.equal(state.message, LOOP_RATE_SET_MESSAGE); assert.equal(state.error, "");
     view = loopRateSettingView(state.get, state.report, "4000");
@@ -154,11 +158,19 @@ async function main() {
     // Demo host has no controller flash: the existing save flow refuses honestly and keeps the reading.
     const refused = await saveLoopRate(host, state);
     assert.match(refused.error, /not stored on a controller/); assert.deepEqual(refused.get, state.get);
+    // N6: a reboot applies only saved values; the unsaved RAM change is dropped.
+    await host.sendCommand("reboot"); await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    const unsaved = await readLoopRateSetting(host);
+    assert.deepEqual(unsaved.get, { kind: "value", value: "4000" }, "unsaved change lost on reboot");
+    assert.equal(unsaved.report?.bootSettingHz, "4000"); assert.equal(unsaved.report?.pendingReboot, false);
+    assert.equal(parseLoopStatus(await host.sendCommand("status")).targetHz, "4000", "unsaved change never applied");
+    state = await selectLoopRate(host, unsaved, "8000"); assert.equal(state.error, "");
     // A verified-save host (stub around the same mock) reports saved + reboot needed.
     const saves: string[] = [];
-    const flashHost: LoopRateSettingHost = { sendCommand: c => host.sendCommand(c), saveSettings: async () => { saves.push("save"); } };
+    const flashHost: LoopRateSettingHost = { sendCommand: c => host.sendCommand(c), saveSettings: async () => { saves.push("save"); host.simulateVerifiedSave(); } };
     const saved = await saveLoopRate(flashHost, state);
     assert.equal(saves.length, 1); assert.equal(saved.message, LOOP_RATE_SAVED_MESSAGE); assert.equal(saved.report?.pendingReboot, true);
+    assert.equal(loopRateSettingView(saved.get, saved.report, "4000").bootDisplay, "4 kHz", "applied at boot unchanged until reboot");
     await host.sendCommand("reboot"); await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
     const booted = await readLoopRateSetting(host);
     assert.equal(booted.report?.bootSettingHz, "8000"); assert.equal(booted.report?.pendingReboot, false);
@@ -177,6 +189,8 @@ async function main() {
     assert.deepEqual(sent, ["get loop_rate_hz"], "no loop_rate report asked of an older FC");
     const v = loopRateSettingView(st.get, st.report, null);
     assert.equal(v.display, "unknown"); assert.equal(v.supported, false); assert.equal(v.selected, null);
+    assert.ok(!v.notices.some(n => /takes effect/.test(n)), "N1: no Save + reboot note for an FC without the setting");
+    assert.equal(v.bootDisplay, "unknown");
     const refused = await selectLoopRate(spy, st, "8000");
     assert.match(refused.error, /not available/); assert.deepEqual(sent, ["get loop_rate_hz"], "never sends set to an older FC");
     await old.disconnect();
@@ -185,10 +199,50 @@ async function main() {
     const g = await readLoopRateSetting(guard);
     const gv = loopRateSettingView(g.get, g.report, parseLoopStatus(await guard.sendCommand("status")).targetHz);
     assert.equal(gv.display, "8 kHz");
-    assert.ok(gv.notices.some(n => /running 4000 Hz instead of the selected 8000 Hz \(overrun-guard\)/.test(n)), gv.notices.join(" | "));
+    assert.ok(gv.notices.some(n => /running 4000 Hz instead of its boot setting 8000 Hz \(overrun-guard\)/.test(n)), gv.notices.join(" | "));
     assert.equal(parseLoopRateReport(await guard.sendCommand("loop_rate"))?.active, "8000/2");
     await guard.disconnect();
     assert.deepEqual(LOOP_RATE_SETTING_EMPTY, { get: null, report: null, message: "", error: "" });
+  });
+  await test("BLOCKER: refused set 8000 on a board without the 8 kHz path keeps the value, shows the exact FW line, re-reads via get", async () => {
+    const FW_LINE = "set failed: loop_rate_hz 8000 not supported on tmotor_f7_v2 (no 8 kHz gyro path)"; // drivers/cli.c, verbatim
+    assert.equal(loopRateUnsupportedLine("8000", "tmotor_f7_v2"), FW_LINE);
+    const host = new MockBobFlightHost({ connectDelayMs: 0, loopRateScenario: "1000/1-no8k" });
+    await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    const sent: string[] = [];
+    const spy: LoopRateSettingHost = { sendCommand: c => { sent.push(c); return host.sendCommand(c); }, saveSettings: async () => {} };
+    const before = await readLoopRateSetting(spy);
+    assert.deepEqual(before.get, { kind: "value", value: "1000" });
+    sent.length = 0;
+    // Stale caller state: the result must come from a fresh read, not from `current`.
+    const after = await selectLoopRate(spy, { ...before, report: null, message: "stale message" }, "8000");
+    assert.deepEqual(after.get, { kind: "value", value: "1000" }, "get.value stays at the previous value (no optimistic set)");
+    assert.equal(after.error, FW_LINE, "error is exactly the FW refusal line (not swallowed or rewritten)");
+    assert.equal(after.message, "", "no success message on a refusal");
+    assert.deepEqual(sent, ["set loop_rate_hz 8000", "get loop_rate_hz", "loop_rate"], "set, then re-read via get (and the report)");
+    assert.equal(after.report?.bootSettingHz, "1000", "report refreshed by the re-read"); assert.equal(after.report?.pendingReboot, false);
+    const view = loopRateSettingView(after.get, after.report, parseLoopStatus(await host.sendCommand("status")).targetHz);
+    assert.equal(view.display, "1 kHz"); assert.equal(view.pendingReboot, false); assert.ok(!view.notices.some(n => /^Pending/.test(n)));
+    const four = await selectLoopRate(spy, after, "4000");
+    assert.equal(four.error, loopRateUnsupportedLine("4000", "tmotor_f7_v2")); assert.deepEqual(four.get, { kind: "value", value: "1000" });
+    await host.disconnect();
+  });
+  await test("armed refusal: get.value unchanged, error is the verbatim FW line, message empty, re-read after set", async () => {
+    const host = new MockBobFlightHost({ connectDelayMs: 0, gyroHealthy: true, loopRateScenario: "8000/2" });
+    await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    const sent: string[] = [];
+    const spy: LoopRateSettingHost = { sendCommand: c => { sent.push(c); return host.sendCommand(c); }, saveSettings: async () => {} };
+    const before = await readLoopRateSetting(spy);
+    assert.deepEqual(before.get, { kind: "value", value: "4000" });
+    assert.equal(await host.sendCommand("arm"), "armed");
+    sent.length = 0;
+    const after = await selectLoopRate(spy, { ...before, message: "stale message" }, "8000");
+    assert.deepEqual(after.get, { kind: "value", value: "4000" });
+    assert.equal(after.error, LOOP_RATE_ARMED_LINE); assert.equal(after.error, "set failed: armed", "N3: shown verbatim");
+    assert.equal(after.message, "");
+    assert.deepEqual(sent, ["set loop_rate_hz 8000", "get loop_rate_hz", "loop_rate"]);
+    assert.equal(after.report?.pendingReboot, false);
+    await host.sendCommand("disarm"); await host.disconnect();
   });
   await test("selector wiring: options from protocol, existing save flow, unknown for older FC, reboot notice, allowlist", () => {
     const setup = code(source("../src/pages/SetupPage.tsx"));
@@ -200,6 +254,11 @@ async function main() {
     assert.match(setup, /loopSelector\.supported === true/, "selector disabled unless the FC reports the setting");
     assert.match(setup, /LOOP_RATE_SETTING_UNKNOWN/);
     assert.match(setup, /loopSelector\.notices\.map/);
+    // N2: RAM selection and the FW boot setting are separate rows.
+    assert.match(setup, /<div className="k">Selected \(controller RAM\)<\/div>\s*<div className="v">\{connected \? loopSelector\.display : LOOP_RATE_SETTING_UNKNOWN\}<\/div>/);
+    assert.match(setup, /<div className="k">Applied at boot<\/div>\s*<div className="v">\{connected \? loopSelector\.bootDisplay : LOOP_RATE_SETTING_UNKNOWN\}<\/div>/);
+    assert.match(source("../../protocol/src/loop-rate-setting.ts"), /const boot = report\?\.bootSettingHz \?\? null;/, "boot row sourced from loop_rate_boot_setting_hz");
+    assert.match(source("../src/pages/SetupPage.tsx"), /^\/\* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2\.0 \*\//, "N8: SPDX header");
     for (const action of ["selectLoopRate(host, loopSetting, value)", "saveLoopRate(host, loopSetting)", "readLoopRateSetting(host)"])
       assert.ok(setup.includes(`runLoopRateAction(() => ${action})`), action);
     const run = setup.slice(setup.indexOf("async function runLoopRateAction"), setup.indexOf("useEffect(", setup.indexOf("async function runLoopRateAction")));
@@ -254,7 +313,6 @@ async function main() {
     const card = code(source("../src/setup/LoopRateReasonCard.tsx"));
     assert.match(setup, /<LoopRateReasonCard report=\{loopSetting\.report\} connected=\{connected\} \/>/);
     assert.match(card, /loopRateReasonView\(connected \? report : null\)/);
-    assert.match(card, /\{view\.token\}/, "token rendered verbatim");
     assert.doesNotMatch(card, /\b(1000|2000|4000|8000)\b|kHz/, "card has no rate text of its own");
     assert.doesNotMatch(card, /bidir|dshot|polled/i, "card never infers a reason from DShot state");
     assert.doesNotMatch(card, /StoragePanel|blocked=|sendCommand|setStatus/, "display only");
@@ -264,10 +322,96 @@ async function main() {
     assert.match(motors, /loop-rate reason exactly as reported/);
     assert.equal(Object.keys(LOOP_RATE_REASON_TEXT).filter(k => /1 kHz loop/.test(LOOP_RATE_REASON_TEXT[k])).join(), "dshot-bidir-polled-listen");
   });
+  await test("B1: a refused set is never applied optimistically: set, then get + loop_rate; previous value kept; FW refusal verbatim", async () => {
+    // Replies recorded from the tmotor_f7_v2 host firmware (drivers/cli.c
+    // "set failed: loop_rate_hz %lu not supported on %s (no 8 kHz gyro path)").
+    const FW_REFUSAL = "set failed: loop_rate_hz 8000 not supported on tmotor_f7_v2 (no 8 kHz gyro path)";
+    const REPORT = ["loop_rate_api: 1", "loop_rate_setting_hz: 1000", "loop_rate_boot_setting_hz: 1000", "loop_rate_pending_reboot: 0",
+      "loop_rate_profile: 1000/1", "loop_rate_active: 1000/1", "loop_rate_reason: setting", "loop_rate_guard_level: 0",
+      "loop_rate_gyro_odr_hz: 0", "loop_rate_gyro_spi_hz: 0", "loop_rate_end: 1"].join("\r\n") + "\r\n";
+    const sent: string[] = [];
+    const spy: LoopRateSettingHost = {
+      sendCommand: async c => {
+        sent.push(c);
+        if (c === "get loop_rate_hz") return "loop_rate_hz=1000\r\n";
+        if (c === "set loop_rate_hz 8000") return `${FW_REFUSAL}\r\n`;
+        if (c === "loop_rate") return REPORT;
+        throw new Error(`unexpected command ${c}`);
+      },
+      saveSettings: async () => { sent.push("<save>"); },
+    };
+    const before = await readLoopRateSetting(spy);
+    assert.deepEqual(before.get, { kind: "value", value: "1000" });
+    sent.length = 0;
+    const after = await selectLoopRate(spy, before, "8000");
+    assert.deepEqual(sent, ["set loop_rate_hz 8000", "get loop_rate_hz", "loop_rate"], "set, then get, then loop_rate");
+    assert.deepEqual(after.get, { kind: "value", value: "1000" }, "get still returns the previous value");
+    assert.equal(after.report?.settingHz, "1000"); assert.equal(after.report?.pendingReboot, false);
+    assert.equal(after.error, FW_REFUSAL, "error is the FW line verbatim");
+    assert.equal(after.message, "", "no success message for a refused set");
+    const view = loopRateSettingView(after.get, after.report, "1000");
+    assert.equal(view.selected, "1000"); assert.equal(view.display, "1 kHz"); assert.equal(view.pendingReboot, false);
+    assert.ok(!view.notices.some(n => /Pending/.test(n)), "a refused set is never shown as pending");
+  });
+  await test("S1: LoopRateReasonCard markup: the <code> text is exactly the FC token, or unknown", () => {
+    const report = (reason: string | null) => parseLoopRateReport(["loop_rate_api: 1", "loop_rate_setting_hz: 4000", "loop_rate_active: 8000/2",
+      ...(reason === null ? [] : [`loop_rate_reason: ${reason}`]), "loop_rate_end: 1"].join("\r\n"));
+    const render = (r: ReturnType<typeof report>, connected = true) =>
+      renderToStaticMarkup(createElement(LoopRateReasonCard, { report: r, connected })).replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+    const codes = (html: string) => [...html.matchAll(/<code>([\s\S]*?)<\/code>/g)].map(m => m[1]);
+    const setting = render(report("setting"));
+    assert.deepEqual(codes(setting), ["setting"]);
+    assert.ok(setting.includes(LOOP_RATE_REASON_TEXT["setting"]));
+    const future = render(report("some-future-reason"));
+    assert.deepEqual(codes(future), ["some-future-reason"], "an unrecognised token is shown verbatim");
+    assert.match(future, /no description for this reason; it is shown as the controller sent it/);
+    assert.doesNotMatch(future, /No valid loop-rate reason/);
+    const missing = render(report(null));
+    assert.deepEqual(codes(missing), ["unknown"], "a missing reason is unknown");
+    assert.ok(missing.includes("<p class=\"muted\">No valid loop-rate reason in the controller's report: unknown.</p>"), missing);
+    assert.deepEqual(codes(render(report("Bad_Token!"))), ["unknown"], "a malformed reason is unknown");
+    assert.deepEqual(codes(render(null)), ["unknown"], "no report (older FC) is unknown");
+    assert.deepEqual(codes(render(report("dshot-bidir-reply-window"), false)), ["unknown"], "disconnected is unknown");
+    const capped = render(report("dshot-bidir-reply-window"));
+    assert.deepEqual(codes(capped), ["dshot-bidir-reply-window"]);
+    assert.ok(capped.includes("Bidirectional DShot is on: the eRPM reply does not fit an 8 kHz loop period, so the firmware lowers the loop below 8 kHz; the applied rate is the Loop target above."));
+    assert.doesNotMatch(capped, /4 kHz/, "no hardcoded applied rate");
+  });
+  await test("N2: a change of the polled loop target re-reads the report, so a runtime fallback never shows a stale reason", async () => {
+    const w = new LoopTargetWatcher();
+    assert.equal(w.changed(null), false); assert.equal(w.changed("4000"), false, "first target only primes");
+    assert.equal(w.changed("4000"), false); assert.equal(w.changed(null), false, "unknown target ignored");
+    assert.equal(w.changed("1000"), true, "target changed"); assert.equal(w.changed("1000"), false);
+    w.reset(); assert.equal(w.changed("4000"), false, "reset (disconnect) primes again");
+    // Runtime fallback on the mock FC: bidir capture failure drops 8000/2 -> 1000/1.
+    const host = new MockBobFlightHost({ connectDelayMs: 0, loopRateScenario: "bidir-4k" });
+    await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    const watch = new LoopTargetWatcher();
+    let st = await readLoopRateSetting(host);
+    assert.equal(loopRateReasonView(st.report).token, "setting");
+    assert.equal(watch.changed(parseLoopStatus(await host.sendCommand("status")).targetHz), false);
+    host.setMockGates({ loopRateScenario: "bidir-capture-failed" });
+    const target = parseLoopStatus(await host.sendCommand("status")).targetHz;
+    assert.equal(target, "1000");
+    assert.equal(loopRateReasonView(st.report).token, "setting", "without a re-read the token would be stale");
+    assert.equal(watch.changed(target), true, "new target triggers a re-read");
+    st = await readLoopRateSetting(host);
+    assert.equal(loopRateReasonView(st.report).token, "dshot-bidir-capture-failed", "reason refreshed with the new target");
+    await host.disconnect();
+    // Setup wiring: every polled target goes through the watcher; a change re-arms the existing read effect.
+    const setup = code(source("../src/pages/SetupPage.tsx"));
+    assert.match(setup, /const loopTargetWatcher = useMemo\(\(\) => new LoopTargetWatcher\(\), \[\]\);/);
+    assert.match(setup, /if \(loopTargetWatcher\.changed\(loopTarget\)\) setLoopSettingRead\(false\);/);
+    assert.match(setup, /loopTargetWatcher\.reset\(\);/);
+    assert.match(setup, /\}, \[loopTargetWatcher, connected, loopTarget, busy, postFlashGate\]\);/);
+    assert.match(setup, /if \(!loopSettingRead && !busy && !postFlashGate\) void runLoopRateAction\(\(\) => readLoopRateSetting\(host\)\);/);
+  });
   await test("CI runs the loop-rate tests and the firmware contract", () => {
     const ci = source("../../../.github/workflows/ci.yml");
-    for (const step of ["npm --prefix protocol run test:loop-rate", "npm --prefix ui run test:loop-rate", "node ../.github/scripts/loop-status-contract.cjs", "npm --prefix ui run test:storage"])
+    for (const step of ["npm --prefix protocol run test:loop-rate", "npm --prefix ui run test:loop-rate", "npm --prefix ui run test:setup-poll", "node ../.github/scripts/loop-status-contract.cjs", "npm --prefix ui run test:storage"])
       assert.ok(ci.includes(step), step);
+    assert.ok(ci.includes("cmake --build ../bobflight-firmware/build-contract-tmotor --target bobflight_host"), "CI builds the tmotor_f7_v2 host for the no-8k mock contract");
+    assert.match(source("../package.json"), /"test:setup-poll": "node scripts\/run-setup-loop-poll\.mjs"/, "SetupPage render test (QA #57 poll kick) runs in CI");
     const pkg = source("../../protocol/package.json");
     assert.match(pkg, /"test:loop-rate": "tsc && node tests\/loop-rate\.cjs && node tests\/loop-rate-setting\.cjs"/, "protocol setting tests run in CI via test:loop-rate");
   });

@@ -58,3 +58,25 @@ export async function saveLoopRate(host: LoopRateSettingHost, current: LoopRateS
   }
   return { ...(await readLoopRateSetting(host)), message: LOOP_RATE_SAVED_MESSAGE };
 }
+
+/**
+ * Runtime fallbacks (overrun guard, bidir capture failure) change the applied
+ * rate without any selector action. Setup feeds every polled `loop_target_hz`
+ * here; a change from the last target seen means the `loop_rate` report (and
+ * its reason) must be re-read so a new target is never shown next to a stale
+ * reason. Unknown targets (null) are ignored; the first known target only
+ * primes the watcher (the connect-time read already covers it).
+ */
+export class LoopTargetWatcher {
+  private last: string | null = null;
+  reset(): void {
+    this.last = null;
+  }
+  /** true when `target` differs from the last known target: re-read the setting and report. */
+  changed(target: string | null): boolean {
+    if (target === null) return false;
+    const prev = this.last;
+    this.last = target;
+    return prev !== null && prev !== target;
+  }
+}
