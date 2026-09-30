@@ -6,6 +6,7 @@
 #include "drivers/power.h"
 #include "drivers/dshot.h"
 #include "board/pins_generated.h"
+#include "sched/loop_rate_setting.h"
 #include <stdarg.h>
 
 /* These commands report stored configuration, never telemetry or arm state as settings. */
@@ -17,9 +18,9 @@ static void cmd_storage(void)
     flight_enabled=1;
 #endif
     int n = snprintf(buf, sizeof(buf),
-        "storage_api: 1\r\nbackend: %s\r\nschema: 6\r\nstate: %s\r\n"
+        "storage_api: 1\r\nbackend: %s\r\nschema: 7\r\nstate: %s\r\n"
         "dirty: %u\r\ngeneration: %lu\r\nlast_error: %s\r\n"
-        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d\r\n"
+        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz\r\n"
         "armed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nflight_enabled: %u\r\nstorage_end: 1\r\n",
         persist_backend(), persist_state(), persist_dirty() ? 1u : 0u,
         (unsigned long)persist_generation(), persist_last_error(),
@@ -64,9 +65,9 @@ static void cmd_config_export(bool full)
     char out[1800]; size_t used = 0;
     const board_t *b = board_get();
     bool ok = export_append(out, sizeof(out), &used,
-        "# bobflight_config: 1\r\n# schema: 6\r\n# board: %s\r\n"
+        "# bobflight_config: 1\r\n# schema: 7\r\n# board: %s\r\n"
         "# firmware: %s\r\n# kind: %s\r\n# mode_count: %u\r\n"
-        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d\r\n"
+        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz\r\n"
         "# excludes: gyro_calibration\r\n",
         b ? b->board_id : "unknown", BOBFLIGHT_VERSION_STRING, full ? "dump" : "diff", (unsigned)MODE_COUNT);
     gyro_calibration_info_t cal;gyro_calibration_info(&cal);
@@ -85,6 +86,8 @@ static void cmd_config_export(bool full)
         if (ok && (full || value != defaults[i].value))
             ok = export_append(out, sizeof(out), &used, "set %s %.9g\r\n", defaults[i].name, (double)value);
     }
+    if (ok && (full || loop_rate_setting_get() != loop_rate_setting_default_hz()))
+        ok = export_append(out, sizeof(out), &used, "set loop_rate_hz %lu\r\n", (unsigned long)loop_rate_setting_get());
     if (ok && b && b->rx_uart > 0 && (full || b->rx_uart != BOARD_GENERATED_RX_UART))
         ok = export_append(out, sizeof(out), &used, "receiver_uart %u\r\n", b->rx_uart);
     if (ok && (full || strcmp(crsf_map(), "AETR") != 0))

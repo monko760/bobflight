@@ -54,6 +54,8 @@ void gyro_calibration_tick(void);
 void gyro_calibration_touch(void);
 
 void gyro_init(void);
+/* Apply the loop_rate_hz output rate (MPU6000 on the 8 kHz board only). */
+bool gyro_select_output_rate(bool fast);
 void gyro_begin_calibration(void);
 bool gyro_calibrated(void);
 /** Stricter pre-arm readiness: gyro bias alone does not validate gravity. */

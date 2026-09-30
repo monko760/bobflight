@@ -15,6 +15,7 @@
 #ifdef BOBFLIGHT_HOST
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #else
 #include "hal/stm32f7/boot_crumb.h"
 #endif
@@ -65,6 +66,11 @@ int main(void)
 #ifdef BOBFLIGHT_HOST
     /* Host smoke: run a bounded number of slices then exit. */
     const unsigned slices = 20000;
+    /* Test-only warm reboot: BOBFLIGHT_HOST_REBOOT_REINIT=1 re-runs app_init
+     * on `reboot` with the process-local flash model kept, so save + reboot
+     * paths (e.g. loop_rate_hz) are exercised end to end. Default: exit. */
+    const char *reinit = getenv("BOBFLIGHT_HOST_REBOOT_REINIT");
+    unsigned reboots = 0;
     for (unsigned i = 0; i < slices; i++) {
         scheduler_run();
         /* Host harness: cascade can eat every slice in a tight loop.
@@ -72,6 +78,11 @@ int main(void)
         cli_poll();
         loop_rate_tick();
         if (cli_reboot_requested()) {
+            if (reinit && strcmp(reinit, "1") == 0 && reboots < 4u) {
+                reboots++;
+                if (!app_init()) { fprintf(stderr, "app_init failed after reboot\n"); return 1; }
+                continue;
+            }
             break;
         }
     }
