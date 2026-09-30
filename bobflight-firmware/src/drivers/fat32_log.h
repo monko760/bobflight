@@ -120,6 +120,10 @@ struct fatlog {
 
     /* Clean / Dirty bit state */
     uint32_t fat_entry1_val;
+
+    /* RAM-only next-free allocation hint. On-card FSInfo hints are invalidated
+     * while the file is open; scanning must not restart at cluster 2. */
+    uint32_t alloc_hint;
 };
 
 /**
@@ -151,6 +155,13 @@ int fatlog_poll(fatlog_t *fs, uint64_t now);
  * @return true if accepted, false if not ready, invalid used, or already short final.
  */
 bool fatlog_write(fatlog_t *fs, const uint8_t sector[FATLOG_SECTOR_SIZE], uint16_t used, uint64_t now);
+
+/**
+ * @brief Rewrite the file's first data sector (e.g. patch a fixed-width header
+ * field) with full-sector readback. Only in READY with >=512 bytes written.
+ * Does not change file size or allocation. Returns false if refused.
+ */
+bool fatlog_rewrite_first_sector(fatlog_t *fs, const uint8_t sector[FATLOG_SECTOR_SIZE], uint64_t now);
 
 /**
  * @brief Finish log file writing, finalize file size, update FSInfo, and clean volume status bit.

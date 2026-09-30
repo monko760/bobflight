@@ -38,6 +38,14 @@ export {
   MockSerial,
   MOCK_PORT_PATH,
 } from "./mock-serial";
+export {
+  MockOnboardBlackbox,
+  MOCK_BLACKBOX_UNAVAILABLE,
+  formatOnboardStatus,
+  formatOnboardStatusV1,
+  formatDropPct,
+} from "./blackbox-mock";
+export type { MockBlackboxCard, OnboardStatusFields } from "./blackbox-mock";
 export type { MockSerialOptions, DshotTelemStatus } from "./mock-serial";
 export { DSHOT_TELEM_STATUSES } from "./mock-serial";
 export {

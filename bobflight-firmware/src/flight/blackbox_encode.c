@@ -37,11 +37,22 @@ static bool unsigned_field(unsigned i){return i<2u || i>=35u;}
 static size_t add(char *b,size_t n,size_t cap,const char *s){ size_t k=strlen(s);if(n>=cap||k>=cap-n)return cap;memcpy(b+n,s,k);b[n+k]=0;return n+k; }
 size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
  if(!dst||!m||!m->revision||!m->config)return 0; uint32_t hz=m->sample_hz;const char *revision=m->revision;
- if((hz!=250u&&hz!=500u&&hz!=1000u)||m->loop_hz<hz||m->loop_hz>8000u||m->loop_hz%hz||(m->dshot_kbps!=300&&m->dshot_kbps!=600))return 0;
+ if((hz!=125u&&hz!=250u&&hz!=500u&&hz!=1000u)||m->loop_hz<hz||m->loop_hz>8000u||m->loop_hz%hz||(m->dshot_kbps!=300&&m->dshot_kbps!=600))return 0;
  size_t len=0;while(revision[len]){if(len>=96u||!((revision[len]>='a'&&revision[len]<='z')||(revision[len]>='A'&&revision[len]<='Z')||(revision[len]>='0'&&revision[len]<='9')||revision[len]=='.'||revision[len]=='-'||revision[len]=='_'))return 0;len++;}
  if(!len)return 0; char b[4096],t[160];size_t n=0;
  n=add(b,n,sizeof b,"H Product:Blackbox flight data recorder by Nicholas Sherlock\nH Data version:2\nH Firmware type:BobFlight\nH Firmware revision:BobFlight "); n=add(b,n,sizeof b,revision);n=add(b,n,sizeof b,"\n");
- snprintf(t,sizeof t,"H I interval:%lu\nH P interval:1/%lu\n",(unsigned long)(m->loop_hz/hz),(unsigned long)(m->loop_hz/hz));n=add(b,n,sizeof b,t);
+ {
+  /* Fixed-width rate block: the BobFlight line is space-padded so the block is
+   * always BLACKBOX_RATE_BLOCK_BYTES long (in-place effective-rate patch). */
+  uint32_t requested=m->requested_hz?m->requested_hz:hz;const char *reason=m->rate_reason?m->rate_reason:"default";
+  if(requested>1000u||requested<hz||strlen(reason)>24u)return 0;
+  for(const char *r=reason;*r;r++)if(!((*r>='a'&&*r<='z')||*r=='-'))return 0;
+  int k=snprintf(t,sizeof t,"H I interval:%lu\nH P interval:1/%lu\nH BobFlight log_rate_hz:%lu requested_hz:%lu reason:%s",
+   (unsigned long)(m->loop_hz/hz),(unsigned long)(m->loop_hz/hz),(unsigned long)hz,(unsigned long)requested,reason);
+  if(k<0||(size_t)k>=BLACKBOX_RATE_BLOCK_BYTES)return 0;
+  while((size_t)k<BLACKBOX_RATE_BLOCK_BYTES-1u)t[k++]=' ';
+  t[k++]='\n';t[k]=0;n=add(b,n,sizeof b,t);
+ }
  snprintf(t,sizeof t,"H looptime:%lu\n",(unsigned long)(1000000u/m->loop_hz));n=add(b,n,sizeof b,t);
  n=add(b,n,sizeof b,"H gyro.scale:30efe050\nH minthrottle:1000\nH maxthrottle:2000\nH motorOutput:48,2047\n"); snprintf(t,sizeof t,"H motor_pwm_protocol:%u\n",m->dshot_kbps==300?6:7);n=add(b,n,sizeof b,t);
  const bf_config_t *c=m->config; const float values[]={c->rate_max_roll,c->rate_max_pitch,c->rate_max_yaw,c->rate_expo,c->pid_roll_p,c->pid_roll_i,c->pid_roll_d,c->pid_pitch_p,c->pid_pitch_i,c->pid_pitch_d,c->pid_yaw_p,c->pid_yaw_i,c->pid_yaw_d}; const char *keys[]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo","pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d","pid_yaw_p","pid_yaw_i","pid_yaw_d"};

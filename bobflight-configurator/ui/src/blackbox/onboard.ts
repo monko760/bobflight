@@ -18,6 +18,16 @@ export const ONBOARD_STATES = [
 
 export type OnboardState = (typeof ONBOARD_STATES)[number];
 
+/** Rates the firmware can log at (125 is the auto-lower floor). */
+export const ONBOARD_RATES_HZ = [125, 250, 500, 1000] as const;
+/** Documented `blackbox_rate_reason` values (firmware api 2). */
+export const ONBOARD_RATE_REASONS = ['default', 'auto-lowered-card-slow'] as const;
+export type OnboardRateReason = (typeof ONBOARD_RATE_REASONS)[number];
+/** Firmware recorder FIFO capacity (samples). */
+export const ONBOARD_QUEUE_CAPACITY = 64;
+/** Shown for any value the FC did not report. Never replaced by 0 or 500. */
+export const ONBOARD_UNKNOWN = 'unknown';
+
 export interface OnboardSnapshot {
   api: number;
   state: OnboardState | 'unavailable';
@@ -25,7 +35,15 @@ export interface OnboardSnapshot {
   file: string;
   bytes: number;
   frames: number;
-  rateHz: number;
+  /** Effective logging rate as reported in `blackbox_rate_hz`; null = not reported. */
+  rateHz: number | null;
+  /** `blackbox_rate_requested_hz` (api 2); null = not reported (api 1 or missing). */
+  requestedHz: number | null;
+  /** `blackbox_rate_reason` (api 2); null = not reported (api 1 or missing). */
+  rateReason: OnboardRateReason | string | null;
+  /** `blackbox_drop_pct` exactly as the FC sent it (e.g. "85.2"); never computed
+   * by the Configurator. null = not reported (api 1 or missing). */
+  dropPct: string | null;
   dropped: number;
   missed: number;
   invalid: number;
@@ -33,6 +51,38 @@ export interface OnboardSnapshot {
   active: boolean;
   unavailable: boolean;
   raw: string;
+}
+
+export function formatOnboardHz(hz: number | null): string {
+  return hz === null ? ONBOARD_UNKNOWN : `${hz} Hz`;
+}
+
+/** FC-sent percent string, verbatim, or "unknown". */
+export function formatOnboardDropPct(pct: string | null): string {
+  return pct === null ? ONBOARD_UNKNOWN : `${pct}%`;
+}
+
+export function formatOnboardRateReason(reason: string | null): string {
+  return reason === null ? ONBOARD_UNKNOWN : reason;
+}
+
+/** True only when the FC explicitly reports the card-slow auto-lower. */
+export function onboardAutoLowered(s: Pick<OnboardSnapshot, 'rateReason'>): boolean {
+  return s.rateReason === 'auto-lowered-card-slow';
+}
+
+/** Effective rate; the auto-lowered note appears only for that reported reason. */
+export function describeOnboardRate(s: Pick<OnboardSnapshot, 'rateHz' | 'requestedHz' | 'rateReason'>): string {
+  const rate = formatOnboardHz(s.rateHz);
+  if (onboardAutoLowered(s)) {
+    return `${rate} (requested ${formatOnboardHz(s.requestedHz)}; auto-lowered because the SD card could not keep up)`;
+  }
+  return rate;
+}
+
+/** "N dropped (P%)" with the FC's own percent string, or "(unknown)". */
+export function describeOnboardDrops(s: Pick<OnboardSnapshot, 'dropped' | 'dropPct'>): string {
+  return `${s.dropped.toLocaleString('en-US')} dropped (${formatOnboardDropPct(s.dropPct)})`;
 }
 
 export function parseOnboardReply(raw: string): OnboardSnapshot {
@@ -46,7 +96,10 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
     file: '',
     bytes: 0,
     frames: 0,
-    rateHz: 500,
+    rateHz: null,
+    requestedHz: null,
+    rateReason: null,
+    dropPct: null,
     dropped: 0,
     missed: 0,
     invalid: 0,
@@ -82,14 +135,13 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
     fields[match[1]]=match[2];
   }
 
-  const requiredFields = [
+  const requiredFields: string[] = [
     'blackbox_api',
     'blackbox_state',
     'blackbox_reason',
     'blackbox_file',
     'blackbox_bytes',
     'blackbox_frames',
-    'blackbox_rate_hz',
     'blackbox_dropped',
     'blackbox_missed',
     'blackbox_invalid',
@@ -100,15 +152,16 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
 
   if (
     fields.blackbox_end !== '1' ||
-    fields.blackbox_api !== '1' ||
+    (fields.blackbox_api !== '1' && fields.blackbox_api !== '2') ||
     !ONBOARD_STATES.includes(fields.blackbox_state as OnboardState) ||
     (fields.blackbox_active !== '0' && fields.blackbox_active !== '1')
   ) {
     throw new Error(
-      'Incomplete or unsupported blackbox reply. Firmware with blackbox:1 support is required.'
+      'Incomplete or unsupported blackbox reply. Firmware with blackbox api 1 or 2 support is required.'
     );
   }
 
+  const api = Number(fields.blackbox_api);
   for (const req of requiredFields) {
     if (!Object.hasOwn(fields, req)) {
       throw new Error(
@@ -124,18 +177,62 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
     }
     return Number(val);
   };
+  const isRate = (hz: number) => (ONBOARD_RATES_HZ as readonly number[]).includes(hz);
+  /** A reported rate must be a supported rate; a missing one stays null ("unknown"). */
+  const optionalRate = (key: string): number | null => {
+    if (!Object.hasOwn(fields, key)) return null;
+    const hz = uint(key);
+    if (!isRate(hz)) throw new Error(`Unsupported ${key} in blackbox reply.`);
+    return hz;
+  };
 
   const expectedActive=['initializing','preparing','writing-header','recording','draining','closing'].includes(fields.blackbox_state);
-  if(expectedActive !== (fields.blackbox_active==='1') || uint('blackbox_rate_hz')!==500 || uint('blackbox_queue')>64 || !/^(BFL\d{5}\.BBL)?$/.test(fields.blackbox_file))throw new Error('Inconsistent Blackbox state or metadata.');
+  const rateHz = optionalRate('blackbox_rate_hz');
+  // api 1 firmware only ever logged at a fixed 500 Hz; anything else is malformed.
+  if(expectedActive !== (fields.blackbox_active==='1') || (api === 1 && rateHz !== null && rateHz !== 500) || uint('blackbox_queue')>ONBOARD_QUEUE_CAPACITY || !/^(BFL\d{5}\.BBL)?$/.test(fields.blackbox_file))throw new Error('Inconsistent Blackbox state or metadata.');
+  const frames = uint('blackbox_frames');
+  const dropped = uint('blackbox_dropped');
+  // api 1 FCs do not report these: they stay null and render as "unknown".
+  // Nothing is inferred, defaulted or computed by the Configurator.
+  let requestedHz: number | null = null;
+  let rateReason: OnboardRateReason | string | null = null;
+  let dropPct: string | null = null;
+  if (api >= 2) {
+    requestedHz = optionalRate('blackbox_rate_requested_hz');
+    if (Object.hasOwn(fields, 'blackbox_rate_reason')) {
+      const reason = fields.blackbox_rate_reason;
+      // Documented reasons are typed; a future documented token is shown verbatim.
+      if (!/^[a-z0-9-]{1,40}$/.test(reason)) {
+        throw new Error('Invalid blackbox_rate_reason in blackbox reply.');
+      }
+      rateReason = reason;
+    }
+    if (Object.hasOwn(fields, 'blackbox_drop_pct')) {
+      const pct = fields.blackbox_drop_pct;
+      if (!/^\d{1,3}\.\d$/.test(pct) || Number(pct) > 100) {
+        throw new Error('Invalid blackbox_drop_pct in blackbox reply.');
+      }
+      dropPct = pct; // displayed verbatim, never recomputed
+    }
+    // Consistency is checked only between values the FC actually reported.
+    if (rateHz !== null && requestedHz !== null) {
+      if (rateHz > requestedHz || (rateReason === 'default' && rateHz !== requestedHz) || (rateReason === 'auto-lowered-card-slow' && rateHz >= requestedHz)) {
+        throw new Error('Inconsistent Blackbox rate metadata.');
+      }
+    }
+  }
   return {
-    api: Number(fields.blackbox_api),
+    api,
     state: fields.blackbox_state as OnboardState,
     reason: fields.blackbox_reason || '',
     file: fields.blackbox_file || '',
     bytes: uint('blackbox_bytes'),
-    frames: uint('blackbox_frames'),
-    rateHz: uint('blackbox_rate_hz'),
-    dropped: uint('blackbox_dropped'),
+    frames,
+    rateHz,
+    requestedHz,
+    rateReason,
+    dropPct,
+    dropped,
     missed: uint('blackbox_missed'),
     invalid: uint('blackbox_invalid'),
     queue: uint('blackbox_queue'),

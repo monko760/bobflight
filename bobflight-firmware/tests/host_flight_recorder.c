@@ -25,5 +25,16 @@ int main(void){
  init();assert(recorder_start(1000));s.time_us=12345;s.iteration=3;assert(recorder_capture(&s));assert(recorder_pop(&out)&&out.time_us==12345);s.time_us=12000;assert(!recorder_capture(&s));s.time_us=14000;s.iteration=2;assert(!recorder_capture(&s));assert(recorder_stats()->total_regressed==2);
  s.iteration=4000000;s.time_us=UINT32_MAX-1;assert(recorder_capture(&s));assert(recorder_pop(&out)&&out.time_us==UINT32_MAX-1);s.time_us=UINT32_MAX;assert(!recorder_capture(&s));s.time_us=0;assert(!recorder_capture(&s));assert(recorder_stats()->total_regressed==3);
  init();assert(recorder_start(500));s.time_us=UINT32_MAX;assert(recorder_capture(&s));assert(recorder_pop(&out)&&out.time_us==UINT32_MAX);assert(!recorder_capture(&s));
- puts("PASS recorder: FIFO/retention; 250/500/1000Hz; O(1) missed slots; invalid/regressed inputs; timestamp extremes; cumulative loss");
+ /* 125 Hz support and deterministic in-session lowering (never raising). */
+ init();assert(recorder_start(125));recorder_stop();recorder_reset();
+ init();assert(!recorder_lower_rate(250));assert(recorder_start(500));assert(!recorder_lower_rate(500)&&!recorder_lower_rate(1000)&&!recorder_lower_rate(300));
+ s.time_us=0;s.iteration=0;assert(recorder_capture(&s));s.time_us=2000;s.iteration=1;assert(recorder_capture(&s));
+ assert(recorder_lower_rate(250)&&recorder_stats()->rate_hz==250);
+ s.time_us=4000;s.iteration=2;assert(recorder_capture(&s)); /* existing deadline kept */
+ s.time_us=6000;s.iteration=3;assert(!recorder_capture(&s)); /* decimated at 4 ms period */
+ s.time_us=8000;s.iteration=4;assert(recorder_capture(&s));
+ assert(recorder_lower_rate(125)&&!recorder_lower_rate(250)&&recorder_stats()->rate_hz==125);
+ s.time_us=12000;s.iteration=5;assert(recorder_capture(&s));s.time_us=16000;s.iteration=6;assert(!recorder_capture(&s));s.time_us=20000;s.iteration=7;assert(recorder_capture(&s));
+ recorder_stop();assert(!recorder_lower_rate(125));
+ puts("PASS recorder: FIFO/retention; 125/250/500/1000Hz; in-session lower-only rate; O(1) missed slots; invalid/regressed inputs; timestamp extremes; cumulative loss");
 }

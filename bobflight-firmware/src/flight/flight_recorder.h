@@ -52,6 +52,8 @@ typedef struct {
 void recorder_reset(void);
 bool recorder_start(uint32_t rate_hz);
 void recorder_stop(void);
+/* Lower the active decimation rate (125/250/500/1000 Hz only, strictly lower). */
+bool recorder_lower_rate(uint32_t rate_hz);
 bool recorder_capture(const flight_log_sample_t *sample);
 bool recorder_pop(flight_log_sample_t *out_sample);
 bool recorder_active(void);

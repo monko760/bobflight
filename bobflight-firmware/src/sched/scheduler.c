@@ -57,3 +57,11 @@ void scheduler_run(void){
  bg_rx_poll();bg_cli_poll();bg_failsafe_tick();g_stats.bg_runs++;
 }
 const scheduler_stats_t *scheduler_stats(void){return &g_stats;}
+uint32_t scheduler_bg_budget_us(uint64_t now){
+ if(!g_stats.gyro_period_us)return SCHEDULER_BG_UNSCHEDULED_US;
+ if(now>=g_next_gyro_us)return 0;
+ uint64_t left=g_next_gyro_us-now;
+ if(left<=SCHEDULER_BG_GUARD_US)return 0;
+ left-=SCHEDULER_BG_GUARD_US;
+ return left>SCHEDULER_BG_MAX_US?SCHEDULER_BG_MAX_US:(uint32_t)left;
+}

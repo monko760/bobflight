@@ -27,11 +27,19 @@ void recorder_reset(void){
  head=tail=count=period=last_time=last_iteration=0;next_due=0;have_time=false;
  memset(&stats,0,sizeof stats);stats.queue_capacity=FLIGHT_RECORDER_QUEUE_CAPACITY;
 }
+static bool supported(uint32_t hz){return hz==125u||hz==250u||hz==500u||hz==1000u;}
 bool recorder_start(uint32_t hz){
- if(active||count||(hz!=250u&&hz!=500u&&hz!=1000u))return false;
+ if(active||count||!supported(hz))return false;
  recorder_reset();period=1000000u/hz;stats.rate_hz=hz;active=true;return true;
 }
 void recorder_stop(void){active=false;}
+/* Deterministic in-session decimation: only ever lowers the rate. The next
+ * accepted slot keeps the existing deadline; later slots use the new period.
+ * Queued samples are untouched; no sample is fabricated or re-timed. */
+bool recorder_lower_rate(uint32_t hz){
+ if(!active||!supported(hz)||hz>=stats.rate_hz)return false;
+ period=1000000u/hz;stats.rate_hz=hz;return true;
+}
 bool recorder_active(void){return active;}
 bool recorder_pop(flight_log_sample_t *s){
  if(!s||!count)return false;

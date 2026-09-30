@@ -17,3 +17,5 @@ With props removed, record ten seconds of board motion and transmitter movement.
 ## Onboard follow-up
 
 Use a separate MCU-timestamped sample format and bounded queue. Establish the actual board's storage wiring and capability before implementing a nonblocking SD backend. Log overflow and timing gaps explicitly, retain configuration flash separately, and test media removal/full/error handling without delaying control work. USB snapshots are useful for bench diagnosis, not PID frequency-response analysis or flight qualification.
+
+The onboard SD recorder now exists; see [BLACKBOX_RECORDING.md](../../BLACKBOX_RECORDING.md) and [BLACKBOX-THROUGHPUT.md](BLACKBOX-THROUGHPUT.md) for its rate/drop reporting.

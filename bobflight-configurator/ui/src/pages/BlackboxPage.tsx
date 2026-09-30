@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { useHost } from '../hooks/useHost';
 import { Recorder, QUERIES, csv, type Query } from '../blackbox/recorder';
 import { SdCardController, type SdCommand } from '../blackbox/sd-card';
-import { OnboardController, type OnboardCommand } from '../blackbox/onboard';
+import {
+  OnboardController,
+  describeOnboardRate,
+  formatOnboardDropPct,
+  formatOnboardHz,
+  formatOnboardRateReason,
+  onboardAutoLowered,
+  type OnboardCommand,
+} from '../blackbox/onboard';
 
 export function BlackboxPage({ visible }: { visible: boolean }) {
   const { host, connectionStatus, postFlashGate, status } = useHost();
@@ -227,8 +235,16 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
                 {onboard.snapshot.frames.toLocaleString()} frames (encoded;
                 committed when state is done)
               </dd>
-              <dt>Target sampling rate</dt>
-              <dd>{onboard.snapshot.rateHz} Hz</dd>
+              <dt>Effective logging rate</dt>
+              <dd>{describeOnboardRate(onboard.snapshot)}</dd>
+              <dt>Requested logging rate</dt>
+              <dd>{formatOnboardHz(onboard.snapshot.requestedHz)}</dd>
+              <dt>Rate reason</dt>
+              <dd>{formatOnboardRateReason(onboard.snapshot.rateReason)}</dd>
+              <dt>Dropped frames</dt>
+              <dd>{onboard.snapshot.dropped.toLocaleString()}</dd>
+              <dt>Dropped percent (reported by FC)</dt>
+              <dd>{formatOnboardDropPct(onboard.snapshot.dropPct)}</dd>
               <dt>Status detail / reason</dt>
               <dd>{onboard.snapshot.reason || 'None reported'}</dd>
             </dl>
@@ -248,7 +264,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
                 <div>
                   <dt>Dropped frames</dt>
                   <dd style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
-                    {onboard.snapshot.dropped}
+                    {onboard.snapshot.dropped} ({formatOnboardDropPct(onboard.snapshot.dropPct)})
                   </dd>
                 </div>
                 <div>
@@ -272,6 +288,14 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
               </dl>
             </fieldset>
 
+            {onboardAutoLowered(onboard.snapshot) && (
+              <p role="status">
+                The SD card could not keep up at {formatOnboardHz(onboard.snapshot.requestedHz)}, so the
+                controller lowered logging to {formatOnboardHz(onboard.snapshot.rateHz)} for this session
+                (auto-lowered-card-slow). The file header states the effective rate;
+                frames lost before the change remain counted above. Consider a faster card.
+              </p>
+            )}
             {onboard.snapshot.dropped > 0 && <p role="alert">Samples were lost during recording. An empty final queue does not undo those losses. Preserve the file and final status for diagnosis; do not treat this as a complete tuning log.</p>}
             <p>
               <button

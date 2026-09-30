@@ -8,6 +8,7 @@ import { EventEmitter } from "events";
 import { MockMotorBench } from "./bench-mock";
 import { mockSensorReply } from "./sensor-mock";
 import { MockReceiver } from "./receiver-mock";
+import { MockOnboardBlackbox, type MockBlackboxCard } from "./blackbox-mock";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -54,6 +55,11 @@ export interface MockSerialOptions {
    * Does not invent live eRPM; erpm is emitted only when status is `ok`.
    */
   dshotTelemByMotor?: Partial<Record<1 | 2 | 3 | 4, DshotTelemStatus>>;
+  /**
+   * Onboard Blackbox simulation (firmware status api 2). Default "none" keeps
+   * the honest "no physical SD card" reply; "ok"/"slow" are explicit sims.
+   */
+  blackboxCard?: MockBlackboxCard;
 }
 
 /**
@@ -69,6 +75,7 @@ export class MockSerial extends EventEmitter {
   private bench: MockMotorBench;
   private modesPorts = new MockPortsModes();
   private receiver = new MockReceiver();
+  private blackbox: MockOnboardBlackbox;
   private armed = false;
   private rebootRequested = false;
   /** R0c RAM-only bidir flag (default off). */
@@ -96,6 +103,7 @@ export class MockSerial extends EventEmitter {
       boardId: opts.boardId ?? "mock-board",
     };
     this.telemByMotor = { ...(opts.dshotTelemByMotor ?? {}) };
+    this.blackbox = new MockOnboardBlackbox(opts.blackboxCard ?? "none");
     this.modesPorts.reset();
     this.dshotBidir = false;
     this.settings = cloneDefaultSettingValues();
@@ -180,7 +188,7 @@ export class MockSerial extends EventEmitter {
     if (line.length === 0) return;
     if(line === "bl" || line === "bl discard"){this.emitData("bl unavailable: mock transport has no ROM bootloader\r\n");return;}
     if(line === "pid_diag" || line.startsWith("pid_diag ")){this.emitData("pid_diag_available: no\r\nreason: mock-no-hardware\r\nmotor_output: disabled\r\npid_diag_end: 1\r\n");return;}
-    if(line === "blackbox start" || line === "blackbox stop" || line === "blackbox status"){this.emitData("blackbox unavailable: mock has no physical SD card\r\nblackbox_end: 1\r\n");return;}
+    {const bb=this.blackbox.handle(line,this.armed);if(bb!==null){this.emitData(bb);return;}}
     if(line.startsWith("sd read")){this.emitData("sd_data_error: unavailable-mock\r\nsd_data_end: 1\r\n");return;}
     if(line === "sd probe" || line === "sd status" || line === "sd cancel"){this.emitData("sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n");return;}
     if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
