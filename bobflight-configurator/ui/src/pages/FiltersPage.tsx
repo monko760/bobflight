@@ -318,7 +318,7 @@ export function FiltersPage() {
           reports the result below; its reply is shown as sent.
           {!supported && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
         </p>
-        <table className="tuning-grid">
+        <table style={{ width: "100%", marginTop: "0.75rem" }}>
           <thead>
             <tr><th>Notch</th><th>Enabled</th><th>Centre (Hz)</th><th>Cutoff (Hz)</th><th>Active</th><th>Reason</th></tr>
           </thead>
