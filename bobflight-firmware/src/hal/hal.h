@@ -93,6 +93,9 @@ hal_spi_bus_t *hal_spi_open(unsigned bus_index);
 hal_spi_bus_t *hal_spi_open_cfg(const hal_spi_cfg_t *cfg);
 bool hal_spi_transfer(hal_spi_bus_t *bus, hal_pin_t cs,
                       const uint8_t *tx, uint8_t *rx, size_t len);
+/** Re-clock an open, idle bus to the fastest rate <= max_hz. Returns the
+ *  actual SCK rate in Hz, or 0 (bus unchanged) when not possible. */
+uint32_t hal_spi_set_hz(hal_spi_bus_t *bus, uint32_t max_hz);
 
 /* ---- UART ---- */
 typedef struct hal_uart hal_uart_t;

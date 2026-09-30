@@ -1,3 +1,4 @@
+/* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useMemo, useState } from 'react';
 import { useHost } from '../hooks/useHost';
 import { Recorder, QUERIES, csv, type Query } from '../blackbox/recorder';
@@ -11,6 +12,7 @@ import {
   formatOnboardHz,
   formatOnboardRateReason,
   onboardAutoLowered,
+  onboardEffectiveHz,
   type OnboardCommand,
 } from '../blackbox/onboard';
 
@@ -210,6 +212,10 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             ? 'Connect to the controller to manage onboard recording.'
             : onboard.pending
             ? 'Communicating with controller…'
+            : onboard.snapshot && onboard.stale
+            ? `Status stale: the latest reply could not be read. Last known state: ${onboard.snapshot.state}${
+                onboard.snapshot.active ? ' (session active; recording controls stay locked)' : ''
+              }`
             : onboard.snapshot
             ? `State: ${onboard.snapshot.state}${
                 onboard.snapshot.active ? ' (session active)' : ''
@@ -221,7 +227,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
 
         {!!onboard.error && <p role="alert">{onboard.error}</p>}
 
-        {onboard.snapshot && !onboard.snapshot.unavailable && (
+        {onboard.snapshot && !onboard.stale && !onboard.snapshot.unavailable && (
           <>
             <dl>
               <dt>Recording state</dt>
@@ -272,7 +278,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
                 <div>
                   <dt>Dropped frames</dt>
                   <dd style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
-                    {onboard.snapshot.dropped} ({formatOnboardDropPct(onboard.snapshot.dropPct)})
+                    {onboard.snapshot.dropped.toLocaleString('en-US')} ({formatOnboardDropPct(onboard.snapshot.dropPct)})
                   </dd>
                 </div>
                 <div>
@@ -299,7 +305,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             {onboardAutoLowered(onboard.snapshot) && (
               <p role="status">
                 The SD card could not keep up at {formatOnboardHz(onboard.snapshot.requestedHz)}, so the
-                controller lowered logging to {formatOnboardHz(onboard.snapshot.rateHz)} for this session
+                controller lowered logging to {formatOnboardHz(onboardEffectiveHz(onboard.snapshot))} for this session
                 (auto-lowered-card-slow). The file header states the effective rate;
                 frames lost before the change remain counted above. Consider a faster card.
               </p>
@@ -333,12 +339,13 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
 
         {onboard.snapshot?.unavailable && (
           <p>
-            Onboard blackbox recording is unavailable on this connection. Demo mode
-            does not simulate physical SD writing.
+            Onboard blackbox recording is unavailable on this connection (the default
+            demo port has no SD card). To try it without hardware, connect one of the
+            SD card demo ports marked “— SIMULATED”; they never write to a physical card.
           </p>
         )}
 
-        {onboard.snapshot && (
+        {onboard.snapshot && !onboard.stale && (
           <details>
             <summary>Onboard blackbox reply</summary>
             <pre style={{ whiteSpace: 'pre-wrap' }}>{onboard.snapshot.raw}</pre>
@@ -429,8 +436,9 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
         )}
         {sd.snapshot?.unavailable && (
           <p>
-            SD diagnostics are unavailable on this connection. Demo mode does not
-            simulate a working card; older firmware may not support the commands.
+            SD diagnostics are unavailable on this connection. Demo ports do not
+            simulate SD diagnostics (the “— SIMULATED” SD card demo ports cover onboard
+            recording only); older firmware may not support the commands.
           </p>
         )}
         {sd.snapshot && (

@@ -70,7 +70,13 @@ export type CliCommand =
   | `get dshot_telem_m${1 | 2 | 3 | 4}`
   | "get dshot_bidir"
   | "set dshot_bidir on"
-  | "set dshot_bidir off";
+  | "set dshot_bidir off"
+  // Persisted loop rate (FW config schema 7; exact values only, see loop-rate-setting.ts)
+  | "get loop_rate_hz"
+  | "set loop_rate_hz 1000"
+  | "set loop_rate_hz 4000"
+  | "set loop_rate_hz 8000"
+  | "loop_rate";
 
 export interface ConnectOptions {
   path: string;

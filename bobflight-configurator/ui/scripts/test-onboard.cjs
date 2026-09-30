@@ -163,6 +163,12 @@ ${extra}blackbox_end: 1\r
   assert.equal(onboardEffectiveHz(v2), 250); assert.equal(describeOnboardApi1Target(v2), null);
   // Unknown api: no effective rate either.
   assert.equal(onboardEffectiveHz({ api: NaN, rateHz: 500 }), null);
+  // #56 nit: the api 1 target row is shown only for api exactly 1, never for a non-integer/unknown api.
+  for (const api of [1.5, 0.5, NaN, 0, 2.5, Infinity]) {
+    assert.equal(describeOnboardApi1Target({ api, rateHz: 500 }), null, `api ${api}: no api 1 row`);
+    assert.equal(onboardEffectiveHz({ api, rateHz: 500 }), null, `api ${api}: no effective rate`);
+  }
+  assert.equal(describeOnboardApi1Target({ api: 1, rateHz: 500 }), '500 Hz');
 
   // 5d. BlackboxPage wiring: rates and drop % come from the helpers; the page computes nothing.
   const page = fs.readFileSync(path.join(__dirname, '../src/pages/BlackboxPage.tsx'), 'utf8');
@@ -171,6 +177,38 @@ ${extra}blackbox_end: 1\r
   assert.match(page, /formatOnboardDropPct\(onboard\.snapshot\.dropPct\)/);
   assert.match(page, /\{onboardAutoLowered\(onboard\.snapshot\) && \(/);
   assert.doesNotMatch(page, /onboard\.snapshot\.(dropped|frames)\s*[*\/+-]|[*\/+-]\s*onboard\.snapshot\.(dropped|frames)|formatDropPct/);
+  // F3: the page shows the FC's drop % and auto-lowered flag through the helpers only, and never divides dropped by frames.
+  {
+    const pageCode = page.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+    const dropCalls = pageCode.match(/formatOnboardDropPct\([^)]*\)/g) || [];
+    assert.ok(dropCalls.length >= 1, 'BlackboxPage uses formatOnboardDropPct');
+    for (const call of dropCalls) assert.match(call, /^formatOnboardDropPct\((?:onboard\.)?snapshot\.dropPct\)$/, call);
+    const loweredCalls = pageCode.match(/onboardAutoLowered\([^)]*\)/g) || [];
+    assert.ok(loweredCalls.length >= 1, 'BlackboxPage uses onboardAutoLowered');
+    for (const call of loweredCalls) assert.match(call, /^onboardAutoLowered\((?:onboard\.)?snapshot\)$/, call);
+    for (const line of pageCode.split('\n')) {
+      assert.doesNotMatch(line, /\bdropped\b[^;]*\/[^/>]*\bframes\b/, `no dropped/frames division: ${line.trim()}`);
+      assert.doesNotMatch(line, /\bframes\b[^;]*\/[^/>]*\bdropped\b/, `no frames/dropped division: ${line.trim()}`);
+      assert.doesNotMatch(line, /(?:toFixed|Math\.round|\* ?100)\b[^;]*\bdropped\b|\bdropped\b[^;]*(?:toFixed|\* ?100)/, `no page-side percent math: ${line.trim()}`);
+    }
+    assert.match(page, /stale/, 'page renders the stale state (F5)');
+    assert.match(page, /\{onboard\.snapshot && !onboard\.stale && !onboard\.snapshot\.unavailable && \(/);
+    assert.doesNotMatch(page, /Demo mode\s+does not simulate physical SD writing/, 'F2: SD demo ports exist');
+    // #56 nits: every rate on the page goes through formatOnboardHz with the FC value or the api-gated
+    // effective rate; no numeric fallback (e.g. `?? 500`) and no raw rateHz; dropped count is grouped.
+    const hzCalls = pageCode.match(/formatOnboardHz\((?:[^()]|\([^()]*\))*\)/g) || [];
+    assert.ok(hzCalls.length >= 3, 'BlackboxPage formats rates with formatOnboardHz');
+    for (const call of hzCalls) assert.match(call, /^formatOnboardHz\((?:onboard\.snapshot\.requestedHz|onboardEffectiveHz\(onboard\.snapshot\))\)$/, call);
+    assert.equal((pageCode.match(/requestedHz/g) || []).length, (pageCode.match(/formatOnboardHz\(onboard\.snapshot\.requestedHz\)/g) || []).length, 'requestedHz only as formatOnboardHz(onboard.snapshot.requestedHz)');
+    assert.doesNotMatch(pageCode, /(?:\?\?|\|\|)\s*\(?\s*\d/, 'no numeric fallback such as ?? 500');
+    assert.doesNotMatch(pageCode, /snapshot\.rateHz/, 'effective rate only via onboardEffectiveHz / describeOnboardRate');
+    assert.match(pageCode, /controller lowered logging to \{formatOnboardHz\(onboardEffectiveHz\(onboard\.snapshot\)\)\}/);
+    assert.match(pageCode, /\{onboard\.snapshot\.dropped\.toLocaleString\('en-US'\)\} \(\{formatOnboardDropPct\(onboard\.snapshot\.dropPct\)\}\)/);
+    assert.doesNotMatch(pageCode, /\{onboard\.snapshot\.dropped\}/, 'dropped count is never shown ungrouped');
+  }
+  // F4: drop percent is 0.0 .. 100.0 with one decimal and no leading zeros.
+  for (const good of ['0.0', '0.1', '9.9', '10.0', '99.9', '100.0']) assert.equal(parseOnboardReply(makeV2({ pct: good })).dropPct, good, good);
+  for (const bad of ['00.0', '05.0', '100.5', '101.0', '1000.0', '.5', '5.', '-0.0', '1.00']) assert.throws(() => parseOnboardReply(makeV2({ pct: bad })), bad);
   assert.equal(parseOnboardReply(makeV2({ rate: 125, pct: '28.4', dropped: 788, frames: 1988 })).rateHz, 125);
   // The FC's own percent string is shown verbatim, even if counters would round differently.
   assert.equal(parseOnboardReply(makeV2({ pct: '1.8' })).dropPct, '1.8');
@@ -300,6 +338,26 @@ ${extra}blackbox_end: 1\r
   broken.setEnabled(true);
   assert.equal(await broken.command('blackbox start'), false);
   assert.match(broken.error, /connection lost/);
+
+  // F5: a reply that fails to parse marks the last good snapshot stale (kept only for the lock), never current.
+  {
+    let replyText = makeV2();
+    const staleCtl = new OnboardController({ getConnectionStatus: () => 'connected', sendCommand: async () => replyText }, () => 0);
+    staleCtl.setEnabled(true);
+    assert.equal(await staleCtl.command('blackbox status'), true);
+    assert.equal(staleCtl.stale, false); assert.equal(staleCtl.snapshot.dropPct, '1.7'); assert.equal(staleCtl.active, true);
+    replyText = replyText.replace('blackbox_drop_pct: 1.7', 'blackbox_drop_pct: 1.75');
+    assert.equal(await staleCtl.command('blackbox status'), false);
+    assert.equal(staleCtl.stale, true, 'bad reply marks stale'); assert.match(staleCtl.error, /drop_pct/);
+    assert.equal(staleCtl.active, true, 'recording lock fails safe while stale'); assert.equal(staleCtl.busy, true);
+    replyText = makeV2();
+    assert.equal(await staleCtl.command('blackbox status'), true);
+    assert.equal(staleCtl.stale, false); assert.equal(staleCtl.error, '');
+    staleCtl.setEnabled(false); assert.equal(staleCtl.stale, false); assert.equal(staleCtl.snapshot, null);
+    const fresh = new OnboardController({ getConnectionStatus: () => 'connected', sendCommand: async () => 'blackbox_api: 2\r\nblackbox_end: 1\r\n' }, () => 0);
+    fresh.setEnabled(true); assert.equal(await fresh.command('blackbox status'), false);
+    assert.equal(fresh.stale, false, 'nothing to mark stale'); assert.equal(fresh.snapshot, null);
+  }
 
   console.log(
     'PASS onboard panel model: status api 1 (new fields unknown) + api 2 default/auto-lowered (effective/requested rate, reason, verbatim drop %, missing keys unknown), explicit start/stop, 1Hz status polling, framing validation, unknown/repeated line safety, no autoStop on hide/disconnect, and error preservation'

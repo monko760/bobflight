@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 const assert=require('node:assert/strict');
 const path=require('node:path');
-const {BobFlightCliClient,MockTransportFactory,ResponseCollector,MockOnboardBlackbox,formatOnboardStatus,formatOnboardStatusV1,formatDropPct}=require('../dist');
+const {BobFlightCliClient,MockTransportFactory,MockSerial,ResponseCollector,MockOnboardBlackbox,formatOnboardStatus,formatOnboardStatusV1,formatDropPct}=require('../dist');
 const {loadUiTs}=require('./load-ui-ts.cjs');
 const {parseOnboardReply,describeOnboardRate,describeOnboardDrops,onboardAutoLowered,formatOnboardHz,formatOnboardRateReason,formatOnboardDropPct,describeOnboardApi1Target,ONBOARD_API1_TARGET_LABEL}=loadUiTs(path.join(__dirname,'../../ui/src/blackbox/onboard.ts'));
 (async()=>{
@@ -53,5 +53,13 @@ const {parseOnboardReply,describeOnboardRate,describeOnboardDrops,onboardAutoLow
  const m=new MockOnboardBlackbox('ok');assert.match(m.handle('blackbox start',true),/blackbox refused/);assert.equal(m.handle('status'),null);
  assert.match(formatOnboardStatus({state:'idle',reason:'not-started',file:'',bytes:0,frames:0,rateHz:500,dropped:0,missed:0,invalid:0,queue:0,active:false,requestedHz:500,rateReason:'default'}),/blackbox_active: 0\r\nblackbox_rate_requested_hz: 500\r\nblackbox_rate_reason: default\r\nblackbox_drop_pct: 0\.0\r\nblackbox_end: 1\r\n$/);
  assert.match(formatOnboardStatusV1({state:'idle',reason:'not-started',file:'',bytes:0,frames:0,rateHz:500,dropped:0,missed:0,invalid:0,queue:0,active:false,requestedHz:500,rateReason:'default'}),/^blackbox_api: 1\r\n[\s\S]*blackbox_active: 0\r\nblackbox_end: 1\r\n$/);
+ // F2: the explicit SD simulations are listed (so the UI can pick them) and labelled SIMULATED.
+ {const ports=await MockSerial.list();
+  for(const [p,card] of [['mock://bobflight-sd','ok'],['mock://bobflight-sd-slow','slow'],['mock://bobflight-sd-api1','api1']]){
+   const port=ports.find(x=>x.path===p);assert.ok(port,p);assert.match(port.friendlyName,/ — SIMULATED$/,p);
+   const c=new BobFlightCliClient(new MockTransportFactory());await c.connect({path:p,transport:'mock'});
+   const raw=await c.sendCommand('blackbox status');assert.doesNotMatch(raw,/unavailable/,`${p} simulates a ${card} card`);await c.disconnect();
+  }
+  assert.doesNotMatch(ports.find(x=>x.path==='mock://bobflight').friendlyName,/SIMULATED/,'default port stays the honest no-card mock');}
  console.log('PASS recording allowlist, complete framing, honest unavailable mock, explicit SD simulations parsed by the UI: api 2 default, api 2 auto-lowered (verbatim FC drop %), api 1 (requested/reason/drop % unknown), and no injected commands');
 })().catch(e=>{console.error(e);process.exitCode=1;});

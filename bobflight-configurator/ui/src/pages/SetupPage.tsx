@@ -1,7 +1,25 @@
-import { useState } from "react";
+/* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
+import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
-import { shouldDisableArm } from "../protocol";
+import {
+  LOOP_RATE_OPTIONS,
+  LOOP_RATE_OPTION_LABELS,
+  LOOP_RATE_SETTING_UNKNOWN,
+  isLoopRateOption,
+  loopRateSettingView,
+  loopRateView,
+  parseLoopStatus,
+  shouldDisableArm,
+} from "../protocol";
+import { LoopRatePoller, type LoopRatePollState } from "../setup/loopRatePoller";
+import {
+  LOOP_RATE_SETTING_EMPTY,
+  readLoopRateSetting,
+  saveLoopRate,
+  selectLoopRate,
+  type LoopRateSettingState,
+} from "../setup/loopRateSetting";
 
 /** Setup MVP status fields only (Lead lock). */
 const SETUP_STATUS_FIELDS = [
@@ -25,6 +43,7 @@ export function SetupPage() {
     refreshStatus,
     pollAfterConnect,
     setLastError,
+    postFlashGate,
   } = useHost();
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -32,6 +51,62 @@ export function SetupPage() {
   const [confirmDefaults, setConfirmDefaults] = useState(false);
 
   const connected = connectionStatus === "connected";
+  // Loop-rate readout: read-only `status` every 1 s, local to this section only
+  // (never the shared status, never a StoragePanel `blocked`).
+  const [loopPoll, setLoopPoll] = useState<LoopRatePollState>({ raw: null, error: "" });
+  const loopPoller = useMemo(
+    () => new LoopRatePoller(() => host.sendCommand("status"), setLoopPoll),
+    [host],
+  );
+  // Bumped after every action: pauseLoopPoll() disables the poller directly, and
+  // busy true->false can batch into one render when the action fails instantly.
+  const [loopPollKick, setLoopPollKick] = useState(0);
+  useEffect(() => {
+    loopPoller.setEnabled(connected && !busy && !postFlashGate);
+    if (!connected) loopPoller.reset();
+  }, [loopPoller, connected, busy, postFlashGate, loopPollKick]);
+  useEffect(() => () => loopPoller.setEnabled(false), [loopPoller]);
+  const loop = loopRateView(loopPoll.raw === null ? null : parseLoopStatus(loopPoll.raw));
+
+  /** Stop the loop-rate poll and let an in-flight read finish before an action. */
+  async function pauseLoopPoll() {
+    loopPoller.setEnabled(false);
+    await loopPoller.idle();
+  }
+
+  // Loop-rate setting (FW `loop_rate_hz`): read once per connection, written
+  // only by the selector, persisted by the existing verified save flow.
+  const [loopSetting, setLoopSetting] = useState<LoopRateSettingState>(LOOP_RATE_SETTING_EMPTY);
+  const [loopSettingRead, setLoopSettingRead] = useState(false);
+  const loopTarget = loopPoll.raw === null ? null : parseLoopStatus(loopPoll.raw).targetHz;
+  const loopSelector = loopRateSettingView(loopSetting.get, loopSetting.report, loopTarget);
+  const loopSelectorEnabled = connected && !busy && !postFlashGate && loopSelector.supported === true;
+
+  /** Selector actions: busy (poll paused), one CLI command at a time. */
+  async function runLoopRateAction(action: () => Promise<LoopRateSettingState>) {
+    if (!connected || busy) return;
+    setBusy(true);
+    try {
+      await pauseLoopPoll();
+      setLoopSetting(await action());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLoopSetting((prev) => ({ ...prev, message: "", error: msg }));
+    } finally {
+      setLoopSettingRead(true);
+      setBusy(false);
+      setLoopPollKick((k) => k + 1);
+    }
+  }
+  useEffect(() => {
+    if (!connected) {
+      setLoopSetting(LOOP_RATE_SETTING_EMPTY);
+      setLoopSettingRead(false);
+      return;
+    }
+    if (!loopSettingRead && !busy && !postFlashGate) void runLoopRateAction(() => readLoopRateSetting(host));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, loopSettingRead, busy, postFlashGate, host]);
   // restoreDefaults exists on BobFlightHost and is safe when connected (mock + serial).
   const canRestoreDefaults =
     connected && !busy && typeof host.restoreDefaults === "function";
@@ -49,6 +124,7 @@ export function SetupPage() {
     setActionErr(null);
     setLastError(null);
     try {
+      await pauseLoopPoll();
       // Re-fetch version + status via existing host APIs (no new commands).
       await pollAfterConnect();
       await refreshStatus();
@@ -58,6 +134,7 @@ export function SetupPage() {
       setActionErr(msg);
     } finally {
       setBusy(false);
+      setLoopPollKick((k) => k + 1);
     }
   }
 
@@ -69,8 +146,10 @@ export function SetupPage() {
     setLastError(null);
     setConfirmDefaults(false);
     try {
+      await pauseLoopPoll();
       await host.restoreDefaults();
       setActionMsg("defaults restored");
+      setLoopSettingRead(false); // FW `defaults` also resets loop_rate_hz: re-read it
       if (host.getConnectionStatus() === "connected") {
         await refreshStatus();
       }
@@ -80,6 +159,7 @@ export function SetupPage() {
       setActionErr(msg);
     } finally {
       setBusy(false);
+      setLoopPollKick((k) => k + 1);
     }
   }
 
@@ -164,6 +244,95 @@ export function SetupPage() {
             );
           })}
         </div>
+      </section>
+
+      {/* Loop rate — frozen status keys loop_target_hz / loop_actual_hz / loop_overruns */}
+      <section style={{ marginTop: "1.25rem" }}>
+        <h3>Loop rate</h3>
+        <p className="muted">
+          From CLI <code>status</code>, polled every 1 s while connected and
+          paused during actions. Values are shown exactly as the firmware sends
+          them; anything missing or unavailable shows unknown.
+        </p>
+        <div className="status-grid">
+          {loop.items.map((item) => (
+            <div key={item.key} className="status-card">
+              <div className="k">{item.label}</div>
+              <div className="v">{connected ? item.value : "unknown"}</div>
+            </div>
+          ))}
+        </div>
+        {connected && loop.notice && <p className="muted">{loop.notice}</p>}
+        {connected && loopPoll.error && (
+          <p className="fail">Loop-rate read failed: {loopPoll.error}</p>
+        )}
+
+        <h4 style={{ marginTop: "1rem" }}>Loop-rate setting</h4>
+        <p className="muted">
+          Firmware setting <code>loop_rate_hz</code>. Saving stores all current
+          controller settings (flash-verified). The loop target above is the
+          rate actually applied.
+        </p>
+        <div className="row" style={{ alignItems: "center" }}>
+          <label>
+            <span className="muted">Selected</span>{" "}
+            <select
+              aria-label="Loop-rate setting"
+              value={loopSelector.selected ?? ""}
+              disabled={!loopSelectorEnabled}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (isLoopRateOption(value) && value !== loopSelector.selected)
+                  void runLoopRateAction(() => selectLoopRate(host, loopSetting, value));
+              }}
+            >
+              {loopSelector.selected === null && (
+                <option value="">{LOOP_RATE_SETTING_UNKNOWN}</option>
+              )}
+              {LOOP_RATE_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {LOOP_RATE_OPTION_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="primary"
+            disabled={!loopSelectorEnabled}
+            onClick={() => void runLoopRateAction(() => saveLoopRate(host, loopSetting))}
+          >
+            Save loop rate
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            disabled={!connected || busy || postFlashGate}
+            onClick={() => void runLoopRateAction(() => readLoopRateSetting(host))}
+          >
+            Re-read
+          </button>
+        </div>
+        <div className="status-grid" style={{ marginTop: "0.5rem" }}>
+          <div className="status-card">
+            <div className="k">Selected (controller RAM)</div>
+            <div className="v">{connected ? loopSelector.display : LOOP_RATE_SETTING_UNKNOWN}</div>
+          </div>
+          <div className="status-card">
+            <div className="k">Applied at boot</div>
+            <div className="v">{connected ? loopSelector.bootDisplay : LOOP_RATE_SETTING_UNKNOWN}</div>
+          </div>
+        </div>
+        {connected &&
+          loopSelector.notices.map((notice) => (
+            <p key={notice} className={loopSelector.pendingReboot && notice.startsWith("Pending") ? "banner-warn" : "muted"}>
+              {notice}
+            </p>
+          ))}
+        {connected && loopSetting.message && <p className="muted">{loopSetting.message}</p>}
+        {connected && loopSetting.error && (
+          <p className="fail">Loop-rate setting: {loopSetting.error}</p>
+        )}
       </section>
 
       {/* Accel calibrate — honest disable only; no CLI yet */}

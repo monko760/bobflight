@@ -21,6 +21,9 @@ typedef struct {
     uint8_t gyro_config, accel_config;
     const char *chip;
     float raw_acc_g[3];
+    /* Configured sensor output data rate (0 = unknown) and the SPI clock used
+     * for sensor/interrupt register reads (0 = left at the config clock). */
+    uint32_t odr_hz, spi_read_hz;
 } gyro_diagnostics_t;
 
 typedef struct {
@@ -51,6 +54,8 @@ void gyro_calibration_tick(void);
 void gyro_calibration_touch(void);
 
 void gyro_init(void);
+/* Apply the loop_rate_hz output rate (MPU6000 on the 8 kHz board only). */
+bool gyro_select_output_rate(bool fast);
 void gyro_begin_calibration(void);
 bool gyro_calibrated(void);
 /** Stricter pre-arm readiness: gyro bias alone does not validate gravity. */
@@ -62,7 +67,8 @@ const float *gyro_latest_dps(void);
 bool gyro_sample(float dps[3]);
 bool gyro_is_healthy(void);
 void gyro_filter(const float in_dps[3], float out_dps[3]);
-/** Sample period for soft gyro LPF (seconds). Default 1/4000. */
+/** Sample period for soft gyro LPF (seconds); set every PID cycle from the
+ * scheduler's gyro_hz / pid_process_denom. */
 void gyro_filter_set_dt(float dt);
 /** "dummy" | "no-cs" | "no-spi" | "unbound" | "bf-derived" | "ok" */
 const char *gyro_bind_state(void);

@@ -21,6 +21,8 @@
 #include "flight/rates.h"
 #include "flight/mode_range.h"
 #include "sched/scheduler.h"
+#include "sched/loop_rate.h"
+#include "sched/loop_rate_setting.h"
 
 #include <string.h>
 
@@ -271,9 +273,13 @@ bool app_init(void)
     /* Defaults and subsystem init must finish before restoring persistent settings. */
     (void)persist_load();
 
-    /* Scheduler: host/bench path 1000 Hz / denom 1 until R3 first-flight.
-     * Kakute 4 kHz uses scheduler_init(8000, 2) + DWT us (Lead); do not
-     * claim 8 kHz here while this call stays 1000/1. */
-    scheduler_init(1000, 1);
+    /* Persisted loop_rate_hz (default 4000 on Kakute F7 HDV, 1000 elsewhere)
+     * picks the MPU6000 output rate, then the loop-rate policy
+     * (sched/loop_rate.c) picks gyro/denom: 1000 -> 1000/1, 4000 -> 8000/2,
+     * 8000 -> 8000/1, only while DWT us, the 8 kHz gyro path and DShot mode
+     * allow it. Fallbacks are reported by `loop_rate` and status
+     * loop_target_hz. A setting change applies after save + reboot. */
+    (void)gyro_select_output_rate(loop_rate_setting_wants_8k_gyro(loop_rate_setting_get()));
+    loop_rate_init();
     return true;
 }

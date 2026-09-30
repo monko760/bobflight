@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0
+ * Schema 7: schema6 bytes0..187 plus loop_rate_hz u32 LE 188..191 (1000|4000|8000,
+ * must be supported by this board). Older schemas migrate to the board default
+ * (sched/loop_rate_setting.h: 4000 on kakute_f7_hdv, 1000 elsewhere).
  * Schema 6: schema5 bytes0..183 plus pid_yaw_d float184..187 (default 0.00005).
  * Schema 5: schema4 bytes0..175 plus gyro_lpf_hz float176..179, dterm_lpf_hz 180..183.
  * Bytes 165..175 remain reserved (zero); do not overload them.
@@ -23,12 +26,13 @@
 #include "drivers/rx.h"
 #include "sched/tasks.h"
 #include "board/board.h"
+#include "sched/loop_rate_setting.h"
 #include <string.h>
 #include <math.h>
 #include <float.h>
 
 #define BASE_BYTES 96u
-#define PAYLOAD_BYTES 188u
+#define PAYLOAD_BYTES 192u
 _Static_assert(MODE_COUNT == 2 || MODE_COUNT == 4, "Update persistence schema for new mode model");
 _Static_assert(sizeof(float)==4 && FLT_RADIX==2 && FLT_MANT_DIG==24, "binary32 config required");
 static const char *keys[12]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo",
@@ -86,6 +90,7 @@ static bool flight_idle_valid(const uint8_t *p){
  for(unsigned i=165;i<176;i++)if(p[i])return false;
  if(!lpf_hz_valid(getfloat(p+176))||!lpf_hz_valid(getfloat(p+180)))return false;
  {float yd=getfloat(p+184);if(!isfinite(yd)||yd<0.f||yd>10.f)return false;}
+ if(loop_rate_setting_unsupported_reason(get32(p+188)))return false;
  return true;
 }
 static bool extras_valid(const uint8_t *p){power_config_t c=power_decode(p);return power_config_valid(&c)&&(get32(p+156)==300||get32(p+156)==600)&&flight_idle_valid(p);}
@@ -110,6 +115,7 @@ static bool encode(uint8_t p[PAYLOAD_BYTES]){
  {float g;if(!config_get_key("gyro_lpf_hz",&g))return false;putfloat(p+176,g);}
  {float d;if(!config_get_key("dterm_lpf_hz",&d))return false;putfloat(p+180,d);}
  {float yd;if(!config_get_key("pid_yaw_d",&yd))return false;putfloat(p+184,yd);}
+ put32(p+188,loop_rate_setting_get());
  float values[12];mode_config_t modes[MODE_COUNT];return decode(p,values,modes)&&accel_decode_valid(p)&&extras_valid(p);
 }
 static const char *store_error(config_store_result_t r){switch(r){case CONFIG_STORE_EMPTY:return "empty";case CONFIG_STORE_UNSUPPORTED:return "unsupported";case CONFIG_STORE_INVALID:return "invalid_record";case CONFIG_STORE_IO_ERROR:return "storage_io";default:return "none";}}
@@ -119,15 +125,16 @@ static bool safe_to_change(void){
  if(gyro_manual_calibration_active()){last_error="calibration_active";return false;}
  return true;
 }
-void persist_init(void){config_init();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;migration_pending=false;last_error="none";memset(saved,0,sizeof(saved));}
+void persist_init(void){config_init();loop_rate_setting_defaults();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;migration_pending=false;last_error="none";memset(saved,0,sizeof(saved));}
 bool persist_load(void){
  if(!safe_to_change())return false;
- uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v6(board_tag(),p,sizeof(p));
+ uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v7(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);load_error=r!=CONFIG_STORE_EMPTY&&r!=CONFIG_STORE_UNSUPPORTED;return false;}
  if(config_store_loaded_schema()<3){const power_config_t defaults={11.f,0.f,0.f,0,3.5f,3.3f,0};power_encode(p,&defaults,300);}
  if(config_store_loaded_schema()<4){putfloat(p+160,0.05f);p[164]=0;for(unsigned i=165;i<176;i++)p[i]=0;}
  if(config_store_loaded_schema()<5){putfloat(p+176,320.f);putfloat(p+180,53.f);}
  if(config_store_loaded_schema()<6){putfloat(p+184,0.00005f);}
+ if(config_store_loaded_schema()<7){put32(p+188,loop_rate_setting_default_hz());}
  float values[12];mode_config_t modes[MODE_COUNT];if(!decode(p,values,modes)||!accel_decode_valid(p)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
  /* Reject unsupported control selection before mutating other settings */
  if(p[55]!=CONTROL_MODE_ANGLE&&p[55]!=CONTROL_MODE_ACRO&&p[55]!=CONTROL_MODE_HORIZON){last_error="invalid_settings";load_error=true;return false;}
@@ -142,6 +149,7 @@ bool persist_load(void){
  (void)config_set_key("gyro_lpf_hz",getfloat(p+176));
  (void)config_set_key("dterm_lpf_hz",getfloat(p+180));
  (void)config_set_key("pid_yaw_d",getfloat(p+184));
+ (void)loop_rate_setting_set(get32(p+188));
  (void)crsf_set_map(p[52]?"TAER":"AETR");
  for(unsigned i=0;i<MODE_COUNT;i++)(void)mode_range_set((mode_id_t)i,modes[i].enabled,modes[i].aux_channel,modes[i].min_us,modes[i].max_us);
  if(!control_mode_set((control_mode_t)p[55])){last_error="control_mode_failed";load_error=true;return false;}
@@ -157,7 +165,7 @@ bool persist_load(void){
  }
 #endif
  {float bias[3]={0},scale[3]={1,1,1};if(p[96])accel_values(p,bias,scale);gyro_restore_accel_calibration(bias,scale,p[96]!=0);}
- migration_pending=config_store_loaded_schema()!=6||legacy_aux_migrated;
+ migration_pending=config_store_loaded_schema()!=7||legacy_aux_migrated;
  failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;
  if(legacy_aux_migrated){
   last_error="migrated_control_source_manual";
@@ -169,9 +177,9 @@ bool persist_load(void){
 bool persist_save(void){
  if(!safe_to_change())return false;
  uint8_t p[PAYLOAD_BYTES];if(!encode(p)){last_error="invalid_settings";return false;}
- config_store_result_t r=config_store_save_v6(board_tag(),p,sizeof(p));
+ config_store_result_t r=config_store_save_v7(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);return false;}
- uint8_t check[PAYLOAD_BYTES];r=config_store_load_v6(board_tag(),check,sizeof(check));
+ uint8_t check[PAYLOAD_BYTES];r=config_store_load_v7(board_tag(),check,sizeof(check));
  if(r!=CONFIG_STORE_OK||memcmp(p,check,sizeof(p))){last_error="verify_failed";return false;}
  memcpy(saved,p,sizeof(saved));have_saved=true;migration_pending=false;load_error=false;last_error="none";return true;
 }

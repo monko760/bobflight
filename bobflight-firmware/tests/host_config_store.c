@@ -99,6 +99,29 @@ int main(void){
   puts("PASS schema5 -> schema6 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
  }
 
+ /* Schema6 -> schema7 (loop_rate_hz, full 192-byte MAX_PAYLOAD) migration. */
+ {
+  uint8_t old7[192],new7[192],out7[192];memset(old7,17,188);memset(old7+188,0,4);memset(new7,51,sizeof(new7));
+  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
+  assert(config_store_save_v6(19,old7,188)==CONFIG_STORE_OK);
+  assert(config_store_load_v7(19,out7,192)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==6);
+  for(unsigned j=188;j<192;j++)assert(out7[j]==0);
+  memcpy(baseline,flash,sizeof(flash));
+  for(int cut=0;cut<=260;cut++){
+   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
+   config_store_result_t r=config_store_save_v7(19,new7,192);write_budget=-1;
+   assert(config_store_load_v7(19,out7,192)==CONFIG_STORE_OK);
+   if(r==CONFIG_STORE_OK)assert(!memcmp(out7,new7,192)&&config_store_loaded_schema()==7);
+   else assert((!memcmp(out7,old7,188)&&config_store_loaded_schema()==6)||(!memcmp(out7,new7,192)&&config_store_loaded_schema()==7));
+  }
+  assert(config_store_save_v6(19,old7,188)==CONFIG_STORE_INVALID);
+  /* Older schema6 firmware ignores the schema7 record and falls back to the retained schema6 slot. */
+  assert(config_store_load_v6(19,out7,188)==CONFIG_STORE_OK&&config_store_loaded_schema()==6&&!memcmp(out7,old7,188));
+  assert(config_store_load_v7(19,out7,191)==CONFIG_STORE_INVALID);
+  unsigned saved_erases=erases;assert(config_store_save_v7(19,new7,192)==CONFIG_STORE_OK&&erases==saved_erases);
+  puts("PASS schema6 -> schema7 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
+ }
+
 
 
 

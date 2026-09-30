@@ -14,6 +14,8 @@
 #include "flight/config.h"
 #include "board/board.h"
 #include "sched/scheduler.h"
+#include "sched/loop_rate.h"
+#include "sched/loop_rate_setting.h"
 #include "hal/hal.h"
 #include "flight/attitude.h"
 #include "sched/tasks.h"
@@ -40,6 +42,7 @@ static void cli_write_str(const char *s)
 
 #include "drivers/sensor_cli.h"
 #include "drivers/timing_cli.h"
+#include "drivers/loop_status_cli.h"
 #include "drivers/ports_modes_cli.h"
 #include "drivers/storage_cli.h"
 #include "drivers/bootloader_cli.h"
@@ -93,6 +96,7 @@ static void cmd_help(void)
         "  disarm   - disarm\r\n"
         "  pid_diag [status|start|start rx|stop] - 60s zero-output rate/PID diagnostic\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
+        "  loop_rate - loop-rate policy: setting, pending reboot, active gyro/denom and fallback reason\r\n"
         "  bl / BL  - ST ROM bootloader; bl discard explicitly loses unsaved RAM changes\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
 }
@@ -108,7 +112,8 @@ static void cmd_status(void)
 {
     const board_t *b = board_get();
     const scheduler_stats_t *st = scheduler_stats();
-    char buf[1000];
+    char buf[1200], loop_lines[128];
+    if (loop_status_lines(loop_lines, sizeof loop_lines, hal_micros()) < 0) loop_lines[0] = '\0';
     const float *rates=gyro_latest_dps(),*acc=gyro_accel_g(),*angles=attitude_degrees(),*rc=rx_channels();
     const char *flight="bench-only";
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
@@ -135,6 +140,7 @@ static void cmd_status(void)
              "arm: %s\r\n"
              "failsafe: %s\r\n"
              "loop: gyro=%lu Hz denom=%lu cascade=%lu bg=%lu\r\n"
+             "%s"
              "flight_mode: %s\r\n"
              "gyro_calibrated: %s\r\n"
              "gyro_dps: %.2f %.2f %.2f\r\n"
@@ -161,7 +167,7 @@ static void cmd_status(void)
              (unsigned long)(st ? st->gyro_hz : 0),
              (unsigned long)(st ? st->pid_process_denom : 0),
              (unsigned long)(st ? st->cascade_runs : 0),
-             (unsigned long)(st ? st->bg_runs : 0),flight,gyro_calibrated()?"yes":"no",
+             (unsigned long)(st ? st->bg_runs : 0),loop_lines,flight,gyro_calibrated()?"yes":"no",
              (double)rates[0],(double)rates[1],(double)rates[2],(double)acc[0],(double)acc[1],(double)acc[2],
              (double)angles[0],(double)angles[1],b?b->rx_uart:0,rx_frame_fresh()?"yes":"no",(unsigned long)rx_frame_count(),
              (double)rc[0],(double)rc[1],(double)rc[2],(double)rc[3],(double)rc[4],(double)rc[5],(double)rc[6],(double)rc[7],
@@ -276,6 +282,11 @@ static void cmd_get(const char *key)
         cli_write_str(dshot_bidir_enabled() ? "dshot_bidir=on\r\n" : "dshot_bidir=off\r\n");
         return;
     }
+    if (strcmp(key, "loop_rate_hz") == 0) {
+        snprintf(buf, sizeof(buf), "loop_rate_hz=%lu\r\n", (unsigned long)loop_rate_setting_get());
+        cli_write_str(buf);
+        return;
+    }
     if (!config_get_key(key, &v)) {
         cli_write_str("unknown key\r\n");
         return;
@@ -312,6 +323,27 @@ static void cmd_set(const char *key, const char *valstr)
         dshot_bidir_set_enabled(on);
         snprintf(buf, sizeof(buf), "ok dshot_bidir=%s\r\n", on ? "on" : "off");
         cli_write_str(buf);
+        return;
+    }
+    /* Persisted loop rate: exactly 1000|4000|8000, applied at boot only. */
+    if (strcmp(key, "loop_rate_hz") == 0) {
+        uint32_t hz = 0;
+        const board_t *b = board_get();
+        char msg[160];
+        if (!loop_rate_setting_parse(valstr, &hz)) {
+            cli_write_str("set failed: loop_rate_hz must be 1000, 4000 or 8000\r\n");
+            return;
+        }
+        if (loop_rate_setting_unsupported_reason(hz)) {
+            snprintf(msg, sizeof(msg), "set failed: loop_rate_hz %lu not supported on %s (no 8 kHz gyro path)\r\n",
+                     (unsigned long)hz, b ? b->board_id : "unknown");
+            cli_write_str(msg);
+            return;
+        }
+        (void)loop_rate_setting_set(hz);
+        snprintf(msg, sizeof(msg), "ok loop_rate_hz=%lu\r\nnote: loop_rate_hz takes effect after save + reboot\r\n",
+                 (unsigned long)loop_rate_setting_get());
+        cli_write_str(msg);
         return;
     }
     v = strtof(valstr, &end);
@@ -376,6 +408,8 @@ static void handle_line(char *line)
         /* Handled ports, modes, mode_range, or receiver_uart */
     } else if (strcmp(line, "timing") == 0) {
         cmd_timing();
+    } else if (strcmp(line, "loop_rate") == 0) {
+        cmd_loop_rate();
     } else if (strncmp(line, "control_source ", 15) == 0) {
         const char *arg=line+15;
         bool valid=strcmp(arg,"manual")==0 || strcmp(arg,"aux")==0;
@@ -432,6 +466,7 @@ static void handle_line(char *line)
     } else if (strcmp(line, "defaults") == 0) {
         if (arming_state() == ARM_ARMED || bench_motor_active()) { cli_write_str("refused: disarm and stop motors\r\n"); return; }
         config_defaults();
+        loop_rate_setting_defaults();
         cli_write_str("defaults restored\r\n");
     } else if (strcmp(line, "arm") == 0) {
         if (arming_try_arm()) {
@@ -511,6 +546,8 @@ void cli_poll(void)
             else handle_line(g_line);
             g_len = 0;
             g_discard_line = false;
+            /* Never execute bytes queued behind `reboot` (the reset follows). */
+            if (g_reboot_req) break;
         } else if (g_discard_line) {
             /* Discard the WHOLE invalid line, never execute its suffix. */
         } else if (c == '\0') {

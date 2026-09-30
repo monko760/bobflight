@@ -41,6 +41,7 @@ export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "receiver",
   "disarm",
   "reboot", "bl", "bl discard",
+  "get loop_rate_hz", "set loop_rate_hz 1000", "set loop_rate_hz 4000", "set loop_rate_hz 8000", "loop_rate",
 ] as const;
 
 /** Exact single-line UI input; preserve complete arguments, never just a verb. */

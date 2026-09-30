@@ -6,6 +6,7 @@
  */
 #include "app/init.h"
 #include "sched/scheduler.h"
+#include "sched/loop_rate.h"
 #include "drivers/cli.h"
 #include "hal/hal.h"
 #include "board/board.h"
@@ -14,6 +15,7 @@
 #ifdef BOBFLIGHT_HOST
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #else
 #include "hal/stm32f7/boot_crumb.h"
 #endif
@@ -64,12 +66,23 @@ int main(void)
 #ifdef BOBFLIGHT_HOST
     /* Host smoke: run a bounded number of slices then exit. */
     const unsigned slices = 20000;
+    /* Test-only warm reboot: BOBFLIGHT_HOST_REBOOT_REINIT=1 re-runs app_init
+     * on `reboot` with the process-local flash model kept, so save + reboot
+     * paths (e.g. loop_rate_hz) are exercised end to end. Default: exit. */
+    const char *reinit = getenv("BOBFLIGHT_HOST_REBOOT_REINIT");
+    unsigned reboots = 0;
     for (unsigned i = 0; i < slices; i++) {
         scheduler_run();
         /* Host harness: cascade can eat every slice in a tight loop.
          * Drain stdin CDC each iteration so piped help/status still run. */
         cli_poll();
+        loop_rate_tick();
         if (cli_reboot_requested()) {
+            if (reinit && strcmp(reinit, "1") == 0 && reboots < 4u) {
+                reboots++;
+                if (!app_init()) { fprintf(stderr, "app_init failed after reboot\n"); return 1; }
+                continue;
+            }
             break;
         }
     }
@@ -97,6 +110,8 @@ int main(void)
         scheduler_run();
         /* Belt-and-suspenders: keep TinyUSB CDC polled even if sched starves */
         cli_poll();
+        /* Outside the cascade: bidir/timebase/overrun-guard rate decisions. */
+        loop_rate_tick();
         main_led_heartbeat_tick();
         if (cli_reboot_requested()) {
             *((volatile uint32_t*)0xE000ED0Cu)=0x05FA0004u;

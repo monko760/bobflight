@@ -81,9 +81,10 @@ export function onboardEffectiveHz(s: Pick<OnboardSnapshot, 'api' | 'rateHz'>): 
   return isOnboardApi2(s) ? s.rateHz : null;
 }
 
-/** api 1 FC: its fixed target as sent in `blackbox_rate_hz` (own row); null on api 2+ (row hidden). */
+/** api 1 FC: its fixed target as sent in `blackbox_rate_hz` (own row). null (row hidden) on api 2+ and
+ * on any api that is not exactly 1 (non-integer, NaN, 0): an unknown api never claims the api 1 target. */
 export function describeOnboardApi1Target(s: Pick<OnboardSnapshot, 'api' | 'rateHz'>): string | null {
-  return isOnboardApi2(s) ? null : formatOnboardHz(s.rateHz);
+  return s.api === 1 ? formatOnboardHz(s.rateHz) : null;
 }
 
 /** Effective rate; the auto-lowered note appears only for that reported reason. */
@@ -224,7 +225,8 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
     }
     if (Object.hasOwn(fields, 'blackbox_drop_pct')) {
       const pct = fields.blackbox_drop_pct;
-      if (!/^\d{1,3}\.\d$/.test(pct) || Number(pct) > 100) {
+      // One decimal, 0.0 .. 100.0: no leading zeros, nothing above 100.
+      if (!/^(?:100|[1-9]?\d)\.\d$/.test(pct) || Number(pct) > 100) {
         throw new Error('Invalid blackbox_drop_pct in blackbox reply.');
       }
       dropPct = pct; // displayed verbatim, never recomputed
@@ -262,6 +264,12 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
  * Never autoStops on tab hide/USB disconnect (physical FC continues recording). */
 export class OnboardController {
   snapshot: OnboardSnapshot | null = null;
+  /**
+   * The latest reply could not be parsed: `snapshot` is the last good one and
+   * is kept only so the recording lock (`active`) fails safe. The page must
+   * not present its values as current.
+   */
+  stale = false;
   error = '';
   pending = false;
   private enabled = false;
@@ -287,6 +295,7 @@ export class OnboardController {
     this.epoch++;
     this.pending = false;
     this.snapshot = null;
+    this.stale = false;
     this.error = '';
     this.nextPoll = 0;
   }
@@ -309,8 +318,17 @@ export class OnboardController {
       if (!this.enabled || token !== this.epoch || this.link.getConnectionStatus() !== 'connected') {
         return false;
       }
-      const snapshot = parseOnboardReply(raw);
+      let snapshot: OnboardSnapshot;
+      try {
+        snapshot = parseOnboardReply(raw);
+      } catch (e) {
+        // Never keep showing the last good reading as current after a bad reply.
+        this.stale = this.snapshot !== null;
+        this.error = String(e).slice(0, 1000);
+        return false;
+      }
       this.snapshot = snapshot;
+      this.stale = false;
       this.nextPoll = this.now() + 1000;
       return true;
     } catch (e) {

@@ -111,6 +111,8 @@ set(BF_COMMON_SOURCES
   src/app/main.c
   src/app/init.c
   src/sched/scheduler.c
+  src/sched/loop_rate.c
+  src/sched/loop_rate_setting.c
   src/sched/tasks.c
   src/flight/pid.c src/flight/filter.c
   src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/blackbox_capture.c src/flight/blackbox_session.c
@@ -223,7 +225,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME gyro_spi_map COMMAND bobflight_gyro_spi_map_test)
   add_test(NAME tmotor_target_contract COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_tmotor_target.py ${CMAKE_SOURCE_DIR} ${CMAKE_C_COMPILER})
-  add_executable(bobflight_persist_config_test tests/host_persist_config.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
+  add_executable(bobflight_persist_config_test tests/host_persist_config.c src/sched/loop_rate_setting.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
   target_link_libraries(bobflight_persist_config_test m)
   add_test(NAME persist_config COMMAND bobflight_persist_config_test)
   add_executable(bobflight_pid_aw_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_pid_aw.c)
@@ -232,10 +234,10 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mixer_idle_test src/flight/mixer.c src/flight/config.c tests/host_mixer_idle.c)
   target_link_libraries(bobflight_mixer_idle_test m)
   add_test(NAME mixer_idle COMMAND bobflight_mixer_idle_test)
-  add_executable(bobflight_legacy_p54_migration_test tests/host_legacy_p54_migration.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
+  add_executable(bobflight_legacy_p54_migration_test tests/host_legacy_p54_migration.c src/sched/loop_rate_setting.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
   target_link_libraries(bobflight_legacy_p54_migration_test m)
   add_test(NAME legacy_p54_migration COMMAND bobflight_legacy_p54_migration_test)
-  add_executable(bobflight_storage_cli_test src/flight/config.c tests/host_storage_cli.c)
+  add_executable(bobflight_storage_cli_test src/flight/config.c src/sched/loop_rate_setting.c tests/host_storage_cli.c)
   target_link_libraries(bobflight_storage_cli_test m)
   add_test(NAME storage_cli COMMAND bobflight_storage_cli_test)
   add_executable(bobflight_mode_range_test src/flight/mode_range.c tests/host_mode_range.c)
@@ -246,6 +248,11 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_pid_elapsed_test m)
   add_test(NAME pid_elapsed COMMAND bobflight_pid_elapsed_test)
+  add_executable(bobflight_loop_dt_test src/sched/scheduler.c src/sched/tasks.c src/flight/attitude.c tests/host_loop_dt.c)
+  target_sources(bobflight_loop_dt_test PRIVATE src/flight/rates.c src/flight/config.c)
+  target_sources(bobflight_loop_dt_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
+  target_link_libraries(bobflight_loop_dt_test m)
+  add_test(NAME loop_dt_follows_rate COMMAND bobflight_loop_dt_test)
   add_executable(bobflight_cycle_clock_test tests/host_cycle_clock.c)
   add_test(NAME cycle_clock COMMAND bobflight_cycle_clock_test)
   add_executable(bobflight_f7_clock_test src/hal/stm32f7/hal_clock.c tests/host_f7_clock.c)
@@ -253,6 +260,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME f7_clock_register_mock COMMAND bobflight_f7_clock_test)
   add_executable(bobflight_scheduler_timing_test src/sched/scheduler.c tests/host_scheduler_timing.c)
   add_test(NAME scheduler_timing COMMAND bobflight_scheduler_timing_test)
+  add_executable(bobflight_loop_rate_test src/sched/scheduler.c src/sched/loop_rate.c src/sched/loop_rate_setting.c tests/host_loop_rate.c)
+  add_test(NAME loop_rate_policy_status COMMAND bobflight_loop_rate_test)
   add_executable(bobflight_timing_cli_test tests/host_timing_cli.c)
   add_test(NAME timing_cli COMMAND bobflight_timing_cli_test)
   add_test(NAME boot_led_modes COMMAND ${Python3_EXECUTABLE}
@@ -428,8 +437,12 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME control_mode_routing COMMAND bobflight_control_mode_test)
   add_test(NAME control_mode_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_control_mode_cli.py $<TARGET_FILE:bobflight_host>)
+  add_test(NAME loop_status_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_loop_status_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
+  add_test(NAME loop_rate_setting_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_loop_rate_setting_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
 
-  foreach(task_test pid_elapsed bench_safety control_mode)
+  foreach(task_test pid_elapsed loop_dt bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)
   endforeach()
   # Filters R0: loop_filter() needs gyro_filter_set_dt; these targets stub gyro_filter

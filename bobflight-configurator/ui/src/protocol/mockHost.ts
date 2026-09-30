@@ -1,3 +1,4 @@
+/* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import { MockPortsModes, isModeRangeCommand, isControlSourceCommand } from "@bobflight/protocol";
 /**
  * Browser-safe mock host matching BobFlightCliClient surface.
@@ -14,6 +15,9 @@ import {
   MockOnboardBlackbox,
   mockSensorReply,
   cloneDefaultSettings,
+  mockLoopStatusLines,
+  MockLoopRateSetting,
+  type LoopRateMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
 import type {
@@ -64,9 +68,15 @@ export class MockBobFlightHost implements BobFlightHost {
   private connectDelayMs: number;
   private settings: Record<SettingsKey, string> = cloneDefaultSettings();
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean }) {
+  /** `status` loop-rate keys; default "missing" (older FC). */
+  private loopRateScenario: LoopRateMockScenario;
+  /** `get/set loop_rate_hz` + `loop_rate` (same wire as protocol MockSerial). */
+  private readonly loopRateSetting = new MockLoopRateSetting(() => this.loopRateScenario);
+
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario }) {
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
     this.gyroHealthy = opts?.gyroHealthy ?? false;
+    this.loopRateScenario = opts?.loopRateScenario ?? "missing";
   }
 
   getLastError(): string | null {
@@ -217,9 +227,17 @@ export class MockBobFlightHost implements BobFlightHost {
 
   async saveSettings(): Promise<void> { throw new Error("Demo/RAM settings are not stored on a controller"); }
 
+  /**
+   * Test hook: models a flash-verified save of the loop-rate setting (the value
+   * the next reboot applies). The demo host's saveSettings() still refuses, so
+   * in demo mode a reboot drops an unsaved loop-rate change, as on the FC.
+   */
+  simulateVerifiedSave(): void { this.loopRateSetting.save(); }
+
   async restoreDefaults(): Promise<Record<SettingsKey, string>> {
     this.requireConnected();
     this.settings = cloneDefaultSettings();
+    this.loopRateSetting.defaults();
     return { ...this.settings };
   }
 
@@ -266,6 +284,7 @@ export class MockBobFlightHost implements BobFlightHost {
     if(cmd.startsWith("sd read"))return "sd_data_error: unavailable-mock\r\nsd_data_end: 1\r\n";
     if(cmd === "sd probe" || cmd === "sd status" || cmd === "sd cancel")return "sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n";
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
+    {const lr=this.loopRateSetting.handle(cmd,this.armed);if(lr!==null)return lr;}
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;
     if(cmd==="reboot") this.receiver.reset();
@@ -303,7 +322,7 @@ export class MockBobFlightHost implements BobFlightHost {
           "mmio: denied",
           `arm: ${arm}`,
           `failsafe: ${failsafe}`,
-          "loop: gyro=0 Hz denom=1 cascade=0 bg=0",
+          ...mockLoopStatusLines(this.loopRateScenario),
         ].join("\r\n");
       }
       case "arm":
@@ -315,9 +334,12 @@ export class MockBobFlightHost implements BobFlightHost {
       case "disarm":
         this.armed = false;
         return "disarmed";
-      case "reboot":
+      case "reboot": {
         this.armed = false;
+        const next = this.loopRateSetting.reboot();
+        if (next) this.loopRateScenario = next;
         return "reboot...";
+      }
       default:
         return "unknown — try help";
     }
@@ -338,7 +360,9 @@ export class MockBobFlightHost implements BobFlightHost {
   setMockGates(opts: {
     gyroHealthy?: boolean;
     failsafeActive?: boolean;
+    loopRateScenario?: LoopRateMockScenario;
   }): void {
+    if (opts.loopRateScenario !== undefined) this.loopRateScenario = opts.loopRateScenario;
     if (opts.gyroHealthy !== undefined) this.gyroHealthy = opts.gyroHealthy;
     if (opts.failsafeActive !== undefined) {
       this.failsafeActive = opts.failsafeActive;
