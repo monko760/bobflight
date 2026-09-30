@@ -1,6 +1,6 @@
 # Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
 """Actual host firmware CLI: frozen `status` loop-rate lines per board, the
-`loop_rate` policy report, and loop_overruns == timing cycle_overruns (same
+`loop_rate` policy report (default loop_rate_hz setting), and loop_overruns == timing cycle_overruns (same
 counter). Host clock, not a hardware loop-rate claim."""
 import re,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
@@ -36,6 +36,9 @@ cycle=one('cycle_overruns');assert int(cycle)>=int(overruns),(cycle,overruns)
 assert one('gyro_config_hz')==gyro and one('pid_denom')==denom
 profile={'kakute_f7_hdv':'8000/2'}.get(board,'1000/1')
 assert one('loop_rate_profile')==profile and one('loop_rate_active')==f'{gyro}/{denom}'
-assert one('loop_rate_reason')=='board-profile',one('loop_rate_reason')
+assert one('loop_rate_reason')=='setting',one('loop_rate_reason')
+default={'kakute_f7_hdv':'4000'}.get(board,'1000')
+assert one('loop_rate_setting_hz')==default and one('loop_rate_boot_setting_hz')==default
+assert one('loop_rate_pending_reboot')=='0'
 assert 'loop_rate_end: 1' in lines
 print(f'PASS host status loop lines ({board}): target {target}, actual {actual}, overruns {overruns}; loop_rate {profile}')
