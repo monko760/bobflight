@@ -144,3 +144,4 @@ export * from "./storage";
 
 export * from "./loop-rate";
 export * from "./loop-rate-mock";
+export * from "./loop-rate-setting";
