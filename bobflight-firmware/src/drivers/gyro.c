@@ -133,6 +133,7 @@ static uint8_t gyro_chipid_bmi(void)
 #define MPU6K_DLPF_8K 0u
 #define MPU6K_DLPF_1K 3u
 #define MPU6K_SPI_SENSOR_READ_MAX_HZ 20000000u
+#define MPU6K_SPI_REGISTER_MAX_HZ 1000000u
 static bool configure_mpu6k(bool fast)
 {
     const uint8_t dlpf = fast ? MPU6K_DLPF_8K : MPU6K_DLPF_1K;
@@ -161,6 +162,32 @@ static bool configure_mpu6k(bool fast)
      * and sensor output registers, which the part allows up to 20 MHz. */
     if(fast)g_diag.spi_read_hz=hal_spi_set_hz(g_spi,MPU6K_SPI_SENSOR_READ_MAX_HZ);
     g_dps_per_lsb=1.f/16.4f;
+    return true;
+}
+
+/* Persisted loop_rate_hz applied at boot (app/init.c, after persist_load):
+ * 1000 -> DLPF_CFG 3 (1 kHz ODR), 4000/8000 -> DLPF_CFG 0 (8 kHz ODR, reads
+ * re-clocked to <= 20 MHz). Only the MPU6000 on the 8 kHz-capable board
+ * switches; the CONFIG write always happens at the <= 1 MHz register clock.
+ * On failure config_ok drops and odr_hz reads 0, so the loop-rate policy
+ * falls back to 1000 / 1 (gyro-odr-below-8k) and reports it. */
+bool gyro_select_output_rate(bool fast)
+{
+    if (g_kind != GYRO_CHIP_MPU6K || !g_spi || !g_diag.config_ok) return false;
+    fast = fast && loop_rate_board_fast(board_get());
+    const uint32_t want_odr = fast ? 8000u : 1000u;
+    if (g_diag.odr_hz == want_odr) return true;
+    const uint8_t dlpf = fast ? MPU6K_DLPF_8K : MPU6K_DLPF_1K;
+    uint8_t filter = 0xffu;
+    g_diag.spi_read_hz = hal_spi_set_hz(g_spi, MPU6K_SPI_REGISTER_MAX_HZ);
+    if (!g_diag.spi_read_hz || !gyro_spi_write_reg(0x1A, dlpf) ||
+        !gyro_spi_read_regs(0x1A, &filter, 1) || filter != dlpf) {
+        g_diag.config_ok = false;
+        g_diag.odr_hz = 0u;
+        return false;
+    }
+    g_diag.odr_hz = want_odr;
+    if (fast) g_diag.spi_read_hz = hal_spi_set_hz(g_spi, MPU6K_SPI_SENSOR_READ_MAX_HZ);
     return true;
 }
 
