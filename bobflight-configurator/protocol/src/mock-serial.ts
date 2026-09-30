@@ -9,6 +9,7 @@ import { MockMotorBench } from "./bench-mock";
 import { mockSensorReply } from "./sensor-mock";
 import { MockReceiver } from "./receiver-mock";
 import { MockOnboardBlackbox, type MockBlackboxCard } from "./blackbox-mock";
+import { mockLoopStatusLines, type LoopRateMockScenario } from "./loop-rate-mock";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -55,6 +56,8 @@ export interface MockSerialOptions {
    * Does not invent live eRPM; erpm is emitted only when status is `ok`.
    */
   dshotTelemByMotor?: Partial<Record<1 | 2 | 3 | 4, DshotTelemStatus>>;
+  /** `status` loop-rate keys; default "missing" (older FC: no loop_target_hz/actual/overruns). */
+  loopRateScenario?: LoopRateMockScenario;
   /**
    * Onboard Blackbox simulation (firmware status api 2). Default "none" keeps
    * the honest "no physical SD card" reply; "ok"/"slow" are explicit sims.
@@ -82,6 +85,7 @@ export class MockSerial extends EventEmitter {
   private dshotBidir = false;
   /** Optional telem overrides when bidir on (smoke fixtures). */
   private readonly telemByMotor: Partial<Record<1 | 2 | 3 | 4, DshotTelemStatus>>;
+  private readonly loopRateScenario: LoopRateMockScenario;
   /** Numeric store mirroring bf_config_t floats. */
   private settings: Record<SettingsKey, number>;
   private readonly opts: Required<
@@ -103,6 +107,7 @@ export class MockSerial extends EventEmitter {
       boardId: opts.boardId ?? "mock-board",
     };
     this.telemByMotor = { ...(opts.dshotTelemByMotor ?? {}) };
+    this.loopRateScenario = opts.loopRateScenario ?? "missing";
     this.blackbox = new MockOnboardBlackbox(opts.blackboxCard ?? "none");
     this.modesPorts.reset();
     this.dshotBidir = false;
@@ -234,7 +239,7 @@ export class MockSerial extends EventEmitter {
           `mmio: ${this.bench.ready ? "allowed (simulated)" : "denied"}\r\n` +
           `arm: ${arm}\r\n` +
           `failsafe: ${failsafe}\r\n` +
-          `loop: gyro=0 Hz denom=1 cascade=0 bg=0\r\n`
+          mockLoopStatusLines(this.loopRateScenario).map((l) => `${l}\r\n`).join("")
       );
     } else if (line === "arm") {
       if (this.opts.gyroHealthy && !this.opts.failsafeActive) {

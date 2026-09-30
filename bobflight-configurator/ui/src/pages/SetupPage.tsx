@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
-import { shouldDisableArm } from "../protocol";
+import { loopRateView, parseLoopStatus, shouldDisableArm } from "../protocol";
+import { LoopRatePoller, type LoopRatePollState } from "../setup/loopRatePoller";
 
 /** Setup MVP status fields only (Lead lock). */
 const SETUP_STATUS_FIELDS = [
@@ -25,6 +26,7 @@ export function SetupPage() {
     refreshStatus,
     pollAfterConnect,
     setLastError,
+    postFlashGate,
   } = useHost();
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -32,6 +34,25 @@ export function SetupPage() {
   const [confirmDefaults, setConfirmDefaults] = useState(false);
 
   const connected = connectionStatus === "connected";
+  // Loop-rate readout: read-only `status` every 1 s, local to this section only
+  // (never the shared status, never a StoragePanel `blocked`).
+  const [loopPoll, setLoopPoll] = useState<LoopRatePollState>({ raw: null, error: "" });
+  const loopPoller = useMemo(
+    () => new LoopRatePoller(() => host.sendCommand("status"), setLoopPoll),
+    [host],
+  );
+  useEffect(() => {
+    loopPoller.setEnabled(connected && !busy && !postFlashGate);
+    if (!connected) loopPoller.reset();
+  }, [loopPoller, connected, busy, postFlashGate]);
+  useEffect(() => () => loopPoller.setEnabled(false), [loopPoller]);
+  const loop = loopRateView(loopPoll.raw === null ? null : parseLoopStatus(loopPoll.raw));
+
+  /** Stop the loop-rate poll and let an in-flight read finish before an action. */
+  async function pauseLoopPoll() {
+    loopPoller.setEnabled(false);
+    await loopPoller.idle();
+  }
   // restoreDefaults exists on BobFlightHost and is safe when connected (mock + serial).
   const canRestoreDefaults =
     connected && !busy && typeof host.restoreDefaults === "function";
@@ -49,6 +70,7 @@ export function SetupPage() {
     setActionErr(null);
     setLastError(null);
     try {
+      await pauseLoopPoll();
       // Re-fetch version + status via existing host APIs (no new commands).
       await pollAfterConnect();
       await refreshStatus();
@@ -69,6 +91,7 @@ export function SetupPage() {
     setLastError(null);
     setConfirmDefaults(false);
     try {
+      await pauseLoopPoll();
       await host.restoreDefaults();
       setActionMsg("defaults restored");
       if (host.getConnectionStatus() === "connected") {
@@ -164,6 +187,28 @@ export function SetupPage() {
             );
           })}
         </div>
+      </section>
+
+      {/* Loop rate — frozen status keys loop_target_hz / loop_actual_hz / loop_overruns */}
+      <section style={{ marginTop: "1.25rem" }}>
+        <h3>Loop rate</h3>
+        <p className="muted">
+          From CLI <code>status</code>, polled every 1 s while connected and
+          paused during actions. Values are shown exactly as the firmware sends
+          them; anything missing or unavailable shows unknown.
+        </p>
+        <div className="status-grid">
+          {loop.items.map((item) => (
+            <div key={item.key} className="status-card">
+              <div className="k">{item.label}</div>
+              <div className="v">{connected ? item.value : "unknown"}</div>
+            </div>
+          ))}
+        </div>
+        {connected && loop.notice && <p className="muted">{loop.notice}</p>}
+        {connected && loopPoll.error && (
+          <p className="fail">Loop-rate read failed: {loopPoll.error}</p>
+        )}
       </section>
 
       {/* Accel calibrate — honest disable only; no CLI yet */}
