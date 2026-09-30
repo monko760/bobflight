@@ -1,3 +1,4 @@
+/* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import { MockPortsModes, isModeRangeCommand, isControlSourceCommand } from "@bobflight/protocol";
 /**
  * Browser-safe mock host matching BobFlightCliClient surface.
@@ -15,6 +16,7 @@ import {
   mockSensorReply,
   cloneDefaultSettings,
   mockLoopStatusLines,
+  MockLoopRateSetting,
   type LoopRateMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
@@ -68,6 +70,8 @@ export class MockBobFlightHost implements BobFlightHost {
 
   /** `status` loop-rate keys; default "missing" (older FC). */
   private loopRateScenario: LoopRateMockScenario;
+  /** `get/set loop_rate_hz` + `loop_rate` (same wire as protocol MockSerial). */
+  private readonly loopRateSetting = new MockLoopRateSetting(() => this.loopRateScenario);
 
   constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario }) {
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
@@ -226,6 +230,7 @@ export class MockBobFlightHost implements BobFlightHost {
   async restoreDefaults(): Promise<Record<SettingsKey, string>> {
     this.requireConnected();
     this.settings = cloneDefaultSettings();
+    this.loopRateSetting.defaults();
     return { ...this.settings };
   }
 
@@ -272,6 +277,7 @@ export class MockBobFlightHost implements BobFlightHost {
     if(cmd.startsWith("sd read"))return "sd_data_error: unavailable-mock\r\nsd_data_end: 1\r\n";
     if(cmd === "sd probe" || cmd === "sd status" || cmd === "sd cancel")return "sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n";
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
+    {const lr=this.loopRateSetting.handle(cmd,this.armed);if(lr!==null)return lr;}
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;
     if(cmd==="reboot") this.receiver.reset();
@@ -321,9 +327,12 @@ export class MockBobFlightHost implements BobFlightHost {
       case "disarm":
         this.armed = false;
         return "disarmed";
-      case "reboot":
+      case "reboot": {
         this.armed = false;
+        const next = this.loopRateSetting.reboot();
+        if (next) this.loopRateScenario = next;
         return "reboot...";
+      }
       default:
         return "unknown — try help";
     }
