@@ -30,6 +30,20 @@ static bool wait_flag(spi_regs_t *r,uint32_t mask,bool set) {
     while (((r->SR & mask)!=0)!=set) if (!--n) return false;
     return true;
 }
+/* RM0385 SPI_CR1: BR[2:0] may only change while SPE = 0; disable only after
+ * TXE = 1 and BSY = 0 (every hal_spi_transfer ends idle). */
+uint32_t hal_spi_set_hz(hal_spi_bus_t *b,uint32_t max_hz) {
+    if (!b || !b->open || !max_hz) return 0;
+    if (!wait_flag(b->r,2,true) || !wait_flag(b->r,1u<<7,false)) return 0;
+    unsigned br=0; uint32_t clock=hal_f7_pclk(true)/2;
+    while (clock>max_hz && br<7) {br++; clock/=2;}
+    if (clock>max_hz) return 0;
+    uint32_t cr1=b->r->CR1&~(1u<<6);
+    b->r->CR1=cr1;
+    b->r->CR1=(cr1&~(7u<<3))|(br<<3);
+    b->r->CR1|=1u<<6;
+    return clock;
+}
 bool hal_spi_transfer(hal_spi_bus_t *b,hal_pin_t cs,const uint8_t *tx,uint8_t *rx,size_t len) {
     if (!b || !b->open || !hal_pin_valid(cs) || !len) return false;
     bool ok=false; hal_gpio_write(cs,false);

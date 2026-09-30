@@ -37,6 +37,8 @@ bool hal_spi_transfer(hal_spi_bus_t *bus, hal_pin_t cs, const uint8_t *tx, uint8
     return false;
 }
 
+uint32_t hal_spi_set_hz(hal_spi_bus_t *bus, uint32_t max_hz) { (void)bus; (void)max_hz; return 0; }
+
 struct hal_uart { int dummy; };
 hal_uart_t *hal_uart_open(unsigned instance, uint32_t baud) { (void)instance; (void)baud; return NULL; }
 size_t hal_uart_read(hal_uart_t *u, uint8_t *buf, size_t maxlen) { (void)u; (void)buf; (void)maxlen; return 0; }

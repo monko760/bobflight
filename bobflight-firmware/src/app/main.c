@@ -6,6 +6,7 @@
  */
 #include "app/init.h"
 #include "sched/scheduler.h"
+#include "sched/loop_rate.h"
 #include "drivers/cli.h"
 #include "hal/hal.h"
 #include "board/board.h"
@@ -69,6 +70,7 @@ int main(void)
         /* Host harness: cascade can eat every slice in a tight loop.
          * Drain stdin CDC each iteration so piped help/status still run. */
         cli_poll();
+        loop_rate_tick();
         if (cli_reboot_requested()) {
             break;
         }
@@ -97,6 +99,8 @@ int main(void)
         scheduler_run();
         /* Belt-and-suspenders: keep TinyUSB CDC polled even if sched starves */
         cli_poll();
+        /* Outside the cascade: bidir/timebase/overrun-guard rate decisions. */
+        loop_rate_tick();
         main_led_heartbeat_tick();
         if (cli_reboot_requested()) {
             *((volatile uint32_t*)0xE000ED0Cu)=0x05FA0004u;

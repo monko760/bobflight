@@ -28,7 +28,7 @@
 #include <math.h>
 #include <stddef.h>
 static uint64_t last_sample;
-static float sample_dt=0.001f;
+static float sample_dt;
 /* PID uses its own invocation clock, never the latest gyro sample interval. */
 static uint64_t last_pid_us;
 static bool have_pid_time;
@@ -147,11 +147,28 @@ static float g_setpoint[3];
 static float g_motors[MIXER_MOTOR_COUNT];
 static pid_axis_out_t g_pid;
 
+/* Nominal gyro slot / PID period from the running scheduler (never a fixed
+ * 1 kHz or 4 kHz constant). Before scheduler_init only host unit tests call
+ * tasks; they get the scheduler's own fallback rate. */
+static float nominal_gyro_dt(void)
+{
+    const scheduler_stats_t *st = scheduler_stats();
+    const uint32_t hz = st && st->gyro_hz ? st->gyro_hz : SCHEDULER_DEFAULT_GYRO_HZ;
+    return 1.f / (float)hz;
+}
+static float nominal_pid_dt(void)
+{
+    const scheduler_stats_t *st = scheduler_stats();
+    if (st && st->gyro_hz > 0u && st->pid_process_denom > 0u)
+        return (float)st->pid_process_denom / (float)st->gyro_hz;
+    return (float)SCHEDULER_DEFAULT_PID_DENOM / (float)SCHEDULER_DEFAULT_GYRO_HZ;
+}
+
 void loop_gyro(void)
 {
     gyro_calibration_tick();
     uint64_t now=hal_micros();
-    sample_dt=last_sample?(float)(now-last_sample)*0.000001f:0.001f; last_sample=now;
+    sample_dt=last_sample?(float)(now-last_sample)*0.000001f:nominal_gyro_dt(); last_sample=now;
     sample_ok=gyro_sample(g_gyro_raw);
     if(!sample_ok || sample_dt>0.01f){arming_disarm();arm_low_seen=false;}
     if(sample_ok)sample_ok=attitude_update(g_gyro_raw,gyro_accel_g(),sample_dt);
@@ -160,12 +177,7 @@ void loop_gyro(void)
 void loop_filter(void)
 {
     /* Soft gyro LPF runs at PID cadence (gyro_hz / pid_process_denom). */
-    const scheduler_stats_t *st = scheduler_stats();
-    float dt = 1.f / 4000.f;
-    if (st && st->gyro_hz > 0u && st->pid_process_denom > 0u) {
-        dt = (float)st->pid_process_denom / (float)st->gyro_hz;
-    }
-    gyro_filter_set_dt(dt);
+    gyro_filter_set_dt(nominal_pid_dt());
     gyro_filter(g_gyro_raw, g_gyro_filt);
 }
 
