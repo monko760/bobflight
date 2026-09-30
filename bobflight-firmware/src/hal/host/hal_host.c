@@ -149,6 +149,12 @@ bool hal_spi_transfer(hal_spi_bus_t *bus, hal_pin_t cs,
     return bus != NULL && cs != HAL_PIN_INVALID;
 }
 
+/* Host: no SCK to re-clock; report the requested ceiling for an open bus. */
+uint32_t hal_spi_set_hz(hal_spi_bus_t *bus, uint32_t max_hz)
+{
+    return bus ? max_hz : 0u;
+}
+
 struct hal_uart { unsigned instance; };
 
 hal_uart_t *hal_uart_open_cfg(const hal_uart_cfg_t *cfg)
