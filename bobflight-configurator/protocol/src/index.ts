@@ -141,3 +141,6 @@ export * from "./parse-modes";
 export { MockPortsModes } from "./ports-modes-mock";
 
 export * from "./storage";
+
+export * from "./loop-rate";
+export * from "./loop-rate-mock";
