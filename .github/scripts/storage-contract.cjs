@@ -12,12 +12,18 @@ assert.equal(backups.length,4);assert.match(backups[3].raw,/power_config 12.25 2
 for(const command of ['mode_range ACRO 1 5 1300 1600','mode_range HORIZON 1 6 1600 1900','control_mode horizon'])assert(backups[2].raw.includes(command+'\r\n'));
 for(const e of backups){assert(Buffer.byteLength(e.raw)<1800);assert(!e.raw.includes('\r\narm\r\n'));assert(!e.raw.includes('\r\nsave\r\n'));}
 assert(!parseSaveReply('saved\r\n').ok);assert(!parseSaveReply('saved: host_sim verified\r\n').ok);assert(parseSaveReply('saved: flash verified\r\n').ok);
-assert.equal(states[2].schema,7);assert.match(states[2].scope,/,loop_rate_hz$/);
-for(const invalid of ['storage_api: 1\r\n',run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0].replace('schema: 7','schema: 8')]){if(invalid!==undefined)assert.throws(()=>parseStorage(invalid));}
-assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 7','# schema: 8'),'dump'));
+assert.equal(states[2].schema,8);assert.match(states[2].scope,/,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz$/);
+for(const invalid of ['storage_api: 1\r\n',run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0].replace('schema: 8','schema: 9')]){if(invalid!==undefined)assert.throws(()=>parseStorage(invalid));}
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 8','# schema: 9'),'dump'));
 assert.match(backups[3].raw,/\r\nset loop_rate_hz (1000|4000|8000)\r\n/);assert(!/set loop_rate_hz/.test(backups[0].raw),'diff omits the board-default loop rate');
 for(const bad of ['set loop_rate_hz 2000','set loop_rate_hz 4000.0'])assert.throws(()=>parseConfigurationExport(backups[3].raw.replace(/set loop_rate_hz \d+/,bad),'dump'));
-assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 7','# schema: 6').replace(',loop_rate_hz',''),'dump'),'schema 6 export cannot carry loop_rate_hz');
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 8','# schema: 6').replace(',loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz',''),'dump'),'schema 6 export cannot carry loop_rate_hz');
+// Schema 8 manual gyro notches: dump carries all four (cutoff before centre), diff omits the default-off pairs; a schema 7 export cannot carry them.
+assert.match(backups[3].raw,/\r\nset gyro_notch1_cutoff_hz 0\r\nset gyro_notch1_hz 0\r\nset gyro_notch2_cutoff_hz 0\r\nset gyro_notch2_hz 0\r\n/);assert(!/set gyro_notch/.test(backups[0].raw),'diff omits default-off notches');
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 8','# schema: 7').replace(',gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz',''),'dump'),'schema 7 export cannot carry gyro notch lines');
+assert.doesNotThrow(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 8','# schema: 7').replace(',gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz','').replace(/set gyro_notch\S+ \S+\r\n/g,''),'dump'),'schema 7 export without notch lines stays valid');
+for(const bad of ['set gyro_notch1_hz 10','set gyro_notch1_hz 1200','set gyro_notch1_hz -1'])assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('set gyro_notch1_hz 0',bad),'dump'),bad);
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('set gyro_notch2_cutoff_hz 0','set gyro_notch2_cutoff_hz 1000'),'dump'));
 assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# config_end: 1','arm\r\n# config_end: 1'),'dump'));
 assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('mode_range HORIZON 1 6 1600 1900','mode_range HORIZON 1 257 1600 1900'),'dump'));
 const actual=run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0];
