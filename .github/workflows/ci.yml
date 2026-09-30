@@ -92,6 +92,8 @@ jobs:
         run: node ui/scripts/test-switch-bench.cjs
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
+      - name: Storage panel refresh guard and Motors flicker lock tests
+        run: npm --prefix ui run test:storage
       - name: Zero-output PID diagnostic CLI and framing tests
         run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests

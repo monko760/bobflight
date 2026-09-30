@@ -3,6 +3,7 @@ import {StoragePanel} from "../components/StoragePanel";
 import { useEffect, useState } from "react";
 import { useHost } from "../hooks/useHost";
 import { BenchController, benchBlockReason, MOTOR_POSITIONS, MAX_PULSE_PERCENT, type BenchState } from "../motors/benchController";
+import { storageBlocked } from "../motors/motorsStorage";
 
 import { browserPoleStorage, readMotorPoles, storeMotorPoles, validMotorPoles } from "../motors/motorPoles";
 
@@ -54,7 +55,7 @@ export function MotorsPage() {
   const readiness = state.status?.motor_output && / ready$/.test(state.status.motor_output) ? "Ready (driver reports)" : "Unavailable / unknown";
   const rate = state.rate ? `DShot${state.rate}` : "Unknown";
   return <section className="panel motor-bench" aria-labelledby="motor-title">
-    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={state.actionPending || state.stopping}/>
+    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={storageBlocked(state)}/>
     <div className="motor-heading">
       <div><p className="motor-eyebrow">PROPS-OFF WORKBENCH</p><h2 id="motor-title">Motor tests</h2><p className="muted">Verify wiring and rotation, one motor at a time. These controls do not arm the aircraft.</p></div>
       <button className="danger motor-stop" disabled={!state.connected} onClick={() => void controller.stop()}>{state.stopping ? "Stop requested…" : "Stop all motor tests"}</button>
