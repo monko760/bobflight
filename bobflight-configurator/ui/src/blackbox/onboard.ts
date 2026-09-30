@@ -224,7 +224,8 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
     }
     if (Object.hasOwn(fields, 'blackbox_drop_pct')) {
       const pct = fields.blackbox_drop_pct;
-      if (!/^\d{1,3}\.\d$/.test(pct) || Number(pct) > 100) {
+      // One decimal, 0.0 .. 100.0: no leading zeros, nothing above 100.
+      if (!/^(?:100|[1-9]?\d)\.\d$/.test(pct) || Number(pct) > 100) {
         throw new Error('Invalid blackbox_drop_pct in blackbox reply.');
       }
       dropPct = pct; // displayed verbatim, never recomputed
@@ -262,6 +263,12 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
  * Never autoStops on tab hide/USB disconnect (physical FC continues recording). */
 export class OnboardController {
   snapshot: OnboardSnapshot | null = null;
+  /**
+   * The latest reply could not be parsed: `snapshot` is the last good one and
+   * is kept only so the recording lock (`active`) fails safe. The page must
+   * not present its values as current.
+   */
+  stale = false;
   error = '';
   pending = false;
   private enabled = false;
@@ -287,6 +294,7 @@ export class OnboardController {
     this.epoch++;
     this.pending = false;
     this.snapshot = null;
+    this.stale = false;
     this.error = '';
     this.nextPoll = 0;
   }
@@ -309,8 +317,17 @@ export class OnboardController {
       if (!this.enabled || token !== this.epoch || this.link.getConnectionStatus() !== 'connected') {
         return false;
       }
-      const snapshot = parseOnboardReply(raw);
+      let snapshot: OnboardSnapshot;
+      try {
+        snapshot = parseOnboardReply(raw);
+      } catch (e) {
+        // Never keep showing the last good reading as current after a bad reply.
+        this.stale = this.snapshot !== null;
+        this.error = String(e).slice(0, 1000);
+        return false;
+      }
       this.snapshot = snapshot;
+      this.stale = false;
       this.nextPoll = this.now() + 1000;
       return true;
     } catch (e) {
