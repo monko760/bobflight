@@ -90,6 +90,8 @@ jobs:
         run: node ../.github/scripts/pid-diagnostics-contract.cjs
       - name: Firmware to configurator Blackbox status api 2 (SD throughput model)
         run: node ../.github/scripts/blackbox-status-contract.cjs
+      - name: Firmware status loop keys to Setup loop-rate readout contract
+        run: node ../.github/scripts/loop-status-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
@@ -100,10 +102,14 @@ jobs:
         run: npm --prefix ui run test:motors
       - name: Storage panel refresh guard and Motors flicker lock tests
         run: npm --prefix ui run test:storage
+      - name: Setup loop-rate readout poll, mocks and wiring tests
+        run: npm --prefix ui run test:loop-rate
       - name: Zero-output PID diagnostic CLI and framing tests
         run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests
         run: npm --prefix protocol run test:timing
+      - name: Loop-rate status parser, view model and mock tests
+        run: npm --prefix protocol run test:loop-rate
       - name: Sensor protocol tests
         run: npm --prefix protocol run test:sensors
       - name: Sensor UI safety tests
