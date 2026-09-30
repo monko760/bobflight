@@ -28,7 +28,7 @@ Commands: `sd probe`, `sd status`, `sd cancel`. Every reply ends with `sd_end: 1
 
 The start guard requires disarmed state, no motor test, no calibration, USB connected, no pending bootloader entry and no already-running probe. The board must provide a supported SD capability and a high-resolution clock.
 
-Kakute F745 uses its SD SPI1 separately from gyro SPI4. Initialization is GPIO-clocked with at least 3 microseconds per half-cycle, because 108 MHz PCLK2 divided by 256 would exceed the SD initialization limit. Normal transfers use SPI1 at 13.5 MHz for that clock configuration. Exchanges yield while pending; the control loop contains no SD wait loop. Physical timing/throughput has not been measured.
+Kakute F745 uses its SD SPI1 separately from gyro SPI4. Initialization is GPIO-clocked with at least 3 microseconds per half-cycle, because 108 MHz PCLK2 divided by 256 would exceed the SD initialization limit. Normal transfers use SPI1 at 13.5 MHz for that clock configuration. Exchanges yield while pending; the control loop contains no SD wait loop. Blackbox writer throughput analysis (host byte-level card model) is in [bobflight-firmware/docs/BLACKBOX-THROUGHPUT.md](bobflight-firmware/docs/BLACKBOX-THROUGHPUT.md); physical timing/throughput has not been measured.
 
 The probe supports SDHC/SDXC initialization, sector-zero or one supported primary MBR partition, and structurally plausible 512-byte FAT32/exFAT geometry. GPT, multiple candidate partitions, malformed geometry and out-of-range sectors fail explicitly. Recognition is **not** a mount, health check, boot-region checksum validation, repair or filesystem-write capability. No formatting, erasing or SD sector-writing API is exposed by the diagnostic.
 
