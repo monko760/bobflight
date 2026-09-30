@@ -122,6 +122,29 @@ int main(void){
   puts("PASS schema6 -> schema7 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
  }
 
+ /* Schema7 -> schema8 (two manual gyro notches, full 208-byte MAX_PAYLOAD). */
+ {
+  uint8_t old8[208],new8[208],out8[208];memset(old8,17,192);memset(old8+192,0,16);memset(new8,68,sizeof(new8));
+  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
+  assert(config_store_save_v7(19,old8,192)==CONFIG_STORE_OK);
+  assert(config_store_load_v8(19,out8,208)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==7);
+  for(unsigned j=192;j<208;j++)assert(out8[j]==0);
+  memcpy(baseline,flash,sizeof(flash));
+  for(int cut=0;cut<=276;cut++){
+   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
+   config_store_result_t r=config_store_save_v8(19,new8,208);write_budget=-1;
+   assert(config_store_load_v8(19,out8,208)==CONFIG_STORE_OK);
+   if(r==CONFIG_STORE_OK)assert(!memcmp(out8,new8,208)&&config_store_loaded_schema()==8);
+   else assert((!memcmp(out8,old8,192)&&config_store_loaded_schema()==7)||(!memcmp(out8,new8,208)&&config_store_loaded_schema()==8));
+  }
+  assert(config_store_save_v7(19,old8,192)==CONFIG_STORE_INVALID);
+  /* Older schema7 firmware ignores the schema8 record and falls back to the retained schema7 slot. */
+  assert(config_store_load_v7(19,out8,192)==CONFIG_STORE_OK&&config_store_loaded_schema()==7&&!memcmp(out8,old8,192));
+  assert(config_store_load_v8(19,out8,207)==CONFIG_STORE_INVALID);
+  unsigned saved_erases=erases;assert(config_store_save_v8(19,new8,208)==CONFIG_STORE_OK&&erases==saved_erases);
+  puts("PASS schema7 -> schema8 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
+ }
+
 
 
 
