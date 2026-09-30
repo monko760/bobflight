@@ -12,6 +12,7 @@ import {
   formatOnboardHz,
   formatOnboardRateReason,
   onboardAutoLowered,
+  onboardEffectiveHz,
   type OnboardCommand,
 } from '../blackbox/onboard';
 
@@ -277,7 +278,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
                 <div>
                   <dt>Dropped frames</dt>
                   <dd style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
-                    {onboard.snapshot.dropped} ({formatOnboardDropPct(onboard.snapshot.dropPct)})
+                    {onboard.snapshot.dropped.toLocaleString('en-US')} ({formatOnboardDropPct(onboard.snapshot.dropPct)})
                   </dd>
                 </div>
                 <div>
@@ -304,7 +305,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             {onboardAutoLowered(onboard.snapshot) && (
               <p role="status">
                 The SD card could not keep up at {formatOnboardHz(onboard.snapshot.requestedHz)}, so the
-                controller lowered logging to {formatOnboardHz(onboard.snapshot.rateHz)} for this session
+                controller lowered logging to {formatOnboardHz(onboardEffectiveHz(onboard.snapshot))} for this session
                 (auto-lowered-card-slow). The file header states the effective rate;
                 frames lost before the change remain counted above. Consider a faster card.
               </p>

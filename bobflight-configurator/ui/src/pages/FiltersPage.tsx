@@ -32,6 +32,9 @@ const FILTER_LABELS: Record<FilterKey, string> = {
   dterm_lpf_hz: "D-term LPF (Hz)",
 };
 
+/** Client-side LPF range hint; worded so it cannot be mistaken for an FC `set failed` line. */
+export const LPF_RANGE_HINT = "Out of range (10–1000 or 0).";
+
 function emptyFilters(): FiltersConfig {
   return { gyro_lpf_hz: 0, dterm_lpf_hz: 0 };
 }
@@ -153,7 +156,8 @@ export function FiltersPage() {
     setNotchFcLine(null);
     for (const key of FILTER_KEYS) {
       if (!validateFilterHz(values[key])) {
-        setErr("set failed");
+        // Client-side check (not an FC reply), so it must not read like FW text.
+        setErr(`${FILTER_LABELS[key]}: ${LPF_RANGE_HINT}`);
         return;
       }
     }

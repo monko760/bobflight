@@ -1,7 +1,6 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
-/** Filters tab gyro notch rows: controller over the UI mock host (5 scenarios), refused set, reload guard and FiltersPage wiring. */
+/** Filters tab gyro notch controller over the UI mock host (5 scenarios), write plan, refused set and reload guard. Page rendering: test-filters-page.tsx. */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { parseCliInput } from "../src/protocol/types";
 import { GYRO_NOTCH_MOCK_SCENARIOS, type GyroNotchMockScenario } from "../../protocol/src/gyro-notch-mock";
@@ -15,9 +14,6 @@ import type { SettingsKey } from "../src/protocol";
 
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log(`PASS ${name}`); }
-const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
-/** Source without comments, so doc text cannot satisfy or trip a wiring check. */
-const code = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
 
 async function mockHost(scenario: GyroNotchMockScenario) {
   const host = new MockBobFlightHost({ connectDelayMs: 0, gyroNotchScenario: scenario });
@@ -163,25 +159,8 @@ async function main() {
     for (const l of ["filters", "get gyro_notch1_hz", "set gyro_notch2_cutoff_hz 150"]) assert.ok(parseCliInput(l), l);
   });
 
-  await test("FiltersPage wiring: re-read after set, verbatim FC line, #54 guard, no Nyquist math, no StoragePanel blocked", () => {
-    const page = code(source("../src/pages/FiltersPage.tsx"));
-    const ctl = code(source("../src/filters/gyroNotch.ts"));
-    for (const t of [page, ctl]) {
-      assert.ok(!/0\.45|0\.9\s*\*|\/\s*2\b|nyquist\s*[(=*]|sampleHz\s*[*/<>]/i.test(t), "no Nyquist math in the UI");
-      assert.ok(!/StoragePanel|blocked/.test(t), "does not render or feed StoragePanel blocked");
-    }
-    assert.ok(/requestFiltersReload\(\{[\s\S]*requestRefresh,?[\s\S]*\}\)/.test(page), "reload goes through the #54 guard");
-    assert.ok(/import \{[^}]*requestRefresh[^}]*\} from "\.\.\/components\/storageRefresh"/.test(page));
-    const save = page.slice(page.indexOf("async function onSave"), page.indexOf("async function onDefaults"));
-    assert.ok(/applyNotch\([\s\S]*setNotchFcLine\(res\.fcLine\)[\s\S]*await reloadNotches\(\)[\s\S]*return;/.test(save), "refused set: verbatim line, re-read");
-    assert.ok(save.indexOf("await reloadNotches()", save.lastIndexOf("applyNotch(")) < save.indexOf("host.saveSettings()"), "re-read before save");
-    assert.ok(!/setDrafts\(/.test(save) && !/setNotchSnap\(/.test(save), "no optimistic update in save");
-    assert.ok(/\{notchFcLine\}/.test(page), "FC line rendered as-is");
-    assert.ok(/disabled=\{!r\.supported \|\| !d\.enabled\}\s*value=\{r\.supported \? d\.cutoff : r\.cutoff\}/.test(page), "cutoff disabled while off but still shows its value");
-    assert.ok(/<code>\{r\.active\}<\/code>/.test(page) && /<code>\{r\.reason\}<\/code>/.test(page), "active/reason verbatim");
-    assert.ok(!/no notches/.test(source("../src/pages/FiltersPage.tsx")));
-    assert.ok(/\^set failed: /.test(page), "FC set failure text kept verbatim in the page error path");
-  });
+  // FiltersPage behaviour (cells, Save order, refused set, #54 reload guard) is covered by the render test
+  // scripts/test-filters-page.tsx (npm run test:filters-page), not by source regexes.
 
   // SettingsKey type stays in sync with the notch keys.
   const k: SettingsKey = "gyro_notch2_cutoff_hz"; void k;

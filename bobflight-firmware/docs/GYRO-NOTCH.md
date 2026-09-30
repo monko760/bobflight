@@ -1,5 +1,7 @@
 # Manual gyro notches (config schema 8)
 
+Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0.
+
 Two static notch filters on the gyro, applied after the gyro LPF on all three axes, before
 PID and blackbox. Manual only: no dynamic or RPM tracking.
 

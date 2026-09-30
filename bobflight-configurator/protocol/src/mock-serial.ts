@@ -277,7 +277,8 @@ export class MockSerial extends EventEmitter {
         void this.close();
       });
     } else if (line === "save") {
-      // Mock always succeeds (in-memory ack).
+      // Mock always succeeds (in-memory ack). The loop-rate value booted next is the saved one.
+      this.loopRateSetting.save();
       this.emitData("saved\r\n");
     } else if (line === "defaults") {
       this.modesPorts.reset();

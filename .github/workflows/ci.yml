@@ -91,7 +91,10 @@ jobs:
       - name: Firmware to configurator Blackbox status api 2 (SD throughput model)
         run: node ../.github/scripts/blackbox-status-contract.cjs
       - name: Firmware status loop keys and loop_rate_hz setting to Setup loop-rate contract
-        run: node ../.github/scripts/loop-status-contract.cjs
+        run: |
+          cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract-tmotor -DBOBFLIGHT_BOARD=tmotor_f7_v2
+          cmake --build ../bobflight-firmware/build-contract-tmotor --target bobflight_host -j 4
+          node ../.github/scripts/loop-status-contract.cjs
       - name: Firmware gyro notch CLI (schema 8) to Filters tab notch contract
         run: node ../.github/scripts/gyro-notch-contract.cjs
       - name: Receiver protocol and UI parser tests
@@ -106,10 +109,14 @@ jobs:
         run: npm --prefix ui run test:storage
       - name: Setup loop-rate readout and 1k/4k/8k selector (poll, mocks, wiring) tests
         run: npm --prefix ui run test:loop-rate
+      - name: Setup loop-rate poll starts after an in-flight command (SetupPage render test)
+        run: npm --prefix ui run test:setup-poll
       - name: Gyro notch parsers, write plan, SETTINGS_KEYS and five mock scenarios
         run: npm --prefix protocol run test:gyro-notch
-      - name: Filters tab gyro notch rows (mocks, refused set, reload guard, wiring) tests
+      - name: Filters tab gyro notch controller (mocks, write plan, refused set, reload guard) tests
         run: npm --prefix ui run test:gyro-notch
+      - name: Filters tab render test (FiltersPage cells per mock, Save order, refused set verbatim)
+        run: npm --prefix ui run test:filters-page
       - name: Zero-output PID diagnostic CLI and framing tests
         run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests

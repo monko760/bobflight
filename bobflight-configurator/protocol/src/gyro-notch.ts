@@ -144,6 +144,9 @@ export interface NotchRowView {
 /**
  * Row display model. `center`/`cutoff` are the FC's get strings (null =
  * missing); `report` the parsed `filters` reply (null = not reported).
+ * `active`/`reason` come only from the report's own tokens: a missing token
+ * is "unknown". Nothing is inferred from `filters_sample_hz` or the centre
+ * (the FC alone decides above-nyquist).
  */
 export function notchRowView(index: GyroNotchIndex, center: NotchGetResult | null, cutoff: NotchGetResult | null, report: FiltersReportResult | null): NotchRowView {
   const supported = center?.kind === "value" && cutoff?.kind === "value";

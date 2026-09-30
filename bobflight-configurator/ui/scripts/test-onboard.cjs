@@ -163,6 +163,12 @@ ${extra}blackbox_end: 1\r
   assert.equal(onboardEffectiveHz(v2), 250); assert.equal(describeOnboardApi1Target(v2), null);
   // Unknown api: no effective rate either.
   assert.equal(onboardEffectiveHz({ api: NaN, rateHz: 500 }), null);
+  // #56 nit: the api 1 target row is shown only for api exactly 1, never for a non-integer/unknown api.
+  for (const api of [1.5, 0.5, NaN, 0, 2.5, Infinity]) {
+    assert.equal(describeOnboardApi1Target({ api, rateHz: 500 }), null, `api ${api}: no api 1 row`);
+    assert.equal(onboardEffectiveHz({ api, rateHz: 500 }), null, `api ${api}: no effective rate`);
+  }
+  assert.equal(describeOnboardApi1Target({ api: 1, rateHz: 500 }), '500 Hz');
 
   // 5d. BlackboxPage wiring: rates and drop % come from the helpers; the page computes nothing.
   const page = fs.readFileSync(path.join(__dirname, '../src/pages/BlackboxPage.tsx'), 'utf8');
@@ -188,6 +194,17 @@ ${extra}blackbox_end: 1\r
     assert.match(page, /stale/, 'page renders the stale state (F5)');
     assert.match(page, /\{onboard\.snapshot && !onboard\.stale && !onboard\.snapshot\.unavailable && \(/);
     assert.doesNotMatch(page, /Demo mode\s+does not simulate physical SD writing/, 'F2: SD demo ports exist');
+    // #56 nits: every rate on the page goes through formatOnboardHz with the FC value or the api-gated
+    // effective rate; no numeric fallback (e.g. `?? 500`) and no raw rateHz; dropped count is grouped.
+    const hzCalls = pageCode.match(/formatOnboardHz\((?:[^()]|\([^()]*\))*\)/g) || [];
+    assert.ok(hzCalls.length >= 3, 'BlackboxPage formats rates with formatOnboardHz');
+    for (const call of hzCalls) assert.match(call, /^formatOnboardHz\((?:onboard\.snapshot\.requestedHz|onboardEffectiveHz\(onboard\.snapshot\))\)$/, call);
+    assert.equal((pageCode.match(/requestedHz/g) || []).length, (pageCode.match(/formatOnboardHz\(onboard\.snapshot\.requestedHz\)/g) || []).length, 'requestedHz only as formatOnboardHz(onboard.snapshot.requestedHz)');
+    assert.doesNotMatch(pageCode, /(?:\?\?|\|\|)\s*\(?\s*\d/, 'no numeric fallback such as ?? 500');
+    assert.doesNotMatch(pageCode, /snapshot\.rateHz/, 'effective rate only via onboardEffectiveHz / describeOnboardRate');
+    assert.match(pageCode, /controller lowered logging to \{formatOnboardHz\(onboardEffectiveHz\(onboard\.snapshot\)\)\}/);
+    assert.match(pageCode, /\{onboard\.snapshot\.dropped\.toLocaleString\('en-US'\)\} \(\{formatOnboardDropPct\(onboard\.snapshot\.dropPct\)\}\)/);
+    assert.doesNotMatch(pageCode, /\{onboard\.snapshot\.dropped\}/, 'dropped count is never shown ungrouped');
   }
   // F4: drop percent is 0.0 .. 100.0 with one decimal and no leading zeros.
   for (const good of ['0.0', '0.1', '9.9', '10.0', '99.9', '100.0']) assert.equal(parseOnboardReply(makeV2({ pct: good })).dropPct, good, good);

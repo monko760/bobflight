@@ -127,6 +127,32 @@ async function main(){
    await client.disconnect();
   }
  });
+ await test('N1: no reason line at sample 1000 with centre 600 is unknown (never inferred from filters_sample_hz)',()=>{
+  const noReason=['filters_api: 1','filters_sample_hz: 1000','gyro_notch1_active: no','gyro_notch2_active: no','gyro_notch2_reason: off','filters_end: 1'].join('\r\n')+'\r\n';
+  const rep=parseFiltersReport(noReason);
+  assert.equal(rep.kind,'report');assert.equal(rep.report.sampleHz,'1000');assert.equal(rep.report.notches[1].reason,null);
+  const v=notchRowView(1,val('600'),val('420'),rep);
+  assert.equal(v.reason,GYRO_NOTCH_UNKNOWN,'reason missing: unknown, not above-nyquist');
+  assert.equal(v.active,'no','active kept verbatim');
+  assert.deepEqual([v.center,v.cutoff],['600','420']);
+  // Same values with every sample rate: the row never changes its reason on its own.
+  for(const hz of ['1000','4000','8000','500']){
+   const r=parseFiltersReport(noReason.replace('filters_sample_hz: 1000',`filters_sample_hz: ${hz}`));
+   assert.equal(notchRowView(1,val('600'),val('420'),r).reason,GYRO_NOTCH_UNKNOWN,hz);
+  }
+  // Active missing too: both unknown.
+  const bare=parseFiltersReport(['filters_api: 1','filters_sample_hz: 1000','filters_end: 1'].join('\r\n'));
+  const b=notchRowView(1,val('600'),val('420'),bare);
+  assert.deepEqual([b.active,b.reason],[GYRO_NOTCH_UNKNOWN,GYRO_NOTCH_UNKNOWN]);
+ });
+ await test('V3: a malformed token ("above nyquist", with a space) is unknown; a well-formed unknown token stays verbatim',()=>{
+  const rep=parseFiltersReport(report({hz:'1000',r1:'above nyquist',a1:'no'}));
+  assert.equal(rep.kind,'report');assert.equal(rep.report.notches[1].reason,null,'not one \\S+ token');
+  assert.equal(notchRowView(1,val('600'),val('420'),rep).reason,GYRO_NOTCH_UNKNOWN);
+  assert.equal(notchRowView(1,val('200'),val('150'),parseFiltersReport(report({a1:'yes please'}))).active,GYRO_NOTCH_UNKNOWN,'active with a space: unknown');
+  const odd=parseFiltersReport(report({r1:'guard-fallback'}));
+  assert.equal(notchRowView(1,val('200'),val('150'),odd).reason,'guard-fallback','unknown future token shown as sent');
+ });
  for(const k of GYRO_NOTCH_KEYS)assert.equal(DEFAULT_SETTINGS[k],"0",k);
  console.log(`gyro-notch: ${passed} passed`);
 }

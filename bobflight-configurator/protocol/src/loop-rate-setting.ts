@@ -23,6 +23,13 @@ export const LOOP_RATE_OPTIONS = ["1000", "4000", "8000"] as const;
 export type LoopRateOption = (typeof LOOP_RATE_OPTIONS)[number];
 export const LOOP_RATE_OPTION_LABELS: Record<LoopRateOption, string> = { "1000": "1 kHz", "4000": "4 kHz", "8000": "8 kHz" };
 export const LOOP_RATE_REBOOT_NOTE = "note: loop_rate_hz takes effect after save + reboot";
+/** Exact FW refusal lines (drivers/cli.c cmd_set); the mocks print these and the UI shows them verbatim. */
+export const LOOP_RATE_ARMED_LINE = "set failed: armed";
+export const LOOP_RATE_INVALID_LINE = "set failed: loop_rate_hz must be 1000, 4000 or 8000";
+/** FW: "set failed: loop_rate_hz %lu not supported on %s (no 8 kHz gyro path)" with the board id. */
+export function loopRateUnsupportedLine(value: LoopRateOption, boardId: string): string {
+  return `set failed: loop_rate_hz ${value} not supported on ${boardId} (no 8 kHz gyro path)`;
+}
 export type LoopRateCliCommand = "get loop_rate_hz" | `set loop_rate_hz ${LoopRateOption}` | "loop_rate";
 export const LOOP_RATE_CLI_COMMANDS: readonly LoopRateCliCommand[] = [
   "get loop_rate_hz", "set loop_rate_hz 1000", "set loop_rate_hz 4000", "set loop_rate_hz 8000", "loop_rate",
@@ -67,8 +74,8 @@ export function parseLoopRateSetReply(raw: string, requested: LoopRateOption): L
     return { ok: true, value: requested, rebootRequired: ls.includes(LOOP_RATE_REBOOT_NOTE) };
   const message = ls.join(" ") || "no reply";
   if (first === "unknown key") return { ok: false, reason: "unknown-key", message: "This firmware has no loop_rate_hz setting (older FC)." };
-  if (first === "set failed: armed") return { ok: false, reason: "armed", message: "Refused while armed: disarm first." };
-  if (/^set failed: loop_rate_hz must be /.test(first)) return { ok: false, reason: "invalid", message: first };
+  if (first === LOOP_RATE_ARMED_LINE) return { ok: false, reason: "armed", message: first };
+  if (first === LOOP_RATE_INVALID_LINE) return { ok: false, reason: "invalid", message: first };
   if (/^set failed: loop_rate_hz \d+ not supported on /.test(first)) return { ok: false, reason: "unsupported-board", message: first };
   return { ok: false, reason: "unexpected", message };
 }
@@ -115,6 +122,8 @@ export interface LoopRateSettingView {
   /** false: older FC without the setting; the selector stays disabled. */
   supported: boolean | null;
   pendingReboot: boolean;
+  /** `loop_rate_boot_setting_hz` from the FW loop_rate report (the setting applied at boot), or "unknown". */
+  bootDisplay: string;
   notices: string[];
 }
 /**
@@ -129,13 +138,18 @@ export function loopRateSettingView(get: LoopRateGetResult | null, report: LoopR
   if (get?.kind === "malformed") notices.push("Loop-rate setting reply was not understood: unknown.");
   const boot = report?.bootSettingHz ?? null;
   const pendingReboot = !!(selected && (report?.pendingReboot === true || (boot !== null && boot !== selected)));
-  notices.push("A loop-rate change takes effect after Save + reboot.");
+  if (supported === true && report === null)
+    notices.push("Loop-rate report was not understood: pending reboot and firmware fallback are unknown.");
   if (pendingReboot) notices.push(`Pending: ${LOOP_RATE_OPTION_LABELS[selected!]} is selected; the controller runs its boot setting${boot ? ` (${LOOP_RATE_OPTION_LABELS[boot]})` : ""} until you Save and reboot.`);
+  else if (supported === true) notices.push("A loop-rate change takes effect after Save + reboot.");
+  // A fallback is reported even while a change is pending: it compares the applied
+  // target with the boot setting, which a pending (RAM) change does not alter.
   const reason = report?.reason ?? null;
-  if (!pendingReboot && boot !== null && targetHz !== null && targetHz !== boot) {
-    notices.push(`Firmware is running ${targetHz} Hz instead of the selected ${boot} Hz (${reason ?? "reason unknown"}).`);
-  } else if (!pendingReboot && reason !== null && reason !== "setting") {
+  if (boot !== null && targetHz !== null && targetHz !== boot) {
+    notices.push(`Firmware is running ${targetHz} Hz instead of its boot setting ${boot} Hz (${reason ?? "reason unknown"}).`);
+  } else if (reason !== null && reason !== "setting") {
     notices.push(`Firmware reports a loop-rate fallback: ${reason}.`);
   }
-  return { selected, display: selected ? LOOP_RATE_OPTION_LABELS[selected] : LOOP_RATE_SETTING_UNKNOWN, supported, pendingReboot, notices };
+  const bootDisplay = boot ? LOOP_RATE_OPTION_LABELS[boot] : LOOP_RATE_SETTING_UNKNOWN;
+  return { selected, display: selected ? LOOP_RATE_OPTION_LABELS[selected] : LOOP_RATE_SETTING_UNKNOWN, supported, pendingReboot, bootDisplay, notices };
 }
