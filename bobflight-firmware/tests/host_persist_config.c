@@ -13,7 +13,7 @@
 static board_t board={.board_id="kakute_f7_hdv",.rx_uart=6};
 static bool armed,bench,calibrating,supported=true,exists,write_failure,read_failure;
 static unsigned saves,rx_resets,freshness_resets,generation;
-static uint8_t image[192];static size_t image_len;static uint32_t image_board;
+static uint8_t image[208];static size_t image_len;static uint32_t image_board;
 const board_t *board_get(void){return &board;}
 bool board_select_rx_uart(unsigned u){if(!(u==1||u==2||u==3||u==4||u==6||u==7))return false;board.rx_uart=u;return true;}
 arm_state_t arming_state(void){return armed?ARM_ARMED:ARM_DISARMED;}
@@ -46,7 +46,7 @@ void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
 uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
 bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding){return binding==gyro_accel_calibration_binding()&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
-uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:7;}
+uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:8;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
  if(image_len==96&&n==128&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,96);return CONFIG_STORE_OK;}
  return config_store_load(id,p,n);
@@ -85,6 +85,11 @@ config_store_result_t config_store_load_v7(uint32_t id,void*p,size_t n){
  return config_store_load(id,p,n);
 }
 config_store_result_t config_store_save_v7(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
+config_store_result_t config_store_load_v8(uint32_t id,void*p,size_t n){
+ if((image_len==96||image_len==128||image_len==160||image_len==176||image_len==184||image_len==188||image_len==192)&&n==208&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,image_len);return CONFIG_STORE_OK;}
+ return config_store_load(id,p,n);
+}
+config_store_result_t config_store_save_v8(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
 
 /* Include the codec to validate the on-wire byte format, not just happy-path APIs. */
 #include "../src/drivers/persist.c"
@@ -230,6 +235,44 @@ int main(void){
   assert(loop_rate_setting_unsupported_reason(4000)!=NULL);
   strcpy(board.board_id,"kakute_f7_hdv");
   memcpy(image,keep,192);persist_init();assert(persist_load());assert(loop_rate_setting_get()==1000);
+ }
+
+ /* Schema7 -> schema8: both manual gyro notches migrate off (0/0), dirty until
+  * Save; schema8 round-trips the pairs; a stored pair breaking the static rule
+  * is refused atomically; the loop-rate (Nyquist) limit never alters a load. */
+ {
+  assert(persist_save());
+  uint8_t schema7[192];memcpy(schema7,image,192);image_len=192;memcpy(image,schema7,192);
+  assert(config_set_key("gyro_notch1_cutoff_hz",150.f)&&config_set_key("gyro_notch1_hz",200.f));
+  persist_init();float n=-1;assert(config_get_key("gyro_notch1_hz",&n)&&n==0.f);
+  assert(persist_load());assert(persist_dirty());assert(config_store_loaded_schema()==7);
+  static const char *const nk[4]={"gyro_notch1_hz","gyro_notch1_cutoff_hz","gyro_notch2_hz","gyro_notch2_cutoff_hz"};
+  for(unsigned i=0;i<4;i++){assert(config_get_key(nk[i],&n)&&n==0.f);}
+  assert(persist_save());assert(image_len==208&&!persist_dirty());
+  for(unsigned i=192;i<208;i+=4)assert(getfloat(image+i)==0.f);
+  assert(!config_set_key("gyro_notch2_hz",300.f)); /* centre before cutoff refused */
+  assert(config_set_key("gyro_notch1_cutoff_hz",150.f)&&config_set_key("gyro_notch1_hz",200.f));
+  assert(config_set_key("gyro_notch2_cutoff_hz",420.f)&&config_set_key("gyro_notch2_hz",600.f));
+  assert(persist_dirty());assert(persist_save());
+  assert(getfloat(image+192)==200.f&&getfloat(image+196)==150.f&&getfloat(image+200)==600.f&&getfloat(image+204)==420.f);
+  persist_init();assert(config_get_key("gyro_notch2_hz",&n)&&n==0.f);assert(persist_load());assert(!persist_dirty());
+  assert(config_get_key("gyro_notch1_hz",&n)&&n==200.f);assert(config_get_key("gyro_notch1_cutoff_hz",&n)&&n==150.f);
+  assert(config_get_key("gyro_notch2_hz",&n)&&n==600.f);assert(config_get_key("gyro_notch2_cutoff_hz",&n)&&n==420.f);
+  /* 600 Hz stays stored with a 1000 Hz loop setting: runtime disables, load keeps it. */
+  assert(loop_rate_setting_set(1000));assert(persist_save());persist_init();assert(persist_load());
+  assert(config_get_key("gyro_notch2_hz",&n)&&n==600.f);
+  uint8_t keep8[208];memcpy(keep8,image,208);
+  putfloat(image+196,250.f);persist_init();assert(!persist_load());assert(!strcmp(persist_last_error(),"invalid_settings")); /* cutoff >= centre */
+  memcpy(image,keep8,208);putfloat(image+192,10.f);persist_init();assert(!persist_load());   /* centre below 20 */
+  memcpy(image,keep8,208);putfloat(image+200,1200.f);persist_init();assert(!persist_load()); /* centre above 1000 */
+  memcpy(image,keep8,208);putfloat(image+204,0.f);persist_init();assert(!persist_load());    /* nonzero centre, cutoff 0 */
+  memcpy(image,keep8,208);{uint32_t nan=0x7fc00000u;put32(image+192,nan);}persist_init();assert(!persist_load());
+  memcpy(image,keep8,208);putfloat(image+192,0.f);persist_init();assert(persist_load()); /* off keeps its cutoff */
+  assert(config_get_key("gyro_notch1_cutoff_hz",&n)&&n==150.f);
+  assert(config_set_key("gyro_notch1_hz",0.f));config_defaults();
+  for(unsigned i=0;i<4;i++){assert(config_get_key(nk[i],&n)&&n==0.f);}
+  memcpy(image,keep8,208);persist_init();assert(persist_load());
+  puts("PASS schema7 -> schema8 notch migration (off/off, dirty), round-trip, static-rule refusal, Nyquist never alters a load");
  }
 
 

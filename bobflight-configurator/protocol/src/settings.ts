@@ -40,6 +40,20 @@ export const SCHEMA6_FLOAT_KEYS = ["pid_yaw_d"] as const;
 export type Schema6FloatKey = (typeof SCHEMA6_FLOAT_KEYS)[number];
 
 /**
+ * Schema 8 manual gyro notch keys (frozen FW contract, see gyro-notch.ts).
+ * Centre 0 = off, else 20..1000; 0 < cutoff < centre. Defaults 0. An older FC
+ * answers "unknown key": getAllSettings omits these keys then (shown unknown).
+ */
+export const SCHEMA8_FLOAT_KEYS = ["gyro_notch1_hz", "gyro_notch1_cutoff_hz", "gyro_notch2_hz", "gyro_notch2_cutoff_hz"] as const;
+
+export type Schema8FloatKey = (typeof SCHEMA8_FLOAT_KEYS)[number];
+
+/** Keys an older FC may not have; a missing one is omitted, never defaulted. */
+export function isOptionalSettingsKey(k: string): k is Schema8FloatKey {
+  return (SCHEMA8_FLOAT_KEYS as readonly string[]).includes(k);
+}
+
+/**
  * Float get/set keys: first-12 PID/rate (+ yaw D) + Gate2 min_throttle/airmode + Schema5 LPF.
  */
 export const SETTINGS_KEYS = [
@@ -59,6 +73,7 @@ export const SETTINGS_KEYS = [
   "min_throttle",
   "airmode",
   ...SCHEMA5_FLOAT_KEYS,
+  ...SCHEMA8_FLOAT_KEYS,
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -102,11 +117,13 @@ export const DEFAULT_SETTING_VALUES: Readonly<Record<SettingsKey, number>> = {
   pid_pitch_p: 0.002, pid_pitch_i: 0.001, pid_pitch_d: 0.00005,
   pid_yaw_p: 0.002, pid_yaw_i: 0.001, pid_yaw_d: 0.00005,
   min_throttle: 0.05, airmode: 0, gyro_lpf_hz: 320, dterm_lpf_hz: 53,
+  gyro_notch1_hz: 0, gyro_notch1_cutoff_hz: 0, gyro_notch2_hz: 0, gyro_notch2_cutoff_hz: 0,
 };
 
 export const DEFAULT_SETTINGS: Readonly<Record<SettingsKey, string>> = {
   rate_max_roll: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_roll), rate_max_pitch: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_pitch), rate_max_yaw: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_yaw), rate_expo: formatFwFloat(DEFAULT_SETTING_VALUES.rate_expo),
   pid_roll_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_p), pid_roll_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_i), pid_roll_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_d), pid_pitch_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_p), pid_pitch_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_i), pid_pitch_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_d), pid_yaw_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_p), pid_yaw_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_i), pid_yaw_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_d), min_throttle: formatFwFloat(DEFAULT_SETTING_VALUES.min_throttle), airmode: formatFwFloat(DEFAULT_SETTING_VALUES.airmode), gyro_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.gyro_lpf_hz), dterm_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.dterm_lpf_hz),
+  gyro_notch1_hz: "0", gyro_notch1_cutoff_hz: "0", gyro_notch2_hz: "0", gyro_notch2_cutoff_hz: "0",
 };
 export function cloneDefaultSettings(): Record<SettingsKey,string> { return { ...DEFAULT_SETTINGS }; }
 export function cloneDefaultSettingValues(): Record<SettingsKey,number> { return { ...DEFAULT_SETTING_VALUES }; }
@@ -117,6 +134,9 @@ export function validateSettingValue(key: SettingsKey, value: number): boolean {
   if (key === "min_throttle") return value >= 0 && value <= 0.2;
   if (key === "airmode") return value === 0 || value === 1;
   if (key === "gyro_lpf_hz" || key === "dterm_lpf_hz") return value === 0 || (value >= 10 && value <= 1000);
+  // Single-value domain only; the pair rule (cutoff < centre) is notchPairProblem in gyro-notch.ts.
+  if (key === "gyro_notch1_hz" || key === "gyro_notch2_hz") return value === 0 || (value >= 20 && value <= 1000);
+  if (key === "gyro_notch1_cutoff_hz" || key === "gyro_notch2_cutoff_hz") return value >= 0 && value < 1000;
   return value >= 0 && value <= 10;
 }
 export function parseCliFloat(token: string): number | null {

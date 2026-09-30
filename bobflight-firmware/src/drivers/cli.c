@@ -49,6 +49,7 @@ static void cli_write_str(const char *s)
 #include "drivers/pid_diag_cli.h"
 #include "drivers/sd_cli.h"
 #include "drivers/blackbox_cli.h"
+#include "drivers/filters_cli.h"
 
 static void cmd_control_mode(void)
 {
@@ -97,6 +98,7 @@ static void cmd_help(void)
         "  pid_diag [status|start|start rx|stop] - 60s zero-output rate/PID diagnostic\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
         "  loop_rate - loop-rate policy: setting, pending reboot, active gyro/denom and fallback reason\r\n"
+        "  filters  - gyro notch runtime state (active, reason) at the actual filter rate\r\n"
         "  bl / BL  - ST ROM bootloader; bl discard explicitly loses unsaved RAM changes\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
 }
@@ -346,6 +348,10 @@ static void cmd_set(const char *key, const char *valstr)
         cli_write_str(msg);
         return;
     }
+    /* Manual gyro notches: pair rule + actual-loop-rate Nyquist limit. */
+    if (cmd_set_notch(key, valstr)) {
+        return;
+    }
     v = strtof(valstr, &end);
     if (end == valstr) {
         cli_write_str("set failed\r\n");
@@ -410,6 +416,8 @@ static void handle_line(char *line)
         cmd_timing();
     } else if (strcmp(line, "loop_rate") == 0) {
         cmd_loop_rate();
+    } else if (strcmp(line, "filters") == 0) {
+        cmd_filters();
     } else if (strncmp(line, "control_source ", 15) == 0) {
         const char *arg=line+15;
         bool valid=strcmp(arg,"manual")==0 || strcmp(arg,"aux")==0;

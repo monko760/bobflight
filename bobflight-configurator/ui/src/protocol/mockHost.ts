@@ -18,6 +18,10 @@ import {
   mockLoopStatusLines,
   mockLoopRateBidir,
   MockLoopRateSetting,
+  MockGyroNotch,
+  isGyroNotchKey,
+  isGyroNotchCliCommand,
+  type GyroNotchMockScenario,
   type LoopRateMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
@@ -74,7 +78,11 @@ export class MockBobFlightHost implements BobFlightHost {
   /** `get/set loop_rate_hz` + `loop_rate` (same wire as protocol MockSerial). */
   private readonly loopRateSetting = new MockLoopRateSetting(() => this.loopRateScenario);
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario }) {
+  /** Manual gyro notches (schema 8; same wire as protocol MockSerial). */
+  private readonly gyroNotch: MockGyroNotch;
+
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario }) {
+    this.gyroNotch = new MockGyroNotch(opts?.gyroNotchScenario ?? "off");
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
     this.gyroHealthy = opts?.gyroHealthy ?? false;
     this.loopRateScenario = opts?.loopRateScenario ?? "missing";
@@ -173,7 +181,7 @@ export class MockBobFlightHost implements BobFlightHost {
 
   async sendCommand(cmd: CliCommand): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100)|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd) && !/^(get erpm_m[1-4]|get dshot_telem_m[1-4]|get dshot_bidir|set dshot_bidir (?:on|off))$/.test(cmd)) {
+    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100)|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd) && !/^(get erpm_m[1-4]|get dshot_telem_m[1-4]|get dshot_bidir|set dshot_bidir (?:on|off))$/.test(cmd) && !isGyroNotchCliCommand(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     if (this.status !== "connected") {
@@ -208,6 +216,12 @@ export class MockBobFlightHost implements BobFlightHost {
     if (!(SETTINGS_KEYS as readonly string[]).includes(key)) {
       throw new Error("unknown key");
     }
+    if (isGyroNotchKey(key)) {
+      const reply = this.gyroNotch.handle(`get ${key}`, this.armed)!.trim();
+      const idx = reply.indexOf("=");
+      if (idx <= 0) throw new Error(reply);
+      return { key, value: reply.slice(idx + 1) };
+    }
     return { key, value: this.settings[key] };
   }
 
@@ -218,6 +232,13 @@ export class MockBobFlightHost implements BobFlightHost {
     this.requireConnected();
     if (!(SETTINGS_KEYS as readonly string[]).includes(key)) {
       throw new Error("unknown key");
+    }
+    if (isGyroNotchKey(key)) {
+      // FW-identical reply; refusals surface the FW line verbatim.
+      const reply = this.gyroNotch.handle(`set ${key} ${value}`, this.armed)!.trim();
+      const m = /^ok ([a-z0-9_]+)=(\S+)$/.exec(reply);
+      if (!m) throw new Error(reply);
+      return { key, value: m[2] };
     }
     if (!Number.isFinite(Number(value))) {
       throw new Error("set failed");
@@ -239,12 +260,17 @@ export class MockBobFlightHost implements BobFlightHost {
     this.requireConnected();
     this.settings = cloneDefaultSettings();
     this.loopRateSetting.defaults();
-    return { ...this.settings };
+    this.gyroNotch.defaults();
+    return this.getAllSettings();
   }
 
   async getAllSettings(): Promise<Record<SettingsKey, string>> {
     this.requireConnected();
-    return { ...this.settings };
+    const out = { ...this.settings } as Record<string, string>;
+    // Notch keys come from the FC mock; an older FC omits them (shown unknown, never 0).
+    for (const k of Object.keys(out)) if (isGyroNotchKey(k)) delete out[k];
+    if (this.gyroNotch.supported) Object.assign(out, this.gyroNotch.snapshot());
+    return out as Record<SettingsKey, string>;
   }
 
   private modesPorts = new MockPortsModes();
@@ -286,6 +312,7 @@ export class MockBobFlightHost implements BobFlightHost {
     if(cmd === "sd probe" || cmd === "sd status" || cmd === "sd cancel")return "sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n";
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
     {const lr=this.loopRateSetting.handle(cmd,this.armed);if(lr!==null)return lr;}
+    {const gn=this.gyroNotch.handle(cmd,this.armed);if(gn!==null)return gn;}
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;
     if(cmd==="reboot") this.receiver.reset();
@@ -362,11 +389,13 @@ export class MockBobFlightHost implements BobFlightHost {
     gyroHealthy?: boolean;
     failsafeActive?: boolean;
     loopRateScenario?: LoopRateMockScenario;
+    gyroNotchScenario?: GyroNotchMockScenario;
   }): void {
     if (opts.loopRateScenario !== undefined) {
       this.loopRateScenario = opts.loopRateScenario;
       this.dshotBidir = mockLoopRateBidir(opts.loopRateScenario);
     }
+    if (opts.gyroNotchScenario !== undefined) this.gyroNotch.setScenario(opts.gyroNotchScenario);
     if (opts.gyroHealthy !== undefined) this.gyroHealthy = opts.gyroHealthy;
     if (opts.failsafeActive !== undefined) {
       this.failsafeActive = opts.failsafeActive;

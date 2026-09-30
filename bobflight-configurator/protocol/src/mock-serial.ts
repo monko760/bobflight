@@ -19,6 +19,8 @@ import {
   validateSettingValue,
   type SettingsKey,
 } from "./settings";
+import { MockGyroNotch, type GyroNotchMockScenario } from "./gyro-notch-mock";
+import { isGyroNotchKey } from "./gyro-notch";
 
 /** Path prefix for MockSerial ports (enumerate + connect). */
 export const MOCK_PORT_PATH = "mock://bobflight";
@@ -63,6 +65,8 @@ export interface MockSerialOptions {
    * the honest "no physical SD card" reply; "ok"/"slow" are explicit sims.
    */
   blackboxCard?: MockBlackboxCard;
+  /** Manual gyro notches (schema 8): off (default) | ok | above-nyquist | invalid | old-fc. */
+  gyroNotchScenario?: GyroNotchMockScenario;
 }
 
 /**
@@ -88,6 +92,8 @@ export class MockSerial extends EventEmitter {
   private loopRateScenario: LoopRateMockScenario;
   /** `get/set loop_rate_hz` + `loop_rate`, derived from loopRateScenario (missing = older FC). */
   private readonly loopRateSetting = new MockLoopRateSetting(() => this.loopRateScenario);
+  /** `get/set gyro_notch*` + `filters` (schema 8 notches; old-fc = older firmware). */
+  private readonly gyroNotch: MockGyroNotch;
   /** Numeric store mirroring bf_config_t floats. */
   private settings: Record<SettingsKey, number>;
   private readonly opts: Required<
@@ -111,6 +117,7 @@ export class MockSerial extends EventEmitter {
     this.telemByMotor = { ...(opts.dshotTelemByMotor ?? {}) };
     this.loopRateScenario = opts.loopRateScenario ?? "missing";
     this.blackbox = new MockOnboardBlackbox(opts.blackboxCard ?? "none");
+    this.gyroNotch = new MockGyroNotch(opts.gyroNotchScenario ?? "off");
     this.modesPorts.reset();
     this.dshotBidir = mockLoopRateBidir(this.loopRateScenario);
     this.settings = cloneDefaultSettingValues();
@@ -128,6 +135,10 @@ export class MockSerial extends EventEmitter {
       { path: "mock://bobflight-sd", manufacturer: "BobFlight", friendlyName: "Onboard Blackbox SD card demo — SIMULATED", serialNumber: "MOCK-SD" },
       { path: "mock://bobflight-sd-slow", manufacturer: "BobFlight", friendlyName: "Onboard Blackbox slow SD card demo (auto-lowered rate) — SIMULATED", serialNumber: "MOCK-SD-SLOW" },
       { path: "mock://bobflight-sd-api1", manufacturer: "BobFlight", friendlyName: "Onboard Blackbox older firmware (api 1) demo — SIMULATED", serialNumber: "MOCK-SD-API1" },
+      { path: "mock://bobflight-notch-ok", manufacturer: "BobFlight", friendlyName: "Gyro notch active (200 Hz) demo — SIMULATED", serialNumber: "MOCK-NOTCH-OK" },
+      { path: "mock://bobflight-notch-nyquist", manufacturer: "BobFlight", friendlyName: "Gyro notch above Nyquist (600 Hz at 1 kHz loop) demo — SIMULATED", serialNumber: "MOCK-NOTCH-NYQ" },
+      { path: "mock://bobflight-notch-invalid", manufacturer: "BobFlight", friendlyName: "Gyro notch reported invalid demo — SIMULATED", serialNumber: "MOCK-NOTCH-INV" },
+      { path: "mock://bobflight-notch-old", manufacturer: "BobFlight", friendlyName: "Older firmware without gyro notches demo — SIMULATED", serialNumber: "MOCK-NOTCH-OLD" },
     ]);
   }
 
@@ -203,6 +214,7 @@ export class MockSerial extends EventEmitter {
     if(line === "sd probe" || line === "sd status" || line === "sd cancel"){this.emitData("sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n");return;}
     if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
     {const lr=this.loopRateSetting.handle(line,this.armed);if(lr!==null){this.emitData(lr);return;}}
+    {const gn=this.gyroNotch.handle(line,this.armed);if(gn!==null){this.emitData(gn);return;}}
     const pm = this.modesPorts.handle(line,this.armed,this.bench.active);
     if(pm!==null){this.emitData(pm);return;}
     const sensorReply = mockSensorReply(line, this.armed);
@@ -272,6 +284,7 @@ export class MockSerial extends EventEmitter {
       this.modesPorts.reset();
     this.settings = cloneDefaultSettingValues();
       this.loopRateSetting.defaults();
+      this.gyroNotch.defaults();
       this.emitData("defaults restored\r\n");
     } else if (line.startsWith("get ") || line === "get") {
       const key = line === "get" ? "" : line.slice(4).trim();
@@ -383,8 +396,10 @@ export class MockSerial extends EventEmitter {
   getSettingsSnapshot(): Record<SettingsKey, string> {
     const out = {} as Record<SettingsKey, string>;
     for (const key of Object.keys(this.settings) as SettingsKey[]) {
+      if (isGyroNotchKey(key)) continue;
       out[key] = formatFwFloat(this.settings[key]);
     }
+    if (this.gyroNotch.supported) Object.assign(out, this.gyroNotch.snapshot());
     return out;
   }
 }

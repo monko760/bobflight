@@ -1,5 +1,7 @@
 # Settings persistence (schema 6)
 
+> **Schema 8 (current):** schema 7 (`loop_rate_hz` at 188–191, 192 bytes) plus the manual gyro notch floats (LE) at **192–195** `gyro_notch1_hz`, **196–199** `gyro_notch1_cutoff_hz`, **200–203** `gyro_notch2_hz`, **204–207** `gyro_notch2_cutoff_hz`. Payload **208** bytes, `MAX_PAYLOAD` 208. Older records load with both notches off (0) and stay dirty until an explicit Save. Load checks the pair rule only; the loop-rate (Nyquist) limit is applied at runtime. See [GYRO-NOTCH.md](GYRO-NOTCH.md). The schema 6 text below is kept for history.
+
 Schema 6 extends schema 5 with `pid_yaw_d` (float LE, default **0.00005**, clamp **0..10** finite like other `pid_*` D gains). Schema 5 (and older) records load with this default and mark dirty until an explicit Save.
 
 Payload is **188** bytes: schema-5 bytes 0–183 unchanged (160–163 `min_throttle`, 164 `airmode`, **165–175 remain reserved / zero — do not overload**, 176–179 `gyro_lpf_hz`, 180–183 `dterm_lpf_hz`), then **184–187** `pid_yaw_d`. `MAX_PAYLOAD` is 192.

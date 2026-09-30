@@ -2,7 +2,7 @@
 """Actual host firmware CLI: persisted `loop_rate_hz` setting per board.
 get/set conventions, exact 1000|4000|8000 validation, board refusal of the
 8 kHz gyro path, save+reboot note, pending-reboot flag, diff/dump/defaults,
-storage schema 7, and save + (host warm) reboot applying the new rate while
+storage schema 8 (was 7 before the schema 8 notches), and save + (host warm) reboot applying the new rate while
 status loop_target_hz reports the rate actually applied."""
 import os,re,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
@@ -44,8 +44,8 @@ t=values(lines,'loop_target_hz');assert len(t)==2 and t[0]==t[1]==DEFAULT,(t,lin
 assert values(lines,'loop_rate_setting_hz')==[CHANGED],lines
 assert values(lines,'loop_rate_boot_setting_hz')==[DEFAULT],lines
 assert values(lines,'loop_rate_pending_reboot')==['1' if CHANGED!=DEFAULT else '0'],lines
-assert values(lines,'schema')==['7'] and values(lines,'# schema')==['7','7'],lines
-assert all(s.endswith(',loop_rate_hz') for s in values(lines,'scope')+values(lines,'# scope')),lines
+assert values(lines,'schema')==['8'] and values(lines,'# schema')==['8','8'],lines
+assert all(s.endswith(',loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz') for s in values(lines,'scope')+values(lines,'# scope')),lines
 sets=[l for l in lines if l.startswith('set loop_rate_hz ')]
 # diff lists it only when it differs from the board default; dump always does.
 assert sets==([f'set loop_rate_hz {CHANGED}']*2 if CHANGED!=DEFAULT else [f'set loop_rate_hz {DEFAULT}']),sets
@@ -70,4 +70,4 @@ assert 'defaults restored' in lines
 assert not [l for l in lines if l.startswith('set loop_rate_hz ')],lines  # diff after defaults
 print(f'PASS loop_rate_hz CLI ({board}): default {DEFAULT}, invalid rejected, '
       f'{"8000 accepted" if FAST else "4000/8000 refused"}, pending until save+reboot, '
-      f'diff/dump/defaults, schema 7, reboot applies target {want_target}')
+      f'diff/dump/defaults, schema 8, reboot applies target {want_target}')

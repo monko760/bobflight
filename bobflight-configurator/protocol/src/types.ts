@@ -76,7 +76,13 @@ export type CliCommand =
   | "set loop_rate_hz 1000"
   | "set loop_rate_hz 4000"
   | "set loop_rate_hz 8000"
-  | "loop_rate";
+  | "loop_rate"
+  // Manual gyro notches (FW config schema 8; see gyro-notch.ts isGyroNotchCliCommand)
+  | "filters"
+  | `get gyro_notch${1 | 2}_hz`
+  | `get gyro_notch${1 | 2}_cutoff_hz`
+  | `set gyro_notch${1 | 2}_hz ${number}`
+  | `set gyro_notch${1 | 2}_cutoff_hz ${number}`;
 
 export interface ConnectOptions {
   path: string;

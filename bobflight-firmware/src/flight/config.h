@@ -32,6 +32,15 @@ typedef struct {
     uint8_t airmode;    /* 0=off (bench-safe), 1=keep I integrating at idle */
     float gyro_lpf_hz;  /* soft gyro LPF; 0=off, else 10..1000; default 320 */
     float dterm_lpf_hz; /* soft D-term LPF; 0=off, else 10..1000; default 53 */
+    /* Manual gyro notches (schema 8). Centre 0 = off, else 20..1000 Hz with
+     * 0 < cutoff < centre (cutoff = lower -3 dB edge). Defaults 0/0. The
+     * sample-rate (Nyquist) limit is not a stored-setting property: the CLI
+     * refuses it at `set`, and the filter disables an out-of-range notch at
+     * runtime (reported by `filters`) without touching these values. */
+    float gyro_notch1_hz;
+    float gyro_notch1_cutoff_hz;
+    float gyro_notch2_hz;
+    float gyro_notch2_cutoff_hz;
 } bf_config_t;
 
 void config_init(void);
@@ -40,6 +49,10 @@ const bf_config_t *config_get(void);
 bool config_get_key(const char *key, float *out);
 bool config_set_key(const char *key, float value);
 const bf_config_t *config_blob(void);
+/** Static notch pair rule: centre 0 (cutoff 0..<1000), or 20..1000 with 0 < cutoff < centre. */
+bool config_gyro_notch_pair_valid(float center_hz, float cutoff_hz);
+/** Set notch idx (1 or 2) centre+cutoff together (persist restore); false leaves both unchanged. */
+bool config_set_gyro_notch(unsigned idx, float center_hz, float cutoff_hz);
 void config_load_blob(const bf_config_t *src);
 
 #ifdef __cplusplus

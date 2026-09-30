@@ -30,7 +30,8 @@
     "test:bootloader": "tsc && node tests/bootloader.cjs",
     "test:pid-diagnostics": "tsc && node tests/pid-diagnostics.cjs",
     "test:sd": "tsc && node tests/sd-probe.cjs",
-    "test:blackbox": "tsc && node tests/blackbox-recording.cjs"
+    "test:blackbox": "tsc && node tests/blackbox-recording.cjs",
+    "test:gyro-notch": "tsc && node tests/gyro-notch.cjs"
   },
   "engines": {
     "node": ">=18"
