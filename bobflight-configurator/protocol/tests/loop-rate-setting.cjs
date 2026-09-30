@@ -2,8 +2,8 @@
  * loop_rate_hz setting: reply parsers, view model, allowlist and MockSerial get/set/loop_rate/reboot over the real client. */
 const assert=require('node:assert/strict');
 const {LOOP_RATE_OPTIONS,LOOP_RATE_OPTION_LABELS,LOOP_RATE_SETTING_KEY,isLoopRateCliCommand,loopRateSetCommand,parseLoopRateGetReply,parseLoopRateSetReply,parseLoopRateReport,loopRateSettingView,
-  parseLoopStatus,MockLoopRateSetting,mockLoopRateBootSetting,mockLoopRateBoard,LOOP_RATE_MOCK_SCENARIOS,BobFlightCliClient,MockTransportFactory,
-  LOOP_RATE_ARMED_LINE,LOOP_RATE_INVALID_LINE,loopRateUnsupportedLine}=require('../dist');
+  parseLoopStatus,MockLoopRateSetting,mockLoopRateBootSetting,mockLoopRateBoard,mockLoopRateBidir,LOOP_RATE_MOCK_SCENARIOS,BobFlightCliClient,MockTransportFactory,
+  LOOP_RATE_ARMED_LINE,LOOP_RATE_INVALID_LINE,loopRateUnsupportedLine,loopRateReasonView,LOOP_RATE_REASON_TEXT,LOOP_RATE_REASON_UNKNOWN}=require('../dist');
 let passed=0;const test=async(name,fn)=>{await fn();passed++;console.log(`PASS ${name}`);};
 const NOTE='note: loop_rate_hz takes effect after save + reboot';
 const report=(o={})=>['loop_rate_api: 1',`loop_rate_setting_hz: ${o.setting??'4000'}`,`loop_rate_boot_setting_hz: ${o.boot??'4000'}`,`loop_rate_pending_reboot: ${o.pending??'0'}`,
@@ -97,7 +97,11 @@ async function main(){
   m.defaults();assert.equal(m.handle('get loop_rate_hz',false),'loop_rate_hz=4000\r\n');
   scenario='missing';assert.equal(m.handle('get loop_rate_hz',false),'unknown key\r\n');assert.equal(m.handle('set loop_rate_hz 1000',false),'unknown key\r\n');
   assert.match(m.handle('loop_rate',false),/^unknown/);assert.equal(m.handle('status',false),null);
-  assert.deepEqual(LOOP_RATE_MOCK_SCENARIOS.map(mockLoopRateBootSetting),[null,'1000','4000','4000','8000','8000','1000']);
+  assert.deepEqual(LOOP_RATE_MOCK_SCENARIOS.map(mockLoopRateBootSetting),[null,'1000','4000','4000','8000','8000','1000','4000','8000','4000','4000','4000']);
+  assert.deepEqual(LOOP_RATE_MOCK_SCENARIOS.filter(mockLoopRateBidir),['bidir-4k','bidir-8k-capped','bidir-capture-failed','bidir-older-fc']);
+  // Bidir is RAM-only: a bidir scenario reboots into its plain setting scenario.
+  let b='bidir-8k-capped';const bm=new MockLoopRateSetting(()=>b);assert.equal(bm.reboot(),'8000/1');
+  b='bidir-capture-failed';assert.equal(bm.reboot(),'8000/2');
  });
  await test('mock board without the 8 kHz path (tmotor_f7_v2) refuses 4000/8000 with the exact FW line',()=>{
   let scenario='1000/1-no8k';const m=new MockLoopRateSetting(()=>scenario);
@@ -111,8 +115,39 @@ async function main(){
   m.save();assert.equal(m.reboot(),null,'board stays tmotor after reboot');m.defaults();assert.equal(m.handle('get loop_rate_hz',false),'loop_rate_hz=1000\r\n');
   const r=parseLoopRateReport(m.handle('loop_rate',false));assert.equal(r.bootSettingHz,'1000');assert.equal(r.profile,'1000/1');assert.equal(r.pendingReboot,false);
  });
+ await test('reason card: the FC token exactly as sent, unknown when missing, text only for that token',()=>{
+  const rv=o=>loopRateReasonView(parseLoopRateReport(report(o)));
+  assert.equal(LOOP_RATE_REASON_UNKNOWN,'unknown');
+  assert.deepEqual(loopRateReasonView(null),{token:'unknown',explanation:null,fallback:false});
+  const missing=parseLoopRateReport(report().replace('loop_rate_reason: setting\r\n',''));assert.equal(missing.reason,null);
+  assert.deepEqual(loopRateReasonView(missing),{token:'unknown',explanation:null,fallback:false},'missing reason is unknown, never guessed');
+  assert.equal(loopRateReasonView(parseLoopRateReport(report({reason:'Bad_Token!'}))).token,'unknown','malformed reason is unknown');
+  const same=rv({reason:'setting'});assert.equal(same.token,'setting');assert.equal(same.fallback,false);
+  for(const token of ['dshot-bidir-reply-window','dshot-bidir-capture-failed','dshot-bidir-polled-listen','overrun-guard','no-high-res-timebase','gyro-odr-below-8k','gyro-spi-clock-slow','board-has-no-8k-gyro-path']){
+   const v=rv({reason:token,active:'1000/1'});assert.equal(v.token,token,'token as sent');assert.equal(v.fallback,true);assert.equal(v.explanation,LOOP_RATE_REASON_TEXT[token]);assert.ok(v.explanation);
+  }
+  const future=rv({reason:'some-future-reason'});assert.equal(future.token,'some-future-reason');assert.equal(future.explanation,null,'unrecognised token: verbatim, no invented text');
+  assert.equal(rv({reason:'constructor'}).explanation,null,'no prototype keys');
+  // The pre-B2 "bidir forces 1 kHz" copy belongs to exactly one token.
+  const forces=Object.entries(LOOP_RATE_REASON_TEXT).filter(([,t])=>/forces a 1 kHz/.test(t)).map(([k])=>k);
+  assert.deepEqual(forces,['dshot-bidir-polled-listen']);
+  for(const token of ['setting','dshot-bidir-reply-window','dshot-bidir-capture-failed'])assert.doesNotMatch(rv({reason:token}).explanation,/polled|forces a 1 kHz/,token);
+  assert.equal(rv({reason:'dshot-bidir-reply-window'}).explanation,'Bidirectional DShot is on: the eRPM reply does not fit an 8 kHz loop period, so the firmware lowers the loop below 8 kHz; the applied rate is the Loop target above.');
+  assert.doesNotMatch(rv({reason:'dshot-bidir-reply-window'}).explanation,/4 kHz/,'no hardcoded applied rate');assert.match(rv({reason:'dshot-bidir-capture-failed'}).explanation,/capture/);
+ });
+ await test('B2 bidir reports: 4000 kept, 8000 capped, capture failure and an older FC, each with its own reason',()=>{
+  const capped=loopRateSettingView({kind:'value',value:'8000'},parseLoopRateReport(report({setting:'8000',boot:'8000',profile:'8000/1',active:'8000/2',reason:'dshot-bidir-reply-window'})),'4000');
+  assert.match(capped.notices.join(' '),/running 4000 Hz instead of its boot setting 8000 Hz \(dshot-bidir-reply-window\)/);
+  const failed=loopRateSettingView({kind:'value',value:'4000'},parseLoopRateReport(report({active:'1000/1',reason:'dshot-bidir-capture-failed'})),'1000');
+  assert.match(failed.notices.join(' '),/running 1000 Hz instead of its boot setting 4000 Hz \(dshot-bidir-capture-failed\)/);
+  const kept=loopRateSettingView({kind:'value',value:'4000'},parseLoopRateReport(report({reason:'setting'})),'4000');
+  assert.doesNotMatch(kept.notices.join(' '),/instead of|fallback|bidir|1 kHz/,'bidir at 4 kHz: no fallback text');
+  const noReason=loopRateSettingView({kind:'value',value:'4000'},parseLoopRateReport(report({active:'1000/1'}).replace('loop_rate_reason: setting\r\n','')),'1000');
+  assert.match(noReason.notices.join(' '),/\(reason unknown\)/);assert.doesNotMatch(noReason.notices.join(' '),/bidir/);
+ });
  await test('real client over MockSerial: get/set/loop_rate per scenario, framed loop_rate, reboot needed',async()=>{
-  const want={'1000/1':'1000','8000/2':'4000','unavailable':'4000','8000/1':'8000','8000/1-guard':'8000','1000/1-no8k':'1000'};
+  const want={'1000/1':'1000','8000/2':'4000','unavailable':'4000','8000/1':'8000','8000/1-guard':'8000','1000/1-no8k':'1000',
+   'bidir-4k':'4000','bidir-8k-capped':'8000','bidir-capture-failed':'4000','bidir-older-fc':'4000','reason-missing':'4000'};
   for(const scenario of LOOP_RATE_MOCK_SCENARIOS){
    const client=new BobFlightCliClient(new MockTransportFactory(scenario==='missing'?undefined:{loopRateScenario:scenario}));
    await client.connect({path:'mock://bobflight',transport:'mock'});await new Promise(r=>setTimeout(r,15));
@@ -123,7 +158,11 @@ async function main(){
    const rep=parseLoopRateReport(await client.sendCommand('loop_rate'));
    assert.equal(rep.bootSettingHz,want[scenario]);assert.equal(rep.pendingReboot,false);
    const view=loopRateSettingView(get,rep,target);
-   assert.equal(/instead of/.test(view.notices.join(' ')),scenario==='8000/1-guard',`${scenario}: only the guard scenario runs below its setting`);
+   const below=['8000/1-guard','bidir-8k-capped','bidir-capture-failed','bidir-older-fc'];
+   assert.equal(/instead of/.test(view.notices.join(' ')),below.includes(scenario),`${scenario}: runs below its setting only when the FC says so`);
+   const reasons={'8000/1-guard':'overrun-guard','bidir-8k-capped':'dshot-bidir-reply-window','bidir-capture-failed':'dshot-bidir-capture-failed','bidir-older-fc':'dshot-bidir-polled-listen','reason-missing':'unknown'};
+   assert.equal(loopRateReasonView(rep).token,reasons[scenario]??'setting',`${scenario}: reason exactly as the mock FC sent it`);
+   assert.equal(/dshot_bidir=on/.test(await client.sendCommand('get dshot_bidir')),mockLoopRateBidir(scenario),`${scenario}: bidir state matches the fixture`);
    const set=parseLoopRateSetReply(await client.sendCommand('set loop_rate_hz 1000'),'1000');assert.deepEqual(set,{ok:true,value:'1000',rebootRequired:true});
    const after=loopRateSettingView(parseLoopRateGetReply(await client.sendCommand('get loop_rate_hz')),parseLoopRateReport(await client.sendCommand('loop_rate')),target);
    assert.equal(after.pendingReboot,!['1000/1','1000/1-no8k'].includes(scenario));

@@ -15,6 +15,9 @@ void hal_f7_rcc_gpio_enable(unsigned port){(void)port;assert(0 && "unexpected GP
 hal_f7_gpio_regs_t *hal_f7_gpio(unsigned port){(void)port;assert(0 && "unexpected GPIO pointer");return NULL;}
 uint32_t hal_millis(void){assert(0 && "ADC must not start a cycle");return 0;}
 void __DMB(void){} /* disabled motor path never reaches a burst */
+/* B2 bidir capture coupling (hal_tim_ic.c not linked): never armed here. */
+bool hal_f7_dshot_ic_tc_irq_wanted(unsigned group){(void)group;return false;}
+void hal_f7_dshot_ic_quiesce(unsigned group){(void)group;}
 int main(void){
  const hal_pin_t pins[]={HAL_PIN_PACK(1,0),HAL_PIN_PACK(1,1),HAL_PIN_PACK(1,4),HAL_PIN_PACK(1,5),HAL_PIN_PACK(4,9),HAL_PIN_PACK(4,11)};
  const unsigned tim[]={3,3,3,3,1,1},ch[]={3,4,1,2,1,2};
@@ -26,6 +29,7 @@ int main(void){
  assert(!hal_tim_dma_start_burst(NULL,NULL,0));
  assert(hal_tim_dma_set_bit_rate(600000)); /* no initialized timer => RAM setting only */
  assert(!hal_tim_dma_set_bit_rate(123));
+ hal_tim_dma_set_inverted(true); hal_tim_dma_set_inverted(false); /* RAM flag only: no MMIO, no GPIO */
  hal_power_adc_init(HAL_PIN_PACK(2,2),HAL_PIN_PACK(2,3));
  uint16_t v=123,c=456;assert(!hal_power_adc_poll(&v,&c)&&v==123&&c==456);
  /* Even a mistaken Kakute pin pair must not initialize ADC on this board. */

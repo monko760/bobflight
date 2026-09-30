@@ -13,3 +13,17 @@ target_include_directories(bobflight_dshot_telem_test PRIVATE
 target_compile_definitions(bobflight_dshot_telem_test PRIVATE BOBFLIGHT_HOST=1)
 target_link_libraries(bobflight_dshot_telem_test m)
 add_test(NAME dshot_telem_r0c COMMAND bobflight_dshot_telem_test)
+
+# B2: non-blocking DMA capture pipeline at 4 kHz (timeline-simulated HAL).
+add_executable(bobflight_dshot_erpm_4k_test
+  src/drivers/dshot.c
+  src/drivers/dshot_gcr.c
+  src/drivers/dshot_telem.c
+  src/sched/loop_rate.c
+  tests/host_dshot_erpm_4k.c)
+target_include_directories(bobflight_dshot_erpm_4k_test PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(bobflight_dshot_erpm_4k_test PRIVATE BOBFLIGHT_HOST=1)
+target_link_libraries(bobflight_dshot_erpm_4k_test m)
+add_test(NAME dshot_erpm_4k COMMAND bobflight_dshot_erpm_4k_test)

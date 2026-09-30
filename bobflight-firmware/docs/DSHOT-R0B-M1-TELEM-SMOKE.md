@@ -42,6 +42,10 @@ Expected Lead mappings onto `dshot_telem.h`:
 
 ## Open HAL notes
 
+> **Superseded by B2** ([DSHOT-BIDIR-4K.md](DSHOT-BIDIR-4K.md)): DMA input
+> capture, pipelined one frame behind; no polled CCxIF collection.
+
+
 - R0b IC uses post-TX DMA-TC wait + **polled** CC3IF edge collection, then
   restores CH3 PWM. Flight-quality DMA/IRQ IC and precise listen-window timing
   remain follow-ups.

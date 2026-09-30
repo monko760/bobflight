@@ -27,6 +27,8 @@ void USART3_IRQHandler(void);
 void UART4_IRQHandler(void);
 void USART6_IRQHandler(void);
 void UART7_IRQHandler(void);
+void DMA1_Stream2_IRQHandler(void); /* DShot TIM3_UP TX TC → bidir capture (B2) */
+void DMA2_Stream5_IRQHandler(void); /* DShot TIM1_UP TX TC → bidir capture (B2) */
 
 /* Sticky crumb — NOT in .bss (survives after BSS clear once Reset seeds it). */
 volatile uint8_t g_boot_crumb __attribute__((section(".noinit")));
@@ -239,7 +241,7 @@ static const vector_fn g_vectors[16 + 83] = {
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 0-3 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 4-7 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 8-11 */
-    Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 12-15 */
+    Default_Handler, DMA1_Stream2_IRQHandler, Default_Handler, Default_Handler, /* 12-15: 13 DMA1_Stream2 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 16-19 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 20-23 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 24-27 */
@@ -254,7 +256,7 @@ static const vector_fn g_vectors[16 + 83] = {
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 60-63 */
     Default_Handler, Default_Handler, Default_Handler,                 /* 64-66 */
     OTG_FS_IRQHandler, /* 67 OTG_FS */
-    Default_Handler, Default_Handler, Default_Handler, /* 68-70 */
+    DMA2_Stream5_IRQHandler, Default_Handler, Default_Handler, /* 68 DMA2_Stream5, 69-70 */
     USART6_IRQHandler, /* 71 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 72-75 */
     Default_Handler, Default_Handler, Default_Handler, Default_Handler, /* 76-79 */

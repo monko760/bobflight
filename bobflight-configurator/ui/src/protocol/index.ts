@@ -40,5 +40,5 @@ export type {StorageSnapshot} from "@bobflight/protocol";
 
 export { parseLoopStatus, loopRateView, LOOP_LABELS, LOOP_STATUS_KEYS, LOOP_UNKNOWN, mockLoopStatusLines, LOOP_RATE_MOCK_SCENARIOS } from "@bobflight/protocol";
 export type { LoopStatus, LoopRateView, LoopRateItem, LoopRateMockScenario } from "@bobflight/protocol";
-export { LOOP_RATE_SETTING_KEY, LOOP_RATE_OPTIONS, LOOP_RATE_OPTION_LABELS, LOOP_RATE_SETTING_UNKNOWN, isLoopRateOption, loopRateSetCommand, parseLoopRateGetReply, parseLoopRateSetReply, parseLoopRateReport, loopRateSettingView } from "@bobflight/protocol";
-export type { LoopRateOption, LoopRateGetResult, LoopRateSetResult, LoopRateReport, LoopRateSettingView } from "@bobflight/protocol";
+export { LOOP_RATE_SETTING_KEY, LOOP_RATE_OPTIONS, LOOP_RATE_OPTION_LABELS, LOOP_RATE_SETTING_UNKNOWN, isLoopRateOption, loopRateSetCommand, parseLoopRateGetReply, parseLoopRateSetReply, parseLoopRateReport, loopRateSettingView, LOOP_RATE_REASON_UNKNOWN, LOOP_RATE_REASON_TEXT, loopRateReasonView } from "@bobflight/protocol";
+export type { LoopRateOption, LoopRateGetResult, LoopRateSetResult, LoopRateReport, LoopRateSettingView, LoopRateReasonView } from "@bobflight/protocol";
