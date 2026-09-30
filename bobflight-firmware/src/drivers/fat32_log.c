@@ -99,6 +99,8 @@ typedef enum {
     SUB_WRITE_DO_DATA_WRITE,
     SUB_WRITE_READ_VERIFY_DATA,
     SUB_WRITE_CHECK_VERIFY_DATA,
+    SUB_PATCH_READ_VERIFY,
+    SUB_PATCH_CHECK,
 
     /* CLOSING Substates */
     SUB_CLOSE_READ_DIR_SEC,
@@ -252,6 +254,18 @@ bool fatlog_write(fatlog_t *fs, const uint8_t sector[FATLOG_SECTOR_SIZE], uint16
     fs->io_pending = false;
 
     return true;
+}
+
+bool fatlog_rewrite_first_sector(fatlog_t *fs, const uint8_t sector[FATLOG_SECTOR_SIZE], uint64_t now) {
+    if (!fs || !sector || fs->phase != FATLOG_READY || fs->bytes_written < FATLOG_SECTOR_SIZE || fs->start_cluster < 2) {
+        return false;
+    }
+    fs->poll_now = now;
+    memcpy(fs->write_buf, sector, FATLOG_SECTOR_SIZE);
+    fs->phase = FATLOG_WRITING;
+    fs->substate = SUB_PATCH_READ_VERIFY;
+    fs->io_pending = false;
+    return start_async_write(fs, cluster_to_lba(fs, fs->start_cluster, 0), fs->write_buf);
 }
 
 bool fatlog_close(fatlog_t *fs, uint64_t now) {
@@ -1081,6 +1095,7 @@ int fatlog_poll(fatlog_t *fs, uint64_t now) {
             fs->fsinfo_free_count--;
         }
         fs->fsinfo_next_free = fs->start_cluster + 1;
+        fs->alloc_hint = fs->start_cluster + 1;
 
         fs->fsinfo_free_count=UINT32_MAX;fs->fsinfo_next_free=UINT32_MAX;
         put32(fs->sector_buf + 488, fs->fsinfo_free_count);
@@ -1116,8 +1131,9 @@ int fatlog_poll(fatlog_t *fs, uint64_t now) {
 
     case SUB_WRITE_CHECK_CLUSTER:
         if (fs->cluster_sec_offset >= fs->sectors_per_cluster) {
-            /* Current cluster full; search and link next cluster */
-            uint32_t hint = fs->fsinfo_next_free;
+            /* Current cluster full; search and link next cluster, starting at
+             * the RAM hint (cluster after the last one this file allocated). */
+            uint32_t hint = fs->alloc_hint;
             if (hint < 2 || hint >= fs->total_clusters + 2) hint = 2;
 
             fs->search_fat_cluster = hint;
@@ -1312,6 +1328,7 @@ int fatlog_poll(fatlog_t *fs, uint64_t now) {
             start_async_write(fs, prev_fat2_lba, fs->fat_staging_buf);
         } else {
             fs->current_cluster = fs->link_new_cluster;
+            fs->alloc_hint = fs->link_new_cluster + 1;
             fs->cluster_sec_offset = 0;
             fs->substate = SUB_WRITE_DO_DATA_WRITE;
             start_async_write(fs, cluster_to_lba(fs, fs->current_cluster, fs->cluster_sec_offset), fs->write_buf);
@@ -1334,19 +1351,17 @@ int fatlog_poll(fatlog_t *fs, uint64_t now) {
         }
 
         fs->current_cluster = fs->link_new_cluster;
+        fs->alloc_hint = fs->link_new_cluster + 1;
         fs->cluster_sec_offset = 0;
         fs->substate = SUB_WRITE_DO_DATA_WRITE;
         start_async_write(fs, cluster_to_lba(fs, fs->current_cluster, fs->cluster_sec_offset), fs->write_buf);
         break;
     }
 
-    case SUB_WRITE_DO_DATA_WRITE: {
-        fs->substate = SUB_WRITE_READ_VERIFY_DATA;
-        start_async_read(fs, cluster_to_lba(fs, fs->current_cluster, fs->cluster_sec_offset));
-        break;
-    }
-
+    case SUB_WRITE_DO_DATA_WRITE:
     case SUB_WRITE_READ_VERIFY_DATA: {
+        /* Exactly one full-sector readback per data write. (Previously a second,
+         * redundant readback of the same sector was issued: 3 transfers/sector.) */
         fs->substate = SUB_WRITE_CHECK_VERIFY_DATA;
         start_async_read(fs, cluster_to_lba(fs, fs->current_cluster, fs->cluster_sec_offset));
         break;
@@ -1360,6 +1375,20 @@ int fatlog_poll(fatlog_t *fs, uint64_t now) {
 
         fs->bytes_written += fs->write_used_bytes;
         fs->cluster_sec_offset++;
+        fs->phase = FATLOG_READY;
+        fs->substate = SUB_IDLE;
+        break;
+
+    case SUB_PATCH_READ_VERIFY:
+        fs->substate = SUB_PATCH_CHECK;
+        start_async_read(fs, cluster_to_lba(fs, fs->start_cluster, 0));
+        break;
+
+    case SUB_PATCH_CHECK:
+        if (memcmp(fs->sector_buf, fs->write_buf, FATLOG_SECTOR_SIZE) != 0) {
+            set_error(fs, "first-sector-rewrite-verification-failed");
+            break;
+        }
         fs->phase = FATLOG_READY;
         fs->substate = SUB_IDLE;
         break;
