@@ -21,7 +21,7 @@ bool hal_exti_attach(hal_pin_t p,hal_exti_cb_t cb,void *ctx){(void)p;(void)cb;(v
 void hal_delay_ms(uint32_t ms){(void)ms;}
 /* 8 kHz path: sensor reads re-clocked after configuration; count any register
  * write issued above the 1 MHz all-register limit. */
-uint32_t hal_spi_set_hz(hal_spi_bus_t *bus,uint32_t max_hz){(void)bus;spi_set_calls++;spi_hz_request=max_hz;spi_fast=true;return 13500000u;}
+uint32_t hal_spi_set_hz(hal_spi_bus_t *bus,uint32_t max_hz){(void)bus;spi_set_calls++;spi_hz_request=max_hz;spi_fast=max_hz>1000000u;return spi_fast?13500000u:843750u;}
 bool hal_spi_transfer(hal_spi_bus_t *bus,hal_pin_t cs,const uint8_t *tx,uint8_t *rx,size_t n){
  (void)bus;(void)cs;if(broken)return false;memset(rx,0,n);
  if(spi_fast&&!(tx[0]&128))fast_writes++;
@@ -103,7 +103,22 @@ int main(void){float d[3];b.gyro_spi_bus=4;b.gyro_cs_pin=HAL_PIN_PACK(4,4);
  CHECK(gyro_diagnostics()->odr_hz==8000&&gyro_diagnostics()->spi_read_hz==13500000u);
  CHECK(spi_set_calls==1&&spi_hz_request==20000000u&&fast_writes==0);
  regs[0x3a]=1;now++;CHECK(gyro_sample(d));CHECK(fast_writes==0);
+ /* loop_rate_hz 1000 on Kakute: CONFIG back to DLPF_CFG 3 (1 kHz) written at the
+  * <= 1 MHz register clock; 4000/8000 return to DLPF 0 and the fast read clock. */
+ spi_set_calls=fast_writes=0;
+ CHECK(gyro_select_output_rate(false));
+ CHECK(regs[0x1A]==3&&gyro_diagnostics()->odr_hz==1000&&gyro_diagnostics()->spi_read_hz==843750u);
+ CHECK(spi_set_calls==1&&spi_hz_request==1000000u&&fast_writes==0&&gyro_diagnostics()->config_ok);
+ CHECK(gyro_select_output_rate(false)&&spi_set_calls==1); /* already 1 kHz: no bus traffic */
+ CHECK(gyro_select_output_rate(true));
+ CHECK(regs[0x1A]==0&&gyro_diagnostics()->odr_hz==8000&&gyro_diagnostics()->spi_read_hz==13500000u);
+ CHECK(spi_set_calls==3&&spi_hz_request==20000000u&&fast_writes==0);
+ /* A failed CONFIG write is reported, never silently kept at the old rate. */
+ broken=true;CHECK(!gyro_select_output_rate(false));broken=false;
+ CHECK(!gyro_diagnostics()->config_ok&&gyro_diagnostics()->odr_hz==0);
+ CHECK(!gyro_select_output_rate(true)); /* stays failed until the next gyro_init */
  /* Back on a non-Kakute board the 1 kHz DLPF path returns (diagnostics reset). */
  strcpy(b.board_id,"dummy");gyro_init();CHECK(regs[0x1A]==3&&gyro_diagnostics()->odr_hz==1000&&gyro_diagnostics()->spi_read_hz==0);
- puts("PASS: MPU6000 setup, scaling, alignment, calibration reset, bus failure and Kakute 8 kHz ODR / sensor-read SPI clock");return 0;
+ spi_set_calls=0;CHECK(gyro_select_output_rate(true)&&regs[0x1A]==3&&gyro_diagnostics()->odr_hz==1000&&spi_set_calls==0);
+ puts("PASS: MPU6000 setup, scaling, alignment, calibration reset, bus failure, Kakute 8 kHz ODR / sensor-read SPI clock and loop_rate_hz output-rate select");return 0;
 }
