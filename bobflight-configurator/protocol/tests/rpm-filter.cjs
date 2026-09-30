@@ -22,7 +22,8 @@ async function main(){
   for(const [x,q] of [['500','5'],['350','3.5'],['125','1.25'],['100','1'],['1000','10'],['101','1.01']])assert.equal(qFromX100(x),q,x);
   for(const [q,x] of [['5',500],['3.5',350],['1.25',125],['10',1000],[' 2.50 ',250]])assert.equal(qToX100(q),x,q);
   for(const q of ['1.255','abc','','-1','5e2','100'])assert.equal(qToX100(q),null,q);
-  assert.equal(qFromX100('abc'),'abc','non-integer FC value shown verbatim');
+  for(const x of ['350.5','abc','','-5','5e2'])assert.equal(qFromX100(x),RPM_FILTER_UNKNOWN,`${x}: not a whole number -> unknown (nit 10)`);
+  assert.equal(rpmFilterView(values({q:'350.5'}),parseRpmFilterReport(report())).q,RPM_FILTER_UNKNOWN,'view: q_x100 350.5 -> Q unknown');
  });
  await test('allowlist: exact RPM lines only, plain whole numbers',()=>{
   for(const c of ['rpm_filter','get rpm_filter_harmonics','get rpm_filter_min_hz','get rpm_filter_q_x100','get motor_poles','set rpm_filter_harmonics 0','set rpm_filter_q_x100 350','set motor_poles 14','set rpm_filter_min_hz 9999'])assert.ok(isRpmFilterCliCommand(c),c);
@@ -48,6 +49,19 @@ async function main(){
   assert.equal(parseRpmFilterReport(report().replace(/rpm_filter_m3_hz: 180\r\n/,'')).report.motorHz[3],null,'missing');
   assert.deepEqual(parseRpmFilterReport('unknown — try help\r\n'),{kind:'unsupported'});
   assert.equal(parseRpmFilterReport('rpm_filter_api: 1\r\n').kind,'malformed');
+ });
+ await test('report: numeric fields must be ^\\d+$; m1..m4 also unavailable or a lowercase token; else unknown (nit 9)',()=>{
+  for(const bad of ['4OOO','-5','18.5','1e3','+5','0x10','４０００']){
+   const r=parseRpmFilterReport(report({hz:bad,run:bad,m:[bad,bad,bad,bad]})).report;
+   assert.deepEqual([r.sampleHz,r.harmonicsActive,...Object.values(r.motorHz)],[null,null,null,null,null,null],bad);
+   const v=rpmFilterView(values(),{kind:'report',report:r});
+   assert.deepEqual([v.sampleHz,v.harmonicsActive,...v.motors.map(m=>m.hz)],Array(6).fill(RPM_FILTER_UNKNOWN),`${bad} shows unknown`);
+  }
+  const ok=parseRpmFilterReport(report({hz:'4000',run:'0',m:['0','unavailable','esc-fallback','185']})).report;
+  assert.deepEqual([ok.sampleHz,ok.harmonicsActive,...Object.values(ok.motorHz)],['4000','0','0','unavailable','esc-fallback','185'],'digits, unavailable and a lowercase future token kept verbatim');
+  for(const t of ['Unavailable','UNAVAILABLE','n/a','esc_fallback','-unavailable'])assert.equal(parseRpmFilterReport(report({m:[t,'1','2','3']})).report.motorHz[1],null,t);
+  assert.equal(parseRpmFilterReport(report({hz:'unavailable'})).report.sampleHz,null,'sample_hz is digits only');
+  assert.equal(parseRpmFilterReport(report({reason:'esc-fallback',active:'partial'})).report.reason,'esc-fallback','reason/active tokens still verbatim');
  });
  await test('frozen report shape: exact lines and order; no rpm_filter_harmonics line (setting comes from get)',()=>{
   assert.deepEqual([...RPM_FILTER_REPORT_FIELDS],['rpm_filter_active','rpm_filter_reason','rpm_filter_sample_hz','rpm_filter_harmonics_active','rpm_filter_m1_hz','rpm_filter_m2_hz','rpm_filter_m3_hz','rpm_filter_m4_hz']);
@@ -81,11 +95,12 @@ async function main(){
   assert.ok(v.motors.every(m=>m.hz==='unavailable'));
   assert.equal(rpmFilterView.length,2,'view takes only the get results and the report (no eRPM input)');
  });
- await test('MockRpmFilter: seven scenarios produce the FW report shape',()=>{
-  assert.deepEqual([...RPM_FILTER_MOCK_SCENARIOS],['off','ok','bidir-off','erpm-unavailable','trimmed-1k','old-fc','off-erpm-live']);
+ await test('MockRpmFilter: eight scenarios produce the FW report shape',()=>{
+  assert.deepEqual([...RPM_FILTER_MOCK_SCENARIOS],['off','ok','bidir-off','erpm-unavailable','trimmed-1k','old-fc','off-erpm-live','active-partial']);
   const U='unavailable',live=['180','182','179','185'];
   const exp={off:['4000','0','0','no','off',[U,U,U,U]],ok:['4000','3','3','yes','ok',live],'bidir-off':['4000','2','0','no','bidir-off',[U,U,U,U]],
-   'erpm-unavailable':['4000','2','0','no','erpm-unavailable',[U,U,U,U]],'trimmed-1k':['1000','3','1','yes','ok',live],'off-erpm-live':['4000','0','0','no','off',[U,U,U,U]]};
+   'erpm-unavailable':['4000','2','0','no','erpm-unavailable',[U,U,U,U]],'trimmed-1k':['1000','3','1','yes','ok',live],'off-erpm-live':['4000','0','0','no','off',[U,U,U,U]],
+   'active-partial':['4000','3','3','yes','ok',['180',U,'179','185']]};
   for(const [s,[hz,h,run,a,r,m]] of Object.entries(exp)){
    const mock=new MockRpmFilter(s),raw=mock.handle('rpm_filter',false),rep=parseRpmFilterReport(raw).report;
    assert.ok(rpmFilterReportIsExact(raw),`${s}: mock report in the frozen shape`);
@@ -93,6 +108,7 @@ async function main(){
    assert.deepEqual([rep.sampleHz,rep.harmonicsActive,rep.active,rep.reason,Object.values(rep.motorHz)],[hz,run,a,r,m],s);
   }
   assert.equal(new MockRpmFilter('off-erpm-live').handle('get erpm_m1',false),'erpm_m1=75600\r\n','live eRPM while the filter is off');
+  assert.equal(new MockRpmFilter('active-partial').handle('get erpm_m2',false),'erpm_m2=76440\r\n','active-partial: M2 eRPM is live, yet the FC reports m2 unavailable');
   assert.equal(new MockRpmFilter('ok').handle('get erpm_m1',false),null,'other scenarios leave eRPM to the host mock');
   const old=new MockRpmFilter('old-fc');
   assert.equal(old.handle('rpm_filter',false),'unknown — try help\r\n');assert.equal(old.handle('get motor_poles',false),'unknown key\r\n');assert.equal(old.handle('set motor_poles 14',false),'unknown key\r\n');
@@ -105,6 +121,28 @@ async function main(){
   for(const [cmd,line] of cases){const before=m.snapshot();assert.equal(m.handle(cmd,false),line+'\r\n',cmd);assert.deepEqual(m.snapshot(),before,cmd);}
   assert.equal(m.handle('set motor_poles 12',true),'set failed: armed\r\n');assert.equal(m.snapshot().motor_poles,'14');
   assert.equal(m.handle('set motor_poles 12',false),'ok motor_poles=12\r\n');
+ });
+ await test('MockRpmFilter bidir follows the host dshot_bidir (bidirSource), so they never disagree (blocker 2)',()=>{
+  let bidir=false;const m=new MockRpmFilter('ok',()=>bidir);
+  assert.equal(parseRpmFilterReport(m.report()).report.reason,'bidir-off','host bidir off -> bidir-off even in the ok scenario');
+  bidir=true;assert.equal(parseRpmFilterReport(m.report()).report.reason,'ok');
+  assert.equal(MockRpmFilter.scenarioBidir('bidir-off'),false);assert.equal(MockRpmFilter.scenarioBidir('ok'),true);
+  const b=new MockRpmFilter('bidir-off',()=>true);
+  assert.equal(parseRpmFilterReport(b.report()).report.reason,'erpm-unavailable','user enabled bidir: no telemetry yet (like the FW)');
+ });
+ await test('MockSerial: dshot_bidir and the RPM report agree; nothing but the user changes bidir (blocker 2)',async()=>{
+  for(const [path,on,reason] of [['mock://bobflight-rpm-ok','on','ok'],['mock://bobflight-rpm-bidir-off','off','bidir-off'],['mock://bobflight-rpm-no-erpm','on','erpm-unavailable']]){
+   const client=new BobFlightCliClient(new MockTransportFactory());
+   await client.connect({path,transport:'mock'});await new Promise(r=>setTimeout(r,15));
+   assert.equal((await client.sendCommand('get dshot_bidir')).trim(),`dshot_bidir=${on}`,path);
+   assert.equal(parseRpmFilterReport(await client.sendCommand('rpm_filter')).report.reason,reason,path);
+   await client.setSetting('rpm_filter_harmonics','2');
+   assert.equal((await client.sendCommand('get dshot_bidir')).trim(),`dshot_bidir=${on}`,`${path}: a harmonics set never changes bidir`);
+   const flip=on==='on'?'off':'on';
+   assert.equal((await client.sendCommand(`set dshot_bidir ${flip}`)).trim(),`ok dshot_bidir=${flip}`);
+   assert.equal(parseRpmFilterReport(await client.sendCommand('rpm_filter')).report.reason,flip==='off'?'bidir-off':'erpm-unavailable',`${path}: report follows the transport's bidir`);
+   await client.disconnect();
+  }
  });
  await test('real client over MockSerial: all scenarios, set re-read with get + rpm_filter, refused set verbatim',async()=>{
   const paths={off:'mock://bobflight',ok:'mock://bobflight-rpm-ok','bidir-off':'mock://bobflight-rpm-bidir-off','erpm-unavailable':'mock://bobflight-rpm-no-erpm','trimmed-1k':'mock://bobflight-rpm-1k','old-fc':'mock://bobflight-rpm-old'};

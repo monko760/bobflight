@@ -28,8 +28,10 @@
  * The FC is the authority: motor frequencies come only from rpm_filter_mN_hz
  * (never computed from erpm_mN and motor_poles here), the harmonic trim and
  * the reason only from the report. Tokens are kept exactly as sent; a missing,
- * duplicated or malformed field is null ("unknown"). harmonics > 0 never
- * enables bidirectional DShot.
+ * duplicated or malformed field is null ("unknown"): sample_hz and
+ * harmonics_active must be plain digits (^\d+$); m1..m4 must be digits,
+ * "unavailable" or another lowercase token (a future FW state), so "4OOO",
+ * "-5" or "18.5" is unknown. harmonics > 0 never enables bidirectional DShot.
  */
 export const RPM_FILTER_KEYS = ["rpm_filter_harmonics", "rpm_filter_min_hz", "rpm_filter_q_x100", "motor_poles"] as const;
 export type RpmFilterKey = (typeof RPM_FILTER_KEYS)[number];
@@ -57,9 +59,9 @@ export function rpmValueProblem(key: RpmFilterKey, n: number): string | null {
   return n >= 4 && n <= 36 && n % 2 === 0 ? null : "Use an even pole count from 4 to 36.";
 }
 
-/** Q shown to the user: the integer the FC holds divided by 100, exactly ("500" -> "5"). */
+/** Q shown to the user: the integer the FC holds divided by 100, exactly ("500" -> "5"); not a whole number ("350.5") -> "unknown". */
 export function qFromX100(v: string): string {
-  if (!/^\d+$/.test(v)) return v;
+  if (!/^\d+$/.test(v)) return RPM_FILTER_UNKNOWN;
   const n = Number(v);
   const whole = Math.floor(n / 100), frac = n % 100;
   return frac === 0 ? String(whole) : `${whole}.${String(frac).padStart(2, "0").replace(/0$/, "")}`;
@@ -104,9 +106,21 @@ export interface RpmFilterReport {
 }
 export type RpmFilterReportResult = { kind: "report"; report: RpmFilterReport } | { kind: "unsupported" } | { kind: "malformed"; raw: string };
 /**
+ * One report field's token, or null when it is not in the field's domain:
+ * sample_hz / harmonics_active are plain digits; m1..m4 are digits,
+ * "unavailable" or a lowercase future token. Active and reason keep any
+ * single token (shown verbatim, never mapped).
+ */
+function reportToken(key: string, v: string): string | null {
+  if (key === "rpm_filter_sample_hz" || key === "rpm_filter_harmonics_active") return /^\d+$/.test(v) ? v : null;
+  if (/^rpm_filter_m[1-4]_hz$/.test(key)) return /^\d+$/.test(v) || /^[a-z]+(?:-[a-z]+)*$/.test(v) ? v : null;
+  return v;
+}
+/**
  * Framed `rpm_filter` report. Fields must be `<key>: <single token>`; a line
  * with extra words (e.g. "rpm_filter_reason: bidir off") does not parse and
- * the field is null. Duplicates are null. Tokens are never mapped.
+ * the field is null. Duplicates are null, and so is a token outside the
+ * field's domain (reportToken). Tokens are never mapped.
  */
 export function parseRpmFilterReport(raw: string): RpmFilterReportResult {
   const ls = lines(raw);
@@ -120,7 +134,7 @@ export function parseRpmFilterReport(raw: string): RpmFilterReportResult {
     if (seen.has(m[1])) dup.add(m[1]);
     seen.set(m[1], m[2]);
   }
-  const get = (k: string): string | null => (dup.has(k) ? null : seen.get(k) ?? null);
+  const get = (k: string): string | null => { const v = dup.has(k) ? null : seen.get(k) ?? null; return v === null ? null : reportToken(k, v); };
   return {
     kind: "report",
     report: {

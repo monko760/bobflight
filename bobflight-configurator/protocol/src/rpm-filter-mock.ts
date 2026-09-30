@@ -11,10 +11,17 @@ import { RPM_FILTER_KEYS, isRpmFilterKey, type RpmFilterKey } from "./rpm-filter
  *   old-fc            firmware before schema 9: "unknown key", no `rpm_filter`
  *   off-erpm-live     harmonics 0 while `get erpm_mN` answers live values:
  *                     every rpm_filter_mN_hz stays unavailable
+ *   active-partial    harmonics 3, reason ok, `get erpm_mN` live on all four
+ *                     motors, but the FC tracks only M1/M3/M4 (m2 unavailable)
  * The mock mirrors the FW rules only to produce FW-identical replies; the UI
  * never computes any of this.
+ *
+ * Bidirectional DShot: a host mock passes `bidirSource` (its own dshot_bidir
+ * state) so the report and `get dshot_bidir` can never disagree; the host
+ * starts from `MockRpmFilter.scenarioBidir(s)`. Without a source the
+ * scenario's own state is used (standalone tests).
  */
-export const RPM_FILTER_MOCK_SCENARIOS = ["off", "ok", "bidir-off", "erpm-unavailable", "trimmed-1k", "old-fc", "off-erpm-live"] as const;
+export const RPM_FILTER_MOCK_SCENARIOS = ["off", "ok", "bidir-off", "erpm-unavailable", "trimmed-1k", "old-fc", "off-erpm-live", "active-partial"] as const;
 export type RpmFilterMockScenario = (typeof RPM_FILTER_MOCK_SCENARIOS)[number];
 
 const DEFAULTS: Record<RpmFilterKey, number> = { rpm_filter_harmonics: 0, rpm_filter_min_hz: 100, rpm_filter_q_x100: 500, motor_poles: 14 };
@@ -27,15 +34,18 @@ export class MockRpmFilter {
   private bidir = true;
   private rateHz = 4000;
   private erpm: readonly number[] = LIVE_ERPM;
-  constructor(private scenario: RpmFilterMockScenario = "off") { this.setScenario(scenario); }
+  constructor(private scenario: RpmFilterMockScenario = "off", private readonly bidirSource?: () => boolean) { this.setScenario(scenario); }
+  /** dshot_bidir a scenario starts with (a host mock seeds its own state from this). */
+  static scenarioBidir(s: RpmFilterMockScenario): boolean { return s !== "bidir-off"; }
   get supported(): boolean { return this.scenario !== "old-fc"; }
+  private get bidirOn(): boolean { return this.bidirSource ? this.bidirSource() : this.bidir; }
   setScenario(s: RpmFilterMockScenario): void {
     this.scenario = s;
     this.defaults();
-    this.bidir = s !== "bidir-off";
+    this.bidir = MockRpmFilter.scenarioBidir(s);
     this.rateHz = s === "trimmed-1k" ? 1000 : 4000;
     this.erpm = s === "erpm-unavailable" || s === "bidir-off" ? [0, 0, 0, 0] : LIVE_ERPM;
-    if (s === "ok" || s === "trimmed-1k") this.values.rpm_filter_harmonics = 3;
+    if (s === "ok" || s === "trimmed-1k" || s === "active-partial") this.values.rpm_filter_harmonics = 3;
     if (s === "bidir-off" || s === "erpm-unavailable") this.values.rpm_filter_harmonics = 2;
   }
   defaults(): void { this.values = { ...DEFAULTS }; }
@@ -46,7 +56,7 @@ export class MockRpmFilter {
   }
   private reason(): string {
     if (this.values.rpm_filter_harmonics === 0) return "off";
-    if (!this.bidir) return "bidir-off";
+    if (!this.bidirOn) return "bidir-off";
     return this.erpm.some((e) => e > 0) ? "ok" : "erpm-unavailable";
   }
   report(): string {
@@ -55,7 +65,7 @@ export class MockRpmFilter {
     for (let h = 1; h <= 3; h++) if (h * 400 < limit) allowed = h;
     const active = reason === "ok" ? Math.min(this.values.rpm_filter_harmonics, allowed) : 0;
     const hz = (m: number) => {
-      if (reason !== "ok" || !(this.erpm[m] > 0)) return "unavailable";
+      if (reason !== "ok" || !(this.erpm[m] > 0) || (this.scenario === "active-partial" && m === 1)) return "unavailable";
       const f = this.erpm[m] / (this.values.motor_poles / 2) / 60;
       return String(Math.floor(Math.max(f, this.values.rpm_filter_min_hz) + 0.5));
     };
@@ -68,7 +78,7 @@ export class MockRpmFilter {
   handle(line: string, armed: boolean): string | null {
     if (line === "rpm_filter") return this.supported ? this.report() : "unknown — try help\r\n";
     const e = /^get erpm_m([1-4])$/.exec(line);
-    if (e && this.scenario === "off-erpm-live") return `erpm_m${e[1]}=${this.erpm[Number(e[1]) - 1]}\r\n`;
+    if (e && (this.scenario === "off-erpm-live" || this.scenario === "active-partial")) return `erpm_m${e[1]}=${this.erpm[Number(e[1]) - 1]}\r\n`;
     const g = /^get (\S+)$/.exec(line);
     if (g && isRpmFilterKey(g[1])) return this.supported ? `${g[1]}=${formatFwFloat(this.values[g[1]])}\r\n` : "unknown key\r\n";
     const s = /^set (\S+) (.+)$/.exec(line);

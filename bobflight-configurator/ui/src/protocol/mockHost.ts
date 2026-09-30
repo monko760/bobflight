@@ -85,12 +85,15 @@ export class MockBobFlightHost implements BobFlightHost {
   /** Manual gyro notches (schema 8; same wire as protocol MockSerial). */
   private readonly gyroNotch: MockGyroNotch;
 
-  /** RPM notch filter (schema 9; same wire as protocol MockSerial). */
+  /** RPM notch filter (schema 9; same wire as protocol MockSerial). Its bidir state IS dshotBidir. */
   private readonly rpmFilter: MockRpmFilter;
+  /** RPM scenario given by the test/demo (seeds dshotBidir on connect); undefined = loop-rate default. */
+  private rpmFilterScenario: RpmFilterMockScenario | undefined;
 
   constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario }) {
     this.gyroNotch = new MockGyroNotch(opts?.gyroNotchScenario ?? "off");
-    this.rpmFilter = new MockRpmFilter(opts?.rpmFilterScenario ?? "off");
+    this.rpmFilter = new MockRpmFilter(opts?.rpmFilterScenario ?? "off", () => this.dshotBidir);
+    this.rpmFilterScenario = opts?.rpmFilterScenario;
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
     this.gyroHealthy = opts?.gyroHealthy ?? false;
     this.loopRateScenario = opts?.loopRateScenario ?? "missing";
@@ -165,6 +168,7 @@ export class MockBobFlightHost implements BobFlightHost {
     this.lastError = null;
     this.armed = false;
     this.dshotBidir = mockLoopRateBidir(this.loopRateScenario); // RAM-only; bidir scenarios start on
+    if (this.rpmFilterScenario !== undefined) this.dshotBidir = MockRpmFilter.scenarioBidir(this.rpmFilterScenario);
     this.bench.reset();
     this.setStatus("connecting");
     await delay(this.connectDelayMs);
@@ -423,7 +427,11 @@ export class MockBobFlightHost implements BobFlightHost {
       this.dshotBidir = mockLoopRateBidir(opts.loopRateScenario);
     }
     if (opts.gyroNotchScenario !== undefined) this.gyroNotch.setScenario(opts.gyroNotchScenario);
-    if (opts.rpmFilterScenario !== undefined) this.rpmFilter.setScenario(opts.rpmFilterScenario);
+    if (opts.rpmFilterScenario !== undefined) {
+      this.rpmFilterScenario = opts.rpmFilterScenario;
+      this.rpmFilter.setScenario(opts.rpmFilterScenario);
+      this.dshotBidir = MockRpmFilter.scenarioBidir(opts.rpmFilterScenario);
+    }
     if (opts.gyroHealthy !== undefined) this.gyroHealthy = opts.gyroHealthy;
     if (opts.failsafeActive !== undefined) {
       this.failsafeActive = opts.failsafeActive;

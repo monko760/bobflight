@@ -485,7 +485,7 @@ export function FiltersPage() {
         </table>
         {rpm.bidirOff && (
           <p className="banner-warn" data-testid="rpm-bidir-off">
-            Bidirectional DShot is off, so no motor is tracked. Enable it yourself on the controller (<code>set dshot_bidir on</code>, see the Motors tab); this page never enables it.
+            Bidirectional DShot is off, so no motor is tracked. See the Motors tab to enable it; this page never enables it.
           </p>
         )}
         <table style={{ width: "100%", marginTop: "0.75rem" }}>

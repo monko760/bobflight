@@ -104,7 +104,7 @@ export function MotorsPage() {
           <p className="muted">Choose only a rate your ESC supports. Changes are read back from the controller then retained after reboot with Save to controller. Motors must be stationary before switching.</p>
           {capability && !capability.dshot && <p className="banner-warn">Rate selection is unavailable on this firmware. No rate is assumed.</p>}
         </section>
-        <MotorPolesPanel host={host} fallback={
+        <MotorPolesPanel host={host} blocked={storageBlocked(state) || postFlashGate} fallback={
           <section className="motor-option-panel"><h3>Motor pole count</h3>
             <label htmlFor="motor-poles">Magnetic poles · all four motors</label>
             <div className="row"><input id="motor-poles" type="number" min="2" max="60" step="2" value={poleDraft}

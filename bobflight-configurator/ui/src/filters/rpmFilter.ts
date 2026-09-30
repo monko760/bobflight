@@ -20,6 +20,9 @@ export interface RpmHost {
   getSetting(key: SettingsKey): Promise<{ key: SettingsKey; value: string }>;
   setSetting(key: SettingsKey, value: string): Promise<{ key: SettingsKey; value: string }>;
   sendCommand(cmd: CliCommand): Promise<string>;
+  /** Optional: the Motors-tab panel re-reads when the connection status changes. */
+  onStatus?(cb: (s: string) => void): () => void;
+  getConnectionStatus?(): string;
 }
 
 export interface RpmSnapshot {

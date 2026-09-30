@@ -8,6 +8,13 @@
  * refused or accepted Save, the FC refusal line verbatim, the command order
  * (set -> get <key> -> rpm_filter, all before save) and that no eRPM is read
  * to compute a frequency on the client.
+ *
+ * #60 review: no op ever matches /dshot_bidir/ (every scenario, Save in
+ * bidir-off, the poles panel); active-partial keeps m2 "unavailable"; the
+ * real MotorsPage passes `blocked` (post-flash gate, stop in flight) to the
+ * poles panel; invalid pole drafts (13, 38) send nothing; the panel re-reads
+ * on reconnect, shows "unknown" and the FC reason token verbatim; the
+ * schema < 9 downgrade guard; strict numeric report fields.
  */
 import assert from "node:assert/strict";
 import { flushSync } from "react-dom";
@@ -15,6 +22,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { FiltersPage } from "../src/pages/FiltersPage";
 import { MotorPolesPanel } from "../src/motors/MotorPolesPanel";
+import { MotorsPage } from "../src/pages/MotorsPage";
+import { readRpm, rpmView, type RpmSnapshot } from "../src/filters/rpmFilter";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { RPM_FILTER_MOCK_SCENARIOS, type RpmFilterMockScenario } from "../../protocol/src/rpm-filter-mock";
 import { STORAGE_SCOPE_V8, STORAGE_SCOPE_V9 } from "../../protocol/src/storage";
@@ -82,29 +91,45 @@ async function click(el: FakeElement) { flushSync(() => reactProps(el).onClick({
 const storageReply = (schema: number) => ["storage_api: 1", "backend: flash", `schema: ${schema}`, "state: saved", "dirty: 0",
   "generation: 2", "last_error: none", `scope: ${schema >= 9 ? STORAGE_SCOPE_V9 : STORAGE_SCOPE_V8}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n") + "\r\n";
 
-interface RigOpts { rpmReport?: string; }
+interface RigOpts { rpmReport?: string; schema?: number; getValue?: Partial<Record<string, string>>; }
 async function mockHost(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
   const mock = new MockBobFlightHost({ connectDelayMs: 0, gyroHealthy: true, gyroNotchScenario: "off", rpmFilterScenario: scenario });
   await mock.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
   const ops: string[] = [];
   let loads = 0;
-  const host = {
-    getConnectionStatus: () => mock.getConnectionStatus(),
-    onLine: (fn: (l: string) => void) => mock.onLine(fn),
+  /** Commands held until released (e.g. `motor_test 0` to keep a Stop in flight). */
+  const gates = new Map<string, Promise<void>>();
+  const hold = (cmd: string) => { let release = () => {}; gates.set(cmd, new Promise<void>((r) => { release = () => { gates.delete(cmd); r(); }; })); return () => release(); };
+  const logged: Record<string, (...a: never[]) => unknown> = {
     getAllSettings: async () => { ops.push("getAll"); return mock.getAllSettings(); },
-    getSetting: async (key: SettingsKey) => { ops.push(`get ${key}`); return mock.getSetting(key); },
+    getSetting: async (key: SettingsKey) => {
+      ops.push(`get ${key}`);
+      const v = o.getValue?.[key];
+      return v !== undefined ? { key, value: v } : mock.getSetting(key);
+    },
     setSetting: async (key: SettingsKey, value: string) => { ops.push(`set ${key} ${value}`); return mock.setSetting(key, value); },
     sendCommand: async (cmd: CliCommand) => {
       ops.push(cmd);
       if (cmd === "rpm_filter" && o.rpmReport !== undefined) return o.rpmReport;
-      if (cmd === "storage") { loads++; return storageReply(scenario === "old-fc" ? 8 : 9); }
+      if (cmd === "storage") { loads++; return storageReply(o.schema ?? (scenario === "old-fc" ? 8 : 9)); }
+      const gate = gates.get(cmd);
+      if (gate) await gate;
       return mock.sendCommand(cmd);
     },
     saveSettings: async () => { ops.push("save"); },
     restoreDefaults: async () => { ops.push("defaults"); },
   };
-  return { mock, host, ops, loads: () => loads };
+  // Every other host method (onStatus, getStatus, ...) is the mock's own.
+  const host = new Proxy(mock, {
+    get(target, prop) {
+      if (typeof prop === "string" && prop in logged) return logged[prop];
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  }) as unknown as MockBobFlightHost;
+  return { mock, host, ops, hold, loads: () => loads };
 }
+const bidirOps = (ops: string[]) => ops.filter((op) => /dshot_bidir/.test(op));
 async function rig(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
   const h = await mockHost(scenario, o);
   (globalThis as Record<string, unknown>).__setupTestHost = {
@@ -140,6 +165,7 @@ async function main() {
       "trimmed-1k": { h: "3", rate: "1000", run: "1", act: "yes", reason: "ok", m: live, banner: false },
       "old-fc": { h: "unknown", rate: "unknown", run: "unknown", act: "unknown", reason: "unknown", m: ["unknown", "unknown", "unknown", "unknown"], banner: false },
       "off-erpm-live": { h: "0", rate: "4000", run: "0", act: "no", reason: "off", m: [U, U, U, U], banner: false },
+      "active-partial": { h: "3", rate: "4000", run: "3", act: "yes", reason: "ok", m: ["180", U, "179", "185"], banner: false },
     };
     for (const s of RPM_FILTER_MOCK_SCENARIOS) {
       const t = await rig(s);
@@ -148,6 +174,11 @@ async function main() {
       assert.deepEqual([status("Filter rate (Hz)"), status("Harmonics running"), status("Filter active"), status("Filter reason")], [e.rate, e.run, e.act, e.reason], `${s}: status cells`);
       assert.deepEqual(motors(), e.m, `${s}: motor cells`);
       assert.equal(testId("rpm-bidir-off") !== null, e.banner, `${s}: bidir-off banner`);
+      if (e.banner) {
+        const b = testId("rpm-bidir-off")!;
+        assert.ok(/Motors tab/.test(b) && !/set dshot_bidir/.test(b), `banner points only to the Motors tab (no CLI text): ${b}`);
+      }
+      assert.deepEqual(bidirOps(t.ops), [], `${s}: no op touches dshot_bidir: ${JSON.stringify(t.ops)}`);
       if (s === "old-fc") {
         for (const k of ["rpm_filter_harmonics", "rpm_filter_min_hz", "rpm_filter_q"]) { assert.ok(isDisabled(input(k)), `${k} disabled`); assert.equal(input(k).value, "unknown", `${k} unknown, never 0/off`); }
         assert.equal(poles(), "unknown");
@@ -241,9 +272,66 @@ async function main() {
     await t.done();
   });
 
+  await test("Save in bidir-off: accepted, saved, bidir never enabled (no dshot_bidir op) (blocker 2 / B2)", async () => {
+    const t = await rig("bidir-off");
+    await type(input("rpm_filter_harmonics"), "3");
+    await type(input("rpm_filter_min_hz"), "150");
+    const before = t.ops.length;
+    await click(button("Save"));
+    assert.ok(await waitFor(() => lastReply() === "Last reply: saved"), `saved; fail=${JSON.stringify(failText())}`);
+    await t.rereadAfter(t.ops.indexOf("save", before), "save");
+    assert.deepEqual(bidirOps(t.ops), [], `no dshot_bidir op: ${JSON.stringify(t.ops)}`);
+    assert.equal((await t.mock.sendCommand("get dshot_bidir")).trim(), "dshot_bidir=off", "FC bidir still off");
+    assert.equal(status("Filter reason"), "bidir-off");
+    assert.ok(testId("rpm-bidir-off"), "banner still shown");
+    await t.done();
+  });
+
+  await test("active-partial: m2 stays unavailable although eRPM is live; no erpm op (blocker 3 / HZ2)", async () => {
+    const t = await rig("active-partial");
+    assert.equal((await t.mock.sendCommand("get erpm_m2")).trim(), "erpm_m2=76440", "the FC does have live M2 eRPM");
+    assert.deepEqual([status("Filter active"), status("Filter reason")], ["yes", "ok"]);
+    assert.deepEqual(motors(), ["180", "unavailable", "179", "185"], "initial load");
+    t.ops.length = 0;
+    await click(button("Reload"));
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter")), JSON.stringify(t.ops));
+    await sleep(30);
+    assert.deepEqual(motors(), ["180", "unavailable", "179", "185"], "after Reload");
+    assert.ok(!t.ops.some((op) => /erpm/.test(op)), `no erpm read: ${JSON.stringify(t.ops)}`);
+    assert.deepEqual(bidirOps(t.ops), []);
+    await t.done();
+  });
+
+  await test("strict report fields: 4OOO / -5 / 18.5 render unknown; a lowercase token is verbatim (nit 9)", async () => {
+    const raw = ["rpm_filter_api: 1", "rpm_filter_active: yes", "rpm_filter_reason: ok", "rpm_filter_sample_hz: 4OOO", "rpm_filter_harmonics_active: -5",
+      "rpm_filter_m1_hz: 18.5", "rpm_filter_m2_hz: 4OOO", "rpm_filter_m3_hz: -5", "rpm_filter_m4_hz: stale", "rpm_filter_end: 1"].join("\r\n") + "\r\n";
+    const t = await rig("ok", { rpmReport: raw });
+    assert.deepEqual([status("Filter rate (Hz)"), status("Harmonics running")], ["unknown", "unknown"]);
+    assert.deepEqual(motors(), ["unknown", "unknown", "unknown", "stale"]);
+    await t.done();
+  });
+
+  await test("schema < 9 downgrade guard: FC answering RPM keys but reporting schema 8 -> read-only unknown (nit 13 / O2b)", async () => {
+    const full = await (async () => { const h = await mockHost("ok"); const snap: RpmSnapshot = await readRpm(h.host); await h.mock.disconnect(); return snap; })();
+    assert.equal(rpmView(full, 9).supported, true);
+    assert.equal(rpmView(full, null).supported, true, "schema unknown: the FC's own replies decide");
+    for (const schema of [8, 1]) {
+      const v = rpmView(full, schema);
+      assert.equal(v.supported, false, `schema ${schema}`);
+      for (const k of ["harmonics", "minHz", "q", "motorPoles", "sampleHz", "harmonicsActive", "active", "reason"] as const) assert.equal(v[k], "unknown", `schema ${schema}: ${k}`);
+      assert.ok(v.motors.every((m) => m.hz === "unknown"));
+    }
+    const t = await rig("ok", { schema: 8 });
+    assert.equal(input("rpm_filter_harmonics").value, "unknown");
+    assert.ok(isDisabled(input("rpm_filter_harmonics")), "read-only");
+    assert.deepEqual(motors(), ["unknown", "unknown", "unknown", "unknown"]);
+    assert.equal(status("Filter reason"), "unknown");
+    await t.done();
+  });
+
   // ---- Motors tab: motor_poles ---------------------------------------------------
-  async function poleRig(scenario: RpmFilterMockScenario) {
-    const h = await mockHost(scenario);
+  async function poleRig(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
+    const h = await mockHost(scenario, o);
     const root: Root = createRoot(container as never);
     flushSync(() => root.render(<MotorPolesPanel host={h.host} fallback={<p data-testid="browser-poles">browser preference</p>} />));
     assert.ok(await waitFor(() => h.ops.includes("get motor_poles")));
@@ -261,6 +349,110 @@ async function main() {
     assert.ok(await waitFor(() => poles() === "12"), `FC now holds 12: ${JSON.stringify(t.ops)}`);
     assert.deepEqual(t.ops.slice(before), ["set motor_poles 12", "get motor_poles", "rpm_filter"]);
     assert.equal(input("motor_poles").value, "12");
+    await t.done();
+  });
+
+  for (const bad of ["13", "38"]) {
+    await test(`motor_poles ${bad}: hint visible, button disabled, nothing sent (blocker 4)`, async () => {
+      const t = await poleRig("ok");
+      await type(input("motor_poles"), bad);
+      assert.ok(testId("motor-poles-hint"), "hint shown");
+      assert.match(testId("motor-poles-hint")!, /even pole count from 4 to 36/);
+      assert.ok(isDisabled(button("Set on controller")), "button disabled while the hint shows");
+      const before = t.ops.length;
+      await click(button("Set on controller"));
+      await sleep(40);
+      assert.deepEqual(t.ops.slice(before), [], "no op sent");
+      assert.equal(poles(), "14", "FC value unchanged");
+      await t.done();
+    });
+  }
+
+  await test("motor_poles in bidir-off: set -> get -> rpm_filter only, never a dshot_bidir op (blocker 2)", async () => {
+    const t = await poleRig("bidir-off");
+    await type(input("motor_poles"), "12");
+    await click(button("Set on controller"));
+    assert.ok(await waitFor(() => poles() === "12"));
+    assert.deepEqual(bidirOps(t.ops), [], JSON.stringify(t.ops));
+    assert.equal(visibleText(byAttr("data-rpm", "reason")[0]), "bidir-off");
+    await t.done();
+  });
+
+  await test("poles panel: reason token verbatim (known and future tokens) (nit 7 / C1p)", async () => {
+    for (const [scenario, rep, want] of [["erpm-unavailable", undefined, "erpm-unavailable"], ["ok", report({ reason: "esc-fallback", active: "partial", running: "2" }), "esc-fallback"]] as const) {
+      const t = await poleRig(scenario, rep ? { rpmReport: rep } : {});
+      assert.equal(visibleText(byAttr("data-rpm", "reason")[0]), want, scenario);
+      await t.done();
+    }
+  });
+
+  await test("poles panel: malformed FC value -> 'unknown', input and button disabled (nit 7 / MP7)", async () => {
+    for (const raw of ["abc", ""]) {
+      const t = await poleRig("ok", { getValue: { motor_poles: raw } });
+      assert.equal(poles(), "unknown", `get motor_poles -> ${JSON.stringify(raw)}`);
+      assert.ok(isDisabled(input("motor_poles")) && isDisabled(button("Set on controller")));
+      assert.equal(testId("browser-poles"), null, "not the older-FC fallback");
+      await t.done();
+    }
+  });
+
+  await test("poles panel re-reads when the connection status changes (nit 6)", async () => {
+    const t = await poleRig("ok");
+    assert.equal(poles(), "14");
+    await t.mock.disconnect();
+    assert.ok(await waitFor(() => poles() === "reading…"), `stale value dropped on disconnect: ${poles()}`);
+    assert.ok(isDisabled(input("motor_poles")));
+    const before = t.ops.length;
+    await t.mock.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    assert.ok(await waitFor(() => t.ops.indexOf("get motor_poles", before) >= 0 && poles() === "14"), `re-read after reconnect: ${JSON.stringify(t.ops.slice(before))}`);
+    assert.ok(!isDisabled(input("motor_poles")));
+    await t.done();
+  });
+
+  // ---- real MotorsPage: the poles panel honours the storage lock (blocker 1) ---------
+  async function motorsPage(postFlashGate: boolean) {
+    // MotorsPage reads page visibility; the fake DOM has no global document, so lend a
+    // visibility-only one for this render and remove it afterwards.
+    (globalThis as Record<string, unknown>).document = { hidden: false, addEventListener() {}, removeEventListener() {} };
+    const h = await mockHost("ok");
+    (globalThis as Record<string, unknown>).__setupTestHost = {
+      host: h.host, connectionStatus: "connected", version: "BobFlight test", status: null,
+      refreshStatus: async () => {}, pollAfterConnect: async () => {}, setLastError: () => {}, postFlashGate,
+    };
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorsPage />));
+    assert.ok(await waitFor(() => byAttr("data-testid", "motor-poles-fc").length > 0 && poles() === "14"), `poles panel rendered: ${JSON.stringify(h.ops)}`);
+    return { ...h, done: async () => { root.unmount(); await sleep(20); await h.mock.disconnect(); delete (globalThis as Record<string, unknown>).document; } };
+  }
+  const polesLocked = () => isDisabled(input("motor_poles")) && isDisabled(button("Set on controller"));
+
+  await test("MotorsPage post-flash gate: poles input and button disabled, click sends nothing (blocker 1)", async () => {
+    const t = await motorsPage(true);
+    await type(input("motor_poles"), "12");
+    assert.ok(polesLocked(), "both disabled under the post-flash gate");
+    const before = t.ops.length;
+    await click(button("Set on controller"));
+    await sleep(40);
+    assert.ok(!t.ops.slice(before).some((op) => /motor_poles/.test(op) && op.startsWith("set")), JSON.stringify(t.ops.slice(before)));
+    assert.equal((await t.mock.getSetting("motor_poles" as SettingsKey)).value, "14");
+    await t.done();
+  });
+
+  await test("MotorsPage stop in flight (storageBlocked): poles locked until the stop settles (blocker 1)", async () => {
+    const t = await motorsPage(false);
+    assert.ok(await waitFor(() => !isDisabled(input("motor_poles"))), "unlocked when idle");
+    await type(input("motor_poles"), "12");
+    assert.ok(!isDisabled(button("Set on controller")), "enabled when idle with a valid draft");
+    const release = t.hold("motor_test 0");
+    await click(button("Stop all motor tests"));
+    assert.ok(await waitFor(() => polesLocked()), "locked while the stop is in flight");
+    const before = t.ops.length;
+    await click(button("Set on controller"));
+    await sleep(40);
+    assert.ok(!t.ops.slice(before).some((op) => op === "set motor_poles 12"), "nothing set during the stop");
+    release();
+    assert.ok(await waitFor(() => !isDisabled(button("Set on controller"))), "unlocked after the stop settles");
+    assert.deepEqual(bidirOps(t.ops), [], "Motors page never touches dshot_bidir on its own");
     await t.done();
   });
 

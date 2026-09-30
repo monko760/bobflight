@@ -47,7 +47,8 @@ export function isVerifiedFlashSave(raw:string):boolean{return raw.trim()==='sav
 export function canSaveStorage(s:StorageSnapshot|null,connected:boolean,pending:boolean):boolean{return connected&&!pending&&!!s&&s.backend==='flash'&&!s.armed&&!s.benchActive&&!s.calibrationActive;}
 export interface ConfigurationExport {raw:string;board:string;firmware:string;kind:'diff'|'dump';modeCount:2|4}
 export function parseConfigurationExport(raw:string,kind:'diff'|'dump'):ConfigurationExport {
- const lines=raw.trim().split(/\r?\n/);if(raw.length>CONFIG_EXPORT_MAX_BYTES||lines[0]!=='# bobflight_config: 1'||lines.at(-1)!=='# config_end: 1')throw Error('Incomplete or oversized configuration export');
+ if(raw.length>CONFIG_EXPORT_MAX_BYTES)throw Error(`Configuration export is ${raw.length} bytes; the limit is ${CONFIG_EXPORT_MAX_BYTES} bytes`);
+ const lines=raw.trim().split(/\r?\n/);if(lines[0]!=='# bobflight_config: 1'||lines.at(-1)!=='# config_end: 1')throw Error('Incomplete configuration export');
  const headers=new Map<string,string>();let commands=false;
  for(const line of lines.slice(1,-1)){
   if(line.startsWith('# ')){if(commands)throw Error('Misplaced export header');const m=/^# ([a-z_]+): (.+)$/.exec(line);if(!m||headers.has(m[1]))throw Error('Malformed export header');headers.set(m[1],m[2]);}

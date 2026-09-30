@@ -102,9 +102,13 @@ rpm_filter_end: 1
 ## Export size
 
 A schema 9 `dump` with realistic calibration (`%.9g`) is about 1810 bytes. The export buffer and the
-Configurator's `CONFIG_EXPORT_MAX_BYTES` are **2048** bytes (was 1800). An older Configurator
-rejects a dump over 1800 bytes. The uncalibrated worst case measured 1719, 1744 and 1731 bytes
-(dummy, kakute, tmotor).
+Configurator's `CONFIG_EXPORT_MAX_BYTES` are **2048** bytes (was 1800); `tests/host_storage_cli.c`
+checks a calibrated worst case above 1800 and at most 2047 bytes. The uncalibrated worst case measured
+1719, 1744 and 1731 bytes (dummy, kakute, tmotor).
+
+**Older Configurators:** a Configurator released before schema 9 accepts only schema 1–8 exports, so it
+rejects **every** schema 9 `diff`/`dump`, whatever its size. Upgrade the Configurator before exporting
+from schema 9 FW.
 
 ## Risks and limits
 

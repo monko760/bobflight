@@ -4,7 +4,7 @@ get/set/diff/dump/defaults/save for rpm_filter_harmonics, rpm_filter_min_hz,
 rpm_filter_q_x100 and motor_poles; exact refusal lines with the value left
 unchanged; the exact read-only `rpm_filter` report (the host has no ESC, so
 bidir-off / erpm-unavailable and every motor unavailable); harmonics > 0 never
-enables bidir; save + reboot keeps the values; the full dump stays < 1800 bytes."""
+enables bidir; save + reboot keeps the values; the full dump fits the 2048-byte export buffer."""
 import os,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
 RATE='4000' if board=='kakute_f7_hdv' else '1000'
@@ -70,7 +70,7 @@ assert [l for l in lines if l.split('=')[0] in KEYS][-4:]==[f'{k}={v}' for k,v i
 assert values(lines,'schema')==['9'] and values(lines,'# schema')==['9']*4,lines
 assert all(s.endswith(',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles') for s in values(lines,'scope')+values(lines,'# scope')),lines
 
-# Worst-case full dump (every key non-default, longest values) stays under the 1800-byte limit.
+# Worst-case full dump (every key non-default, longest values) fits the 2048-byte export buffer (<= 2047).
 big=['set rate_max_roll 1234.57','set rate_max_pitch 1234.57','set rate_max_yaw 1234.57','set rate_expo 0.123457',
      'set pid_roll_p 0.00123457','set pid_roll_i 0.00123457','set pid_roll_d 0.00123457','set pid_pitch_p 0.00123457',
      'set pid_pitch_i 0.00123457','set pid_pitch_d 0.00123457','set pid_yaw_p 0.00123457','set pid_yaw_i 0.00123457',
@@ -82,7 +82,7 @@ out=subprocess.run([exe],input=('\n'.join(big)+'\n').encode(),stdout=subprocess.
 s=out.index('# bobflight_config: 1');e=out.index('# config_end: 1\r\n',s)+len('# config_end: 1\r\n')
 assert 'config response failed' not in out and 'set motor_poles 36' in out[s:e],out
 print(f'worst-case dump {e-s} bytes')
-assert e-s<1800,e-s
+assert e-s<2048,e-s
 
 # Save + reboot keeps the settings (storage saved, not dirty).
 PAD=' '*64

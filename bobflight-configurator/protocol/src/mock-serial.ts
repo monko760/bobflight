@@ -100,6 +100,11 @@ export class MockSerial extends EventEmitter {
   private readonly gyroNotch: MockGyroNotch;
   /** `get/set rpm_filter_* / motor_poles` + `rpm_filter` (schema 9; old-fc = older firmware). */
   private readonly rpmFilter: MockRpmFilter;
+  private readonly rpmFilterScenario: RpmFilterMockScenario | undefined;
+  /** dshot_bidir after power-up (RAM-only): the RPM scenario's when one is given, else the loop-rate scenario's. */
+  private bootBidir(): boolean {
+    return this.rpmFilterScenario !== undefined ? MockRpmFilter.scenarioBidir(this.rpmFilterScenario) : mockLoopRateBidir(this.loopRateScenario);
+  }
   /** Numeric store mirroring bf_config_t floats. */
   private settings: Record<SettingsKey, number>;
   private readonly opts: Required<
@@ -124,9 +129,11 @@ export class MockSerial extends EventEmitter {
     this.loopRateScenario = opts.loopRateScenario ?? "missing";
     this.blackbox = new MockOnboardBlackbox(opts.blackboxCard ?? "none");
     this.gyroNotch = new MockGyroNotch(opts.gyroNotchScenario ?? "off");
-    this.rpmFilter = new MockRpmFilter(opts.rpmFilterScenario ?? "off");
+    // The RPM mock reads this transport's dshot_bidir, so the report and `get dshot_bidir` never disagree.
+    this.rpmFilter = new MockRpmFilter(opts.rpmFilterScenario ?? "off", () => this.dshotBidir);
+    this.rpmFilterScenario = opts.rpmFilterScenario;
     this.modesPorts.reset();
-    this.dshotBidir = mockLoopRateBidir(this.loopRateScenario);
+    this.dshotBidir = this.bootBidir();
     this.settings = cloneDefaultSettingValues();
   }
 
@@ -285,7 +292,7 @@ export class MockSerial extends EventEmitter {
     } else if (line === "reboot") {
       this.emitData("reboot...\r\n");
       this.rebootRequested = true;
-      { const next = this.loopRateSetting.reboot(); if (next) this.loopRateScenario = next; this.dshotBidir = mockLoopRateBidir(this.loopRateScenario); }
+      { const next = this.loopRateSetting.reboot(); if (next) this.loopRateScenario = next; this.dshotBidir = this.bootBidir(); }
       queueMicrotask(() => {
         void this.close();
       });
