@@ -180,6 +180,9 @@ export class MockTransportFactory implements TransportFactory {
       : MOCK_PORT_PATH;
     const mock = new MockSerial(path, options.baudRate, {
       ...(path === "mock://bobflight-bench" ? { benchReady: true, boardId: "mock-bench-SIMULATED" } : {}),
+      ...(path === "mock://bobflight-sd" ? { blackboxCard: "ok" as const } : {}),
+      ...(path === "mock://bobflight-sd-slow" ? { blackboxCard: "slow" as const } : {}),
+      ...(path === "mock://bobflight-sd-api1" ? { blackboxCard: "api1" as const } : {}),
       ...this.mockOpts,
     });
     await mock.open();
