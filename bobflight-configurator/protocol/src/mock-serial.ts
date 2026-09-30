@@ -9,7 +9,7 @@ import { MockMotorBench } from "./bench-mock";
 import { mockSensorReply } from "./sensor-mock";
 import { MockReceiver } from "./receiver-mock";
 import { MockOnboardBlackbox, type MockBlackboxCard } from "./blackbox-mock";
-import { mockLoopStatusLines, MockLoopRateSetting, type LoopRateMockScenario } from "./loop-rate-mock";
+import { mockLoopStatusLines, mockLoopRateBidir, MockLoopRateSetting, type LoopRateMockScenario } from "./loop-rate-mock";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -119,7 +119,7 @@ export class MockSerial extends EventEmitter {
     this.blackbox = new MockOnboardBlackbox(opts.blackboxCard ?? "none");
     this.gyroNotch = new MockGyroNotch(opts.gyroNotchScenario ?? "off");
     this.modesPorts.reset();
-    this.dshotBidir = false;
+    this.dshotBidir = mockLoopRateBidir(this.loopRateScenario);
     this.settings = cloneDefaultSettingValues();
   }
 
@@ -272,7 +272,7 @@ export class MockSerial extends EventEmitter {
     } else if (line === "reboot") {
       this.emitData("reboot...\r\n");
       this.rebootRequested = true;
-      { const next = this.loopRateSetting.reboot(); if (next) this.loopRateScenario = next; }
+      { const next = this.loopRateSetting.reboot(); if (next) this.loopRateScenario = next; this.dshotBidir = mockLoopRateBidir(this.loopRateScenario); }
       queueMicrotask(() => {
         void this.close();
       });

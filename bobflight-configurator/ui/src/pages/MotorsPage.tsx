@@ -116,6 +116,7 @@ export function MotorsPage() {
         <section className="motor-option-panel"><h3>eRPM & bidirectional DShot</h3>
           <p><strong>M1–M4 eRPM telemetry (R0c).</strong> When bidirectional DShot is enabled on the controller and a motor's telem is OK, that cell shows live electrical RPM. Otherwise the cell stays unavailable (<code>erpm_mN=none</code>) — never an invented zero.</p>
           <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Poll <code>get erpm_m1</code>…<code>m4</code> and <code>get dshot_telem_mN</code> only.</p>
+          <p className="muted">Bidirectional DShot can limit the loop rate the controller applies. This page assumes no rate: Setup shows the loop target and the controller&apos;s loop-rate reason exactly as reported. Some ESCs detect bidirectional DShot only at power-up; if telem stays <code>timeout</code> after enabling it, power-cycle the ESCs with props off.</p>
         </section>
         <section className="motor-option-panel"><h3>Motor sequence</h3><p>M1 rear-right → M2 front-right → M3 rear-left → M4 front-left.</p>
           <p className="muted">One-second pulses at 8%, with 0.7-second gaps. Check each motor individually first.</p>

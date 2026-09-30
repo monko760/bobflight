@@ -3,7 +3,9 @@
 #include "sched/loop_rate_setting.h"
 #include "sched/scheduler.h"
 #include "drivers/gyro.h"
+#include "drivers/dshot.h"
 #include "drivers/dshot_telem.h"
+#include "drivers/dshot_bidir_budget.h"
 #include "flight/arming.h"
 #include "hal/hal.h"
 
@@ -30,30 +32,56 @@ unsigned loop_rate_ladder(uint32_t requested_hz, loop_rate_t out[LOOP_RATE_LADDE
     return n;
 }
 
+static uint32_t profile_loop_hz(loop_rate_t r) { return r.pid_denom ? r.gyro_hz / r.pid_denom : 0u; }
+
+unsigned loop_rate_ladder_bidir(uint32_t requested_hz, bool dshot_bidir, unsigned dshot_kbps,
+                                loop_rate_t out[LOOP_RATE_LADDER_MAX], bool *capped)
+{
+    loop_rate_t full[LOOP_RATE_LADDER_MAX];
+    const unsigned n = loop_rate_ladder(requested_hz, full);
+    unsigned i, k = 0u;
+    if (capped) *capped = false;
+    for (i = 0u; i < n; i++) {
+        /* Bidir: keep only rates whose worst-case reply window is proven
+         * (drivers/dshot_bidir_budget.h). 1000/1 always stays as the floor. */
+        const bool last = i + 1u == n;
+        if (dshot_bidir && !last && !dshot_bidir_window_fits(profile_loop_hz(full[i]), dshot_kbps)) {
+            if (capped) *capped = true;
+            continue;
+        }
+        out[k++] = full[i];
+    }
+    return k;
+}
+
 loop_rate_t loop_rate_select(const loop_rate_inputs_t *in, const char **reason)
 {
     const char *r = "setting";
     loop_rate_t out = k_legacy;
     loop_rate_t ladder[LOOP_RATE_LADDER_MAX];
-    const unsigned n = loop_rate_ladder(in ? in->requested_hz : LOOP_RATE_SETTING_1K, ladder);
-    if (!in || n == 1u) {
+    if (in && in->dshot_bidir && in->dshot_capture_failed) {
+        /* B2: DMA capture failed repeatedly (window never opened, DMA error or
+         * replies cut off): widest window, reported for every setting
+         * (including 1000) so the cause is always visible. */
+        r = "dshot-bidir-capture-failed";
+    } else if (!in || loop_rate_ladder(in->requested_hz, ladder) == 1u) {
         /* Setting 1000 (or anything unrecognised): the pre-R3 1000 / 1 path. */
     } else if (!in->board_fast) {
         r = "board-has-no-8k-gyro-path";
     } else if (!in->high_res_time) {
         r = "no-high-res-timebase";
-    } else if (in->dshot_bidir) {
-        /* Polled bidir listen blocks >= ~95-156 us plus a 0.5-1.1 ms quiet gap
-         * per cascade (docs/LOOP-RATE.md); cannot fit a 125 us gyro slot. */
-        r = "dshot-bidir-polled-listen";
     } else if (in->gyro_healthy && in->gyro_odr_hz < LOOP_RATE_FAST_GYRO_HZ) {
         r = "gyro-odr-below-8k";
     } else if (in->gyro_healthy && in->gyro_spi_hz < LOOP_RATE_MIN_GYRO_SPI_HZ) {
         r = "gyro-spi-clock-slow";
     } else {
+        bool capped = false;
+        const unsigned n = loop_rate_ladder_bidir(in->requested_hz, in->dshot_bidir,
+                                                  in->dshot_kbps, ladder, &capped);
         const unsigned level = in->guard_level < n ? in->guard_level : n - 1u;
         out = ladder[level];
         if (level) r = "overrun-guard";
+        else if (capped) r = "dshot-bidir-reply-window"; /* 8000 + bidir -> 8000/2 */
     }
     if (reason) *reason = r;
     return out;
@@ -73,6 +101,8 @@ static loop_rate_inputs_t gather(void)
     in.board_fast = g_board_fast;
     in.high_res_time = hal_time_high_resolution();
     in.dshot_bidir = dshot_bidir_enabled();
+    in.dshot_kbps = dshot_speed_kbps();
+    in.dshot_capture_failed = dshot_telem_capture_failed();
     in.gyro_healthy = gyro_is_healthy();
     /* A failed or unknown sensor configuration counts as below 8 kHz. */
     in.gyro_odr_hz = g && g->config_ok ? g->odr_hz : 0u;
@@ -106,12 +136,14 @@ void loop_rate_tick(void)
     }
     if (s->loop_window_seq != g_seen_seq) {
         g_seen_seq = s->loop_window_seq;
-        /* Budget guard only judges the requested ladder, never a rate that a
-         * known blocking mode (bidir, no timebase) already forced down. */
+        /* Budget guard only judges the requested (bidir-capped) ladder, never
+         * a rate that a known mode (capture failure, no timebase) forced down. */
         loop_rate_t ladder[LOOP_RATE_LADDER_MAX];
-        const unsigned n = loop_rate_ladder(g_boot_setting_hz, ladder);
+        const unsigned n = loop_rate_ladder_bidir(g_boot_setting_hz, dshot_bidir_enabled(),
+                                                  dshot_speed_kbps(), ladder, NULL);
         const bool guarded = g_board_fast && n > 1u &&
-            (strcmp(g_reason, "setting") == 0 || strcmp(g_reason, "overrun-guard") == 0);
+            (strcmp(g_reason, "setting") == 0 || strcmp(g_reason, "overrun-guard") == 0 ||
+             strcmp(g_reason, "dshot-bidir-reply-window") == 0);
         if (guarded && g_guard_level + 1u < n) {
             if (loop_rate_window_breach(s->loop_window_overruns, s->loop_window_gyro_runs)) {
                 if (++g_breaches >= LOOP_RATE_GUARD_BREACHES) {

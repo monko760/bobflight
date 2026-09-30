@@ -13,8 +13,10 @@ import {
   shouldDisableArm,
 } from "../protocol";
 import { LoopRatePoller, type LoopRatePollState } from "../setup/loopRatePoller";
+import { LoopRateReasonCard } from "../setup/LoopRateReasonCard";
 import {
   LOOP_RATE_SETTING_EMPTY,
+  LoopTargetWatcher,
   readLoopRateSetting,
   saveLoopRate,
   selectLoopRate,
@@ -107,6 +109,18 @@ export function SetupPage() {
     if (!loopSettingRead && !busy && !postFlashGate) void runLoopRateAction(() => readLoopRateSetting(host));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected, loopSettingRead, busy, postFlashGate, host]);
+  // A runtime fallback changes the polled target without any selector action:
+  // re-read the report so the reason card never pairs a new target with a
+  // stale reason token. Deferred while busy (the effect re-runs when idle).
+  const loopTargetWatcher = useMemo(() => new LoopTargetWatcher(), []);
+  useEffect(() => {
+    if (!connected) {
+      loopTargetWatcher.reset();
+      return;
+    }
+    if (busy || postFlashGate) return;
+    if (loopTargetWatcher.changed(loopTarget)) setLoopSettingRead(false);
+  }, [loopTargetWatcher, connected, loopTarget, busy, postFlashGate]);
   // restoreDefaults exists on BobFlightHost and is safe when connected (mock + serial).
   const canRestoreDefaults =
     connected && !busy && typeof host.restoreDefaults === "function";
@@ -323,6 +337,7 @@ export function SetupPage() {
             <div className="v">{connected ? loopSelector.bootDisplay : LOOP_RATE_SETTING_UNKNOWN}</div>
           </div>
         </div>
+        <LoopRateReasonCard report={loopSetting.report} connected={connected} />
         {connected &&
           loopSelector.notices.map((notice) => (
             <p key={notice} className={loopSelector.pendingReboot && notice.startsWith("Pending") ? "banner-warn" : "muted"}>

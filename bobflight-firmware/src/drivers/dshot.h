@@ -50,6 +50,10 @@ bool dshot_is_healthy(void);
 uint16_t dshot_encode_packet(uint16_t throttle11);
 /** Same as encode_packet but sets the telemetry-request bit when request_telem. */
 uint16_t dshot_encode_packet_ex(uint16_t throttle11, bool request_telem);
+/** Bidirectional DShot frame: telemetry bit 0, inverted CRC nibble (BDShot). */
+uint16_t dshot_encode_packet_bidir(uint16_t throttle11);
+/** Last packet built for motor 0..3 by dshot_write (0 if out of range). */
+uint16_t dshot_last_packet(unsigned motor);
 /** Expand packet MSB-first into CCR high-time buffer; out_n >= DSHOT_BURST_LEN. */
 void dshot_expand_frame(uint16_t packet, uint16_t *out, size_t out_n);
 
