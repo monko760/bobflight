@@ -16,6 +16,7 @@ import {
   mockSensorReply,
   cloneDefaultSettings,
   mockLoopStatusLines,
+  mockLoopRateBidir,
   MockLoopRateSetting,
   type LoopRateMockScenario,
   type SettingsKey,
@@ -147,7 +148,7 @@ export class MockBobFlightHost implements BobFlightHost {
     }
     this.lastError = null;
     this.armed = false;
-    this.dshotBidir = false;
+    this.dshotBidir = mockLoopRateBidir(this.loopRateScenario); // RAM-only; bidir scenarios start on
     this.bench.reset();
     this.setStatus("connecting");
     await delay(this.connectDelayMs);
@@ -355,7 +356,10 @@ export class MockBobFlightHost implements BobFlightHost {
     failsafeActive?: boolean;
     loopRateScenario?: LoopRateMockScenario;
   }): void {
-    if (opts.loopRateScenario !== undefined) this.loopRateScenario = opts.loopRateScenario;
+    if (opts.loopRateScenario !== undefined) {
+      this.loopRateScenario = opts.loopRateScenario;
+      this.dshotBidir = mockLoopRateBidir(opts.loopRateScenario);
+    }
     if (opts.gyroHealthy !== undefined) this.gyroHealthy = opts.gyroHealthy;
     if (opts.failsafeActive !== undefined) {
       this.failsafeActive = opts.failsafeActive;

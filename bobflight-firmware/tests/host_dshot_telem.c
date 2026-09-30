@@ -56,15 +56,30 @@ static uint32_t g_ms;
 uint32_t hal_millis(void) { return g_ms; }
 void hal_host_advance_ms(uint32_t dt) { g_ms += dt; }
 
-typedef struct {
+typedef struct test_ic_slot test_ic_slot_t;
+static hal_dshot_ic_result_t g_ic_last(unsigned motor);
+struct test_ic_slot {
     uint16_t *buf;
     size_t cap;
     size_t n;
     uint16_t bit_ticks;
     bool armed;
-} test_ic_slot_t;
-
+    hal_dshot_ic_result_t last;
+};
 static test_ic_slot_t g_ic[HAL_DSHOT_IC_MOTOR_COUNT];
+static hal_dshot_ic_result_t g_ic_last(unsigned motor) { return g_ic[motor].last; }
+static bool g_inverted;
+void hal_tim_dma_set_inverted(bool inverted) { g_inverted = inverted; }
+hal_dshot_ic_result_t hal_dshot_ic_result(unsigned motor)
+{
+    return motor < HAL_DSHOT_IC_MOTOR_COUNT ? g_ic_last(motor) : HAL_DSHOT_IC_NOT_ARMED;
+}
+uint16_t hal_dshot_ic_tail_ticks(unsigned motor)
+{
+    (void)motor;
+    return HAL_DSHOT_IC_TAIL_QUIET;
+}
+
 
 bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap)
 {
@@ -96,9 +111,11 @@ size_t hal_dshot_ic_take(unsigned motor)
     }
     s = &g_ic[motor];
     if (!s->armed) {
+        s->last = HAL_DSHOT_IC_NOT_ARMED;
         return 0u;
     }
     s->armed = false;
+    s->last = HAL_DSHOT_IC_OK;
     n = s->n;
     s->n = 0u;
     return n;
@@ -144,13 +161,15 @@ static void inject_edges(unsigned motor, const uint16_t *d, size_t n,
     if (!s->armed || !s->buf) {
         return;
     }
-    if (n > s->cap) {
-        n = s->cap;
+    /* B2: the capture buffer holds raw timer timestamps, not deltas. */
+    if (n + 1u > s->cap) {
+        n = s->cap - 1u;
     }
+    s->buf[0] = 40000u; /* wraps inside the frame: modular deltas */
     for (i = 0u; i < n; i++) {
-        s->buf[i] = d[i];
+        s->buf[i + 1u] = (uint16_t)(s->buf[i] + d[i]);
     }
-    s->n = n;
+    s->n = n ? n + 1u : 0u;
 }
 
 static int fail(const char *msg)
@@ -219,6 +238,21 @@ static int check_telem_bit_encode(void)
     if (dshot_encode_packet(1048u) != 0x830Bu) {
         return fail("encode_packet telem-off golden");
     }
+    /* B2 BDShot: telem bit 0, CRC nibble inverted; line inverted with bidir. */
+    if (dshot_encode_packet_bidir(1048u) != (uint16_t)(0x830Bu ^ 0x000Fu)) {
+        return fail("bidir packet = inverted CRC");
+    }
+    if ((dshot_encode_packet_bidir(48u) >> 4) & 1u) {
+        return fail("bidir packet telem bit 0");
+    }
+    if (g_inverted) {
+        return fail("bidir off -> line not inverted");
+    }
+    dshot_bidir_set_enabled(true);
+    if (!g_inverted) {
+        return fail("bidir on -> inverted line");
+    }
+    dshot_bidir_set_enabled(false);
     return 0;
 }
 

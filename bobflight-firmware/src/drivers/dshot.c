@@ -45,6 +45,15 @@ uint16_t dshot_encode_packet_ex(uint16_t throttle11, bool request_telem)
     return (uint16_t)((value << 4) | crc);
 }
 
+/* Bidirectional DShot (public BDShot): same 12-bit value, telemetry-request
+ * bit 0 (that bit asks for the separate UART telemetry wire), and the CRC
+ * nibble is inverted: ~(v ^ v>>4 ^ v>>8) & 0xF. Sent on an inverted line. */
+uint16_t dshot_encode_packet_bidir(uint16_t throttle11)
+{
+    uint16_t pkt = dshot_encode_packet_ex(throttle11, false);
+    return (uint16_t)(pkt ^ 0x000Fu);
+}
+
 uint16_t dshot_encode_packet(uint16_t throttle11)
 {
     return dshot_encode_packet_ex(throttle11, false);
@@ -114,8 +123,15 @@ void motor_safe_idle(void)
 void dshot_write(const float motor[DSHOT_MOTOR_COUNT])
 {
     unsigned i;
+    bool bidir;
     if (!motor) {
         return;
+    }
+    bidir = dshot_bidir_enabled();
+    /* B2 pipeline (never blocks): harvest + decode the reply to the PREVIOUS
+     * frame, captured by DMA while the gyro slot ran. */
+    if (bidir) {
+        dshot_telem_poll_all();
     }
     for (i = 0; i < DSHOT_MOTOR_COUNT; i++) {
         float n = motor[i];
@@ -127,23 +143,28 @@ void dshot_write(const float motor[DSHOT_MOTOR_COUNT])
         if (n > 1.f) {
             n = 1.f;
         }
-        /* DShot throttle 48..2047; 0 = disarmed command. Dummy never bursts.
-         * R0c: request telem on M1–M4 when bidir enabled so ESCs reply. */
+        /* DShot throttle 48..2047; 0 = disarmed command. Dummy never bursts. */
         th = (n <= 0.f) ? 0u : (uint16_t)(48u + (unsigned)(n * (2047u - 48u)));
-        {
-            bool telem = dshot_bidir_enabled();
-            g_last_pkt[i] = dshot_encode_packet_ex(th, telem);
-        }
+        g_last_pkt[i] = bidir ? dshot_encode_packet_bidir(th) : dshot_encode_packet_ex(th, false);
         if (g_tim[i]) {
             dshot_expand_frame(g_last_pkt[i], g_burst[i], DSHOT_BURST_LEN);
+        }
+    }
+    /* Register THIS frame's capture buffers before the bursts fire, so the
+     * TX DMA TC IRQ opens the window right after the frame. */
+    if (bidir) {
+        dshot_telem_arm_listen_all();
+    }
+    for (i = 0; i < DSHOT_MOTOR_COUNT; i++) {
+        if (g_tim[i]) {
             if(!hal_tim_dma_start_burst(g_tim[i], g_burst[i], DSHOT_BURST_LEN)) {g_output_ok=false; arming_disarm();}
         }
     }
-    /* Listen-after-TX on M1–M4; TX TIM3_UP / TIM1_UP DMA paths unchanged. */
-    if (dshot_bidir_enabled()) {
-        dshot_telem_arm_listen_all();
-        dshot_telem_poll_all();
-    }
+}
+
+uint16_t dshot_last_packet(unsigned motor)
+{
+    return motor < DSHOT_MOTOR_COUNT ? g_last_pkt[motor] : 0u;
 }
 
 bool dshot_set_speed_kbps(unsigned kbps)

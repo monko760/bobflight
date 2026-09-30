@@ -34,6 +34,17 @@ typedef enum {
 
 /** Age after last OK decode before status reports STALE (ms). */
 #define DSHOT_TELEM_STALE_MS 100u
+/** Capture buffer per motor (raw timer timestamps). */
+#define DSHOT_TELEM_EDGE_CAP 64u
+/** Longest same-level run in a valid 21-bit BDShot reply (GCR: <= 2 zeros). */
+#define DSHOT_TELEM_MAX_RUN_BITS 3u
+/**
+ * Consecutive cycles with a capture failure (window never opened, DMA
+ * error, or reply cut off by the harvest) before dshot_telem_capture_failed()
+ * latches. 32 cycles = 8 ms at 4 kHz, 32 ms at 1 kHz. A silent ESC never
+ * counts (TIMEOUT only).
+ */
+#define DSHOT_TELEM_CAPTURE_FAIL_LIMIT 32u
 
 void dshot_bidir_set_enabled(bool on); /* default off */
 bool dshot_bidir_enabled(void);
@@ -77,12 +88,29 @@ void dshot_telem_ingest_gcr21(unsigned motor, uint32_t bits21);
 bool dshot_telem_ingest_edge_deltas(unsigned motor, const uint16_t *deltas,
                                     size_t n, uint16_t bit_period_ticks);
 
+/**
+ * Decode one capture window: n raw 16-bit timer timestamps (edge times),
+ * bit_period_ticks = telem bit in timer ticks, tail_ticks = ticks from the
+ * last edge to the harvest (HAL_DSHOT_IC_TAIL_QUIET if the line was quiet).
+ * Returns true when a full 21-bit frame was assembled and handed to GCR.
+ */
+bool dshot_telem_ingest_capture(unsigned motor, const uint16_t *ts, size_t n,
+                                uint16_t bit_period_ticks, uint16_t tail_ticks);
+
+/** Latched: DSHOT_TELEM_CAPTURE_FAIL_LIMIT failing cycles in a row (bidir on). */
+bool dshot_telem_capture_failed(void);
+/** Current consecutive capture-failure cycle count (0 when bidir off). */
+uint32_t dshot_telem_capture_fail_streak(void);
+/** Harvest cycles since bidir was enabled (diagnostic / tests). */
+uint32_t dshot_telem_cycles(void);
+
 /** Record a listen-window miss (no edges) for one motor. */
 void dshot_telem_note_timeout(unsigned motor);
 
 /**
- * After DShot TX is queued/fired: arm TIMx_CHy IC listen on that motor pin.
- * No-op when bidir is off or motor out of range. TX UP DMA paths unchanged.
+ * BEFORE this cycle's DShot TX: register the capture buffer (non-blocking).
+ * The TX DMA TC IRQ switches TIMx_CHy to input capture after the frame.
+ * No-op when bidir is off or motor out of range.
  */
 void dshot_telem_arm_listen(unsigned motor);
 
@@ -90,12 +118,12 @@ void dshot_telem_arm_listen(unsigned motor);
 void dshot_telem_arm_listen_all(void);
 
 /**
- * Poll IC completion → edge assemble → GCR → snapshot for one motor.
- * Safe to call from a background/CLI context; no-op if not armed.
+ * Harvest (non-blocking) → edge assemble → GCR → snapshot for one motor.
+ * No-op if not armed. Never waits for edges.
  */
 void dshot_telem_poll(unsigned motor);
 
-/** Poll all motors that were armed. */
+/** Harvest + decode the previous frame's replies; updates the failure latch. */
 void dshot_telem_poll_all(void);
 
 /* Thin M1 ingest/arm/poll wrappers → motor 0 (host / R0b call sites). */

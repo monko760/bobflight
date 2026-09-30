@@ -1,5 +1,14 @@
 # Real RPM and bidirectional DShot: remaining work
 
+> **Status update (R0c + B2, flash held, unverified on hardware):** the firmware
+> now has an explicit, RAM-only bidirectional DShot mode (`set dshot_bidir on`,
+> default off) with per-motor `get erpm_mN` / `get dshot_telem_mN` on the
+> Kakute F7 HDV. B2 receives the reply by DMA input capture without blocking
+> the loop (bobflight-firmware/docs/DSHOT-BIDIR-4K.md). The Motors page shows
+> eRPM only when the controller reports `ok`; Setup shows the loop-rate reason
+> exactly as the controller reports it. Mechanical RPM, direction and the
+> remaining items below are still open.
+
 This is a development plan, **not implemented functionality**. No bidirectional
 mode is enabled by the adjustable-pulse change. Motor tones alone do not prove
 that BobFlight commands spin the intended motor or that ESC telemetry works.

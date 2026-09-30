@@ -128,22 +128,57 @@ bool hal_tim_dma_start_burst(hal_tim_dma_t *t, const uint16_t *words, size_t n);
 /** Re-time the DShot bit clock (300000 or 600000 Hz); false if invalid. */
 bool hal_tim_dma_set_bit_rate(uint32_t hz);
 
-/* ---- DShot M1–M4 listen-after-TX IC (Kakute R0c) ----
+/* ---- DShot M1–M4 bidir receive: DMA input capture (Kakute, B2) ----
  * Pins (IR lock; AF already set by TX path — do not remap):
  *   M1 PB0 AF2 TIM3_CH3 | M2 PB1 AF2 TIM3_CH4 | share TIM3_UP DMA1 S2/C5
  *   M3 PE9 AF1 TIM1_CH1 | M4 PE11 AF1 TIM1_CH2 | share TIM1_UP DMA2 S5/C6
- * TX UP DMA paths unchanged. Host provides inject stubs. */
+ * Capture DMA (RM0385 DMA1/DMA2 request mapping tables):
+ *   TIM3_CH3 DMA1 S7/C5 | TIM3_CH4 DMA1 S2/C5 (same request line as
+ *   TIM3_UP, reused after the TX transfer completes) | TIM1_CH1 DMA2 S1/C6 |
+ *   TIM1_CH2 DMA2 S2/C6.
+ *
+ * NON-BLOCKING contract (B2): nothing here waits for the TX frame or for an
+ * ESC reply.
+ *   hal_dshot_ic_arm()     register a capture buffer for the NEXT TX frame.
+ *                          The TX DMA transfer-complete IRQ switches the
+ *                          channel to input capture; DMA stores timer
+ *                          timestamps while the CPU runs the gyro slot.
+ *   hal_dshot_ic_collect() harvest: stop capture DMA, restore TX (PWM)
+ *                          mode. Called once per cycle before the next TX.
+ *   hal_dshot_ic_take()    number of raw 16-bit timer TIMESTAMPS (CCR values,
+ *                          not deltas) in the motor's buffer; collects that
+ *                          motor's timer group first if still capturing.
+ *   hal_dshot_ic_result()  why a window produced nothing (capture fault vs
+ *                          plain silence).
+ *   hal_dshot_ic_tail_ticks() ticks between the last captured edge and the
+ *                          harvest (0xFFFF = quiet/unknown); lets the decoder
+ *                          tell an unterminated final GCR run from a reply
+ *                          cut off by the harvest.
+ * Host provides inject stubs. */
 #define HAL_DSHOT_IC_MOTOR_COUNT 4u
 #define HAL_DSHOT_IC_MAX_EDGES 64u
 #define HAL_DSHOT_M1_IC_MAX_EDGES HAL_DSHOT_IC_MAX_EDGES /* R0b alias */
+#define HAL_DSHOT_IC_TAIL_QUIET 0xFFFFu
+
+typedef enum {
+    HAL_DSHOT_IC_OK = 0,        /* window ran; 0..n timestamps captured */
+    HAL_DSHOT_IC_NOT_ARMED,     /* nothing was armed for this motor */
+    HAL_DSHOT_IC_TX_NOT_DONE,   /* harvest before the TX frame finished: no window */
+    HAL_DSHOT_IC_DMA_ERROR,     /* capture stream error / could not stop */
+    HAL_DSHOT_IC_NO_HW          /* board has no capture path (arm refused) */
+} hal_dshot_ic_result_t;
 
 bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap);
-/** Parallel CCxIF collect for all armed motors (shared listen window). */
+/** Non-blocking harvest of every armed motor (stop DMA, restore TX mode). */
 void hal_dshot_ic_collect(void);
-size_t hal_dshot_ic_take(unsigned motor); /* edge count after collect or solo spin */
+size_t hal_dshot_ic_take(unsigned motor); /* timestamp count after collect */
+hal_dshot_ic_result_t hal_dshot_ic_result(unsigned motor);
+uint16_t hal_dshot_ic_tail_ticks(unsigned motor);
 void hal_dshot_ic_cancel(unsigned motor);
 void hal_dshot_ic_cancel_all(void);
 uint16_t hal_dshot_ic_bit_period_ticks(unsigned motor); /* telem bit = 4/5 DShot */
+/** Bidirectional DShot line polarity: inverted = idle high, pull-up (BDShot). */
+void hal_tim_dma_set_inverted(bool inverted);
 
 /* M1 wrappers → motor 0 */
 static inline bool hal_dshot_m1_ic_arm(uint16_t *edge_buf, size_t cap)

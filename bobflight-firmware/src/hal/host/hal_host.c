@@ -229,16 +229,25 @@ bool hal_tim_dma_set_bit_rate(uint32_t hz)
     return hz == 300000u || hz == 600000u;
 }
 
-/* ---- DShot M1–M4 IC (host: test inject / no TIM) ---- */
+/* ---- DShot M1–M4 bidir capture (host: test inject / no TIM) ----
+ * Mirrors the MCU contract: arm registers a buffer, collect/take harvest
+ * without waiting, the buffer holds raw timer TIMESTAMPS. Tests inject
+ * either deltas (converted to timestamps) or timestamps, and can force a
+ * HAL capture result (TX_NOT_DONE / DMA_ERROR) or a non-quiet tail. */
 typedef struct {
     uint16_t *buf;
     size_t cap;
     size_t n;
     uint16_t bit_ticks;
+    uint16_t tail_ticks;
+    hal_dshot_ic_result_t forced;
+    hal_dshot_ic_result_t last;
     bool armed;
 } host_ic_slot_t;
 
 static host_ic_slot_t g_ic[HAL_DSHOT_IC_MOTOR_COUNT];
+static bool g_dshot_inverted;
+static unsigned g_ic_collects;
 
 bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap)
 {
@@ -248,9 +257,11 @@ bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap)
     }
     s = &g_ic[motor];
     s->buf = edge_buf;
-    s->cap = cap;
+    s->cap = cap > HAL_DSHOT_IC_MAX_EDGES ? HAL_DSHOT_IC_MAX_EDGES : cap;
     s->n = 0u;
     s->armed = true;
+    s->tail_ticks = HAL_DSHOT_IC_TAIL_QUIET;
+    s->forced = HAL_DSHOT_IC_OK;
     if (s->bit_ticks == 0u) {
         s->bit_ticks = 1u;
     }
@@ -259,7 +270,8 @@ bool hal_dshot_ic_arm(unsigned motor, uint16_t *edge_buf, size_t cap)
 
 void hal_dshot_ic_collect(void)
 {
-    /* Host: edges are injected into per-motor bufs before take(). */
+    /* Host: edges were injected into per-motor bufs; nothing to stop. */
+    g_ic_collects++;
 }
 
 size_t hal_dshot_ic_take(unsigned motor)
@@ -271,12 +283,24 @@ size_t hal_dshot_ic_take(unsigned motor)
     }
     s = &g_ic[motor];
     if (!s->armed) {
+        s->last = HAL_DSHOT_IC_NOT_ARMED;
         return 0u;
     }
     s->armed = false;
-    n = s->n;
+    s->last = s->forced;
+    n = s->last == HAL_DSHOT_IC_OK ? s->n : 0u;
     s->n = 0u;
     return n;
+}
+
+hal_dshot_ic_result_t hal_dshot_ic_result(unsigned motor)
+{
+    return motor < HAL_DSHOT_IC_MOTOR_COUNT ? g_ic[motor].last : HAL_DSHOT_IC_NOT_ARMED;
+}
+
+uint16_t hal_dshot_ic_tail_ticks(unsigned motor)
+{
+    return motor < HAL_DSHOT_IC_MOTOR_COUNT ? g_ic[motor].tail_ticks : HAL_DSHOT_IC_TAIL_QUIET;
 }
 
 void hal_dshot_ic_cancel(unsigned motor)
@@ -290,6 +314,8 @@ void hal_dshot_ic_cancel(unsigned motor)
     s->n = 0u;
     s->buf = NULL;
     s->cap = 0u;
+    s->forced = HAL_DSHOT_IC_OK;
+    s->tail_ticks = HAL_DSHOT_IC_TAIL_QUIET;
 }
 
 void hal_dshot_ic_cancel_all(void)
@@ -310,9 +336,24 @@ uint16_t hal_dshot_ic_bit_period_ticks(unsigned motor)
     return s->bit_ticks == 0u ? 1u : s->bit_ticks;
 }
 
-/** Host-test helper: queue synthetic edge deltas for motor (default M1). */
-void hal_host_dshot_ic_inject(unsigned motor, const uint16_t *deltas, size_t n,
-                              uint16_t bit_ticks)
+void hal_tim_dma_set_inverted(bool inverted)
+{
+    g_dshot_inverted = inverted;
+}
+
+bool hal_host_dshot_inverted(void)
+{
+    return g_dshot_inverted;
+}
+
+unsigned hal_host_dshot_ic_collects(void)
+{
+    return g_ic_collects;
+}
+
+/** Host-test helper: queue raw capture timestamps for an armed motor. */
+void hal_host_dshot_ic_inject_timestamps(unsigned motor, const uint16_t *ts, size_t n,
+                                         uint16_t bit_ticks, uint16_t tail_ticks)
 {
     host_ic_slot_t *s;
     size_t i;
@@ -321,6 +362,7 @@ void hal_host_dshot_ic_inject(unsigned motor, const uint16_t *deltas, size_t n,
     }
     s = &g_ic[motor];
     s->bit_ticks = bit_ticks == 0u ? 1u : bit_ticks;
+    s->tail_ticks = tail_ticks;
     if (!s->armed || !s->buf) {
         return;
     }
@@ -328,9 +370,36 @@ void hal_host_dshot_ic_inject(unsigned motor, const uint16_t *deltas, size_t n,
         n = s->cap;
     }
     for (i = 0u; i < n; i++) {
-        s->buf[i] = deltas[i];
+        s->buf[i] = ts[i];
     }
     s->n = n;
+}
+
+/** Host-test helper: queue synthetic edge deltas (converted to timestamps). */
+void hal_host_dshot_ic_inject(unsigned motor, const uint16_t *deltas, size_t n,
+                              uint16_t bit_ticks)
+{
+    uint16_t ts[HAL_DSHOT_IC_MAX_EDGES];
+    size_t i;
+    uint16_t t = 1000u;
+    if (n + 1u > HAL_DSHOT_IC_MAX_EDGES) {
+        n = HAL_DSHOT_IC_MAX_EDGES - 1u;
+    }
+    ts[0] = t;
+    for (i = 0u; i < n; i++) {
+        t = (uint16_t)(t + deltas[i]);
+        ts[i + 1u] = t;
+    }
+    hal_host_dshot_ic_inject_timestamps(motor, ts, n ? n + 1u : 0u, bit_ticks,
+                                        HAL_DSHOT_IC_TAIL_QUIET);
+}
+
+/** Host-test helper: force the HAL capture result of the next harvest. */
+void hal_host_dshot_ic_force_result(unsigned motor, hal_dshot_ic_result_t r)
+{
+    if (motor < HAL_DSHOT_IC_MOTOR_COUNT) {
+        g_ic[motor].forced = r;
+    }
 }
 
 void hal_host_dshot_m1_ic_inject(const uint16_t *deltas, size_t n, uint16_t bit_ticks)

@@ -113,17 +113,25 @@ setting and never runs slower silently. `loop_target_hz` and
 | `setting` | the setting's mapping | default, nothing blocks it |
 | `board-has-no-8k-gyro-path` | 1000/1 | defensive: 4000/8000 on a board without the 8 kHz path (normally refused at `set` and at load) |
 | `no-high-res-timebase` | 1000/1 | `hal_time_source` is not DWT (ms fallback) |
-| `dshot-bidir-polled-listen` | 1000/1 | bidirectional DShot on (see below) |
+| `dshot-bidir-capture-failed` | 1000/1 | bidirectional DShot on and the DMA reply capture failed on 32 consecutive cycles (window never opened, DMA error, or replies cut off). Latched until bidir is toggled or reboot; reported for every setting, including 1000 (see below) |
+| `dshot-bidir-reply-window` | 8000/2 (4 kHz) | `loop_rate_hz 8000` with bidirectional DShot on: the worst-case reply window does not fit a 125 µs period (see below). `4000` is not affected |
 | `gyro-odr-below-8k` | 1000/1 | healthy gyro reports ODR < 8 kHz, or its output-rate configuration failed |
 | `gyro-spi-clock-slow` | 1000/1 | healthy gyro SPI read clock < 10 MHz |
 | `overrun-guard` | next step of the ladder | two closed windows in a row with overruns > 1% of gyro slots, per step |
 
-Guard ladders (the requested rate is judged only while `setting` or
-`overrun-guard` is in effect):
+Guard ladders (the requested rate is judged only while `setting`,
+`overrun-guard` or `dshot-bidir-reply-window` is in effect):
 
 - `loop_rate_hz 8000`: 8000/1 (8 kHz) → 8000/2 (4 kHz) → 4000/2 (2 kHz) → 1000/1
-- `loop_rate_hz 4000`: 8000/2 (4 kHz) → 4000/2 (2 kHz) → 1000/1
+- `loop_rate_hz 8000` with bidir on: 8000/2 (4 kHz) → 4000/2 (2 kHz) → 1000/1
+  (8000/1 is dropped by `loop_rate_ladder_bidir`; level 0 reports
+  `dshot-bidir-reply-window`, deeper levels `overrun-guard`)
+- `loop_rate_hz 4000`: 8000/2 (4 kHz) → 4000/2 (2 kHz) → 1000/1 (bidir or not)
 - `loop_rate_hz 1000`: not guarded (the pre-R3 behaviour)
+
+The ladder is rebuilt each window from the current bidir state, so turning
+bidir on or off at runtime can shift what `guard_level` points at on the
+8000 ladder (it only ever lands on an equal or lower rate while armed).
 
 The guard latches and never raises the rate by itself. A drop applies even
 while armed. A raise (for example bidir turned off) applies only while
@@ -170,27 +178,43 @@ slower silently.
   ≈70 µs with the inter-frame gap, which fits inside 125 µs. The CPU only arms
   4 DMA bursts.
 - The gyro SPI read (≈13 µs at 13.5 MHz) fits.
-- Bidirectional DShot cannot fit at 8 kHz (or 4 kHz): with bidir on, the
-  policy forces 1000/1 (see below).
+- Bidirectional DShot (B2, DMA input capture) fits 4 kHz with margin but not
+  8 kHz: with bidir on, `8000` is capped to 8000/2 (see below).
 
 ## Bidirectional DShot
 
-The polled listen (`hal_tim_ic.c`) blocks the CPU for:
+Since B2 the eRPM reply is received by DMA input capture, pipelined one frame
+behind and never waited for (`hal_tim_ic.c`, design in
+[DSHOT-BIDIR-4K.md](DSHOT-BIDIR-4K.md)). `dshot_write` harvests the reply to the
+previous frame (bounded: stop 4 DMA streams, copy ≤ 64 timestamps), decodes
+it, re-arms the capture and fires the next TX. The CPU never spins on the
+line, so bidir no longer blocks the cascade.
 
-- TX frame ≈70 µs (DShot300) or ≈35 µs (DShot600)
-- ESC turnaround ≈30 µs
-- GCR reply ≈56 µs (DShot300) or ≈28 µs (DShot600)
-- then `IC_QUIET_GAP` 2000 spins, ≈0.5–1.1 ms
-- with no reply, up to `IC_SPIN_BUDGET` 50000 spins (many ms)
+What limits the rate is the wire: the reply to frame N must be complete
+before frame N+1 starts. Worst case from TX start (`dshot_bidir_budget.h`):
 
-The protocol minimum alone is ≈156 µs (DShot300) or ≈95 µs (DShot600), plus
-the cascade. Neither fits a 125 µs slot. With bidir on, the policy forces
-1000/1 for both `4000` and `8000` settings (reason `dshot-bidir-polled-listen`),
-where it already overruns today because of the quiet gap. Making bidir
-compatible with 4/8 kHz needs an asynchronous (DMA/IRQ input-capture) receive
-path, which is out of scope here.
+| | DShot300 | DShot600 |
+|---|---|---|
+| capture live (TX TC + ISR) | 65.3 µs | 33.7 µs |
+| reply end, 40 µs turnaround | 152.6 µs | 96.3 µs |
+| + 30 µs loop jitter = needed period | 182.6 µs | 126.3 µs |
+| 4 kHz (250 µs) | fits, 67 µs margin | fits, 124 µs margin |
+| 8 kHz (125 µs) | does not fit (−57.6 µs) | does not fit (−1.3 µs) |
+
+So with bidir on: `4000` runs as set (reason `setting`); `8000` is capped to
+8000/2 (reason `dshot-bidir-reply-window`); `1000` is unchanged. If the
+capture keeps failing (32 consecutive cycles with a window that never opened,
+a DMA error or cut-off replies; silence and CRC errors do not count), the
+policy latches 1000/1 with reason `dshot-bidir-capture-failed`: the widest
+window, and the cause is always visible. The latch clears when bidir is
+toggled or on reboot. The pre-B2 reason `dshot-bidir-polled-listen` (polled
+listen, forced 1000/1) no longer exists in firmware; the Configurator still
+explains it when an older FC reports it.
 
 ## Hardware risks (flash held)
+
+- Bidir (B2): turnaround, ISR latency and the inverted-line/CRC protocol
+  fixes are unmeasured; see [DSHOT-BIDIR-4K.md](DSHOT-BIDIR-4K.md).
 
 - Real `cascade_exec_max_us` with no I-cache or D-cache (the guard will step
   down if it is too slow). The 8000 setting has thin headroom even nominally.

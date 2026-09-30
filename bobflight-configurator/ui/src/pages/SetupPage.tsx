@@ -12,6 +12,7 @@ import {
   shouldDisableArm,
 } from "../protocol";
 import { LoopRatePoller, type LoopRatePollState } from "../setup/loopRatePoller";
+import { LoopRateReasonCard } from "../setup/LoopRateReasonCard";
 import {
   LOOP_RATE_SETTING_EMPTY,
   readLoopRateSetting,
@@ -310,6 +311,7 @@ export function SetupPage() {
           <div className="k">Loop-rate setting</div>
           <div className="v">{connected ? loopSelector.display : LOOP_RATE_SETTING_UNKNOWN}</div>
         </div>
+        <LoopRateReasonCard report={loopSetting.report} connected={connected} />
         {connected &&
           loopSelector.notices.map((notice) => (
             <p key={notice} className={loopSelector.pendingReboot && notice.startsWith("Pending") ? "banner-warn" : "muted"}>

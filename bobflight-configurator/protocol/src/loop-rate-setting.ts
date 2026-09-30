@@ -139,3 +139,39 @@ export function loopRateSettingView(get: LoopRateGetResult | null, report: LoopR
   }
   return { selected, display: selected ? LOOP_RATE_OPTION_LABELS[selected] : LOOP_RATE_SETTING_UNKNOWN, supported, pendingReboot, notices };
 }
+
+/**
+ * Loop-rate reason card (B2). The token is `loop_rate_reason` exactly as the
+ * FC sent it; nothing is inferred from other state (bidir on/off, board,
+ * rates). A missing or malformed reason is "unknown". Explanatory text exists
+ * only for tokens the firmware documents (bobflight-firmware/docs/LOOP-RATE.md);
+ * an unrecognised token is still shown verbatim, with no explanation.
+ * `dshot-bidir-polled-listen` is what firmware before B2 (#57) reports; its
+ * "forces 1 kHz" text appears only when the FC reports exactly that token.
+ */
+export const LOOP_RATE_REASON_UNKNOWN = "unknown";
+export const LOOP_RATE_REASON_TEXT: Readonly<Record<string, string>> = Object.freeze({
+  "setting": "No fallback: the controller runs its boot setting.",
+  "overrun-guard": "The firmware's overrun guard stepped the loop down after sustained overruns. It does not step back up until reboot.",
+  "board-has-no-8k-gyro-path": "This board has no 8 kHz gyro path, so the firmware runs its 1 kHz profile.",
+  "no-high-res-timebase": "The firmware has no high-resolution timebase, so it runs its 1 kHz profile.",
+  "gyro-odr-below-8k": "The gyro does not report an 8 kHz output rate, so the firmware runs its 1 kHz profile.",
+  "gyro-spi-clock-slow": "The gyro SPI read clock is below 10 MHz, so the firmware runs its 1 kHz profile.",
+  "dshot-bidir-polled-listen": "Bidirectional DShot is on and this firmware's polled eRPM listen forces a 1 kHz loop.",
+  "dshot-bidir-reply-window": "Bidirectional DShot is on: the eRPM reply does not fit an 8 kHz loop period, so the firmware caps the loop at 4 kHz.",
+  "dshot-bidir-capture-failed": "Bidirectional DShot eRPM capture kept failing, so the firmware fell back to its 1 kHz profile. Check the per-motor telemetry on the Motors page; turning bidir off and on again, or rebooting, retries.",
+});
+export interface LoopRateReasonView {
+  /** `loop_rate_reason` as sent, or "unknown". */
+  token: string;
+  /** Documented meaning of the token; null for unknown/unrecognised tokens. */
+  explanation: string | null;
+  /** true only when the FC reported a token other than "setting". */
+  fallback: boolean;
+}
+export function loopRateReasonView(report: LoopRateReport | null): LoopRateReasonView {
+  const token = report?.reason ?? null;
+  if (token === null) return { token: LOOP_RATE_REASON_UNKNOWN, explanation: null, fallback: false };
+  const explanation = Object.prototype.hasOwnProperty.call(LOOP_RATE_REASON_TEXT, token) ? LOOP_RATE_REASON_TEXT[token] : null;
+  return { token, explanation, fallback: token !== "setting" };
+}

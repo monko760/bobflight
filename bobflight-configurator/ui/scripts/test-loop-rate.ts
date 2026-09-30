@@ -8,7 +8,7 @@ import { mockLoopStatusLines, LOOP_RATE_MOCK_SCENARIOS, type LoopRateMockScenari
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { parseCliInput } from "../src/protocol/types";
 import { storageBlocked } from "../src/motors/motorsStorage";
-import { loopRateSettingView, parseLoopRateReport, LOOP_RATE_OPTIONS } from "../../protocol/src/loop-rate-setting";
+import { loopRateSettingView, parseLoopRateReport, LOOP_RATE_OPTIONS, loopRateReasonView, LOOP_RATE_REASON_TEXT } from "../../protocol/src/loop-rate-setting";
 import { readLoopRateSetting, selectLoopRate, saveLoopRate, LOOP_RATE_SETTING_EMPTY, LOOP_RATE_SAVED_MESSAGE, LOOP_RATE_SET_MESSAGE, type LoopRateSettingHost } from "../src/setup/loopRateSetting";
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) { await fn(); passed++; console.log(`PASS ${name}`); }
@@ -83,6 +83,8 @@ async function main() {
       "missing": ["unknown", "unknown", "unknown"], "1000/1": ["1000", "999", "1"],
       "8000/2": ["4000", "3998", "9007199254740993"], "unavailable": ["4000", "unknown", "0"],
       "8000/1": ["8000", "7996", "4"], "8000/1-guard": ["4000", "4000", "16384"],
+      "bidir-4k": ["4000", "3999", "2"], "bidir-8k-capped": ["4000", "3997", "3"], "bidir-capture-failed": ["1000", "1000", "0"],
+      "bidir-older-fc": ["1000", "1000", "0"], "reason-missing": ["4000", "3999", "2"],
     };
     assert.deepEqual(Object.keys(expected).sort(), [...LOOP_RATE_MOCK_SCENARIOS].sort());
     for (const scenario of LOOP_RATE_MOCK_SCENARIOS) {
@@ -208,6 +210,59 @@ async function main() {
     assert.match(setup, /setLoopSettingRead\(false\); \/\/ FW `defaults` also resets loop_rate_hz/);
     for (const cmd of ["get loop_rate_hz", "loop_rate", ...LOOP_RATE_OPTIONS.map(v => `set loop_rate_hz ${v}`)]) assert.equal(parseCliInput(cmd), cmd, cmd);
     for (const bad of ["set loop_rate_hz 2000", "set loop_rate_hz 4000.0", "set loop_rate_hz"]) assert.equal(parseCliInput(bad), null, bad);
+  });
+  await test("B2 reason card over the UI mock host: FC token as sent, re-read after every set (no optimistic UI)", async () => {
+    const want: Partial<Record<LoopRateMockScenario, string>> = {
+      "bidir-4k": "setting", "bidir-8k-capped": "dshot-bidir-reply-window", "bidir-capture-failed": "dshot-bidir-capture-failed",
+      "bidir-older-fc": "dshot-bidir-polled-listen", "reason-missing": "unknown", "8000/2": "setting", "8000/1-guard": "overrun-guard",
+    };
+    for (const [scenario, token] of Object.entries(want) as [LoopRateMockScenario, string][]) {
+      const host = new MockBobFlightHost({ connectDelayMs: 0, loopRateScenario: scenario });
+      await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+      const st = await readLoopRateSetting(host);
+      const reason = loopRateReasonView(st.report);
+      assert.equal(reason.token, token, scenario);
+      const forces = /forces a 1 kHz/.test(reason.explanation ?? "");
+      assert.equal(forces, token === "dshot-bidir-polled-listen", `${scenario}: "forces 1 kHz" copy only for the FC's polled-listen token`);
+      assert.equal(/dshot_bidir=on/.test(await host.sendCommand("get dshot_bidir")), scenario.startsWith("bidir-"), `${scenario}: bidir fixture`);
+      await host.disconnect();
+    }
+    // Bidir on with a "setting" reason never shows fallback text; the reason is not inferred from bidir.
+    const kept = loopRateReasonView(parseLoopRateReport(["loop_rate_api: 1", "loop_rate_reason: setting", "loop_rate_end: 1"].join("\r\n")));
+    assert.equal(kept.fallback, false); assert.doesNotMatch(kept.explanation ?? "", /bidir|1 kHz/i);
+    // Every selector action re-reads get + loop_rate from the FC after the set.
+    const host = new MockBobFlightHost({ connectDelayMs: 0, loopRateScenario: "bidir-8k-capped" });
+    await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    const sent: string[] = [];
+    const spy: LoopRateSettingHost = { sendCommand: c => { sent.push(c); return host.sendCommand(c); }, saveSettings: async () => { sent.push("<save>"); } };
+    let st = await readLoopRateSetting(spy);
+    assert.equal(loopRateReasonView(st.report).token, "dshot-bidir-reply-window");
+    sent.length = 0; st = await selectLoopRate(spy, st, "4000");
+    assert.deepEqual(sent, ["set loop_rate_hz 4000", "get loop_rate_hz", "loop_rate"], "set is always followed by get + loop_rate");
+    assert.deepEqual(st.get, { kind: "value", value: "4000" }); assert.equal(st.report?.settingHz, "4000", "value from the FC re-read");
+    assert.equal(loopRateReasonView(st.report).token, "dshot-bidir-reply-window", "reason stays what the FC reports until reboot");
+    sent.length = 0; st = await saveLoopRate(spy, st);
+    assert.deepEqual(sent, ["<save>", "get loop_rate_hz", "loop_rate"], "save is followed by a re-read");
+    await host.sendCommand("reboot"); await host.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    st = await readLoopRateSetting(host);
+    assert.equal(loopRateReasonView(st.report).token, "setting", "bidir is RAM-only: after reboot the FC reports its own reason");
+    assert.match(await host.sendCommand("get dshot_bidir"), /dshot_bidir=off/);
+    await host.disconnect();
+  });
+  await test("reason card wiring: renders loopSetting.report through loopRateReasonView; no inference, no rates, no StoragePanel", () => {
+    const setup = code(source("../src/pages/SetupPage.tsx"));
+    const card = code(source("../src/setup/LoopRateReasonCard.tsx"));
+    assert.match(setup, /<LoopRateReasonCard report=\{loopSetting\.report\} connected=\{connected\} \/>/);
+    assert.match(card, /loopRateReasonView\(connected \? report : null\)/);
+    assert.match(card, /\{view\.token\}/, "token rendered verbatim");
+    assert.doesNotMatch(card, /\b(1000|2000|4000|8000)\b|kHz/, "card has no rate text of its own");
+    assert.doesNotMatch(card, /bidir|dshot|polled/i, "card never infers a reason from DShot state");
+    assert.doesNotMatch(card, /StoragePanel|blocked=|sendCommand|setStatus/, "display only");
+    assert.doesNotMatch(setup, /polled-listen|forces a 1 kHz/, "no hardcoded bidir copy in Setup");
+    const motors = code(source("../src/pages/MotorsPage.tsx"));
+    assert.doesNotMatch(motors, /forces? (a )?1 kHz|1 kHz loop|polled/i, "Motors no longer implies bidir = 1 kHz");
+    assert.match(motors, /loop-rate reason exactly as reported/);
+    assert.equal(Object.keys(LOOP_RATE_REASON_TEXT).filter(k => /1 kHz loop/.test(LOOP_RATE_REASON_TEXT[k])).join(), "dshot-bidir-polled-listen");
   });
   await test("CI runs the loop-rate tests and the firmware contract", () => {
     const ci = source("../../../.github/workflows/ci.yml");
