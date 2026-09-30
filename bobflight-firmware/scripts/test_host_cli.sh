@@ -73,6 +73,13 @@ need "disarmed"
 need "unknown — try help"
 need "bobflight host smoke: ok (cascade exercised)"
 
+need "loop_overruns: "
+if [[ "$BOARD_SEL" == "kakute_f7_hdv" ]]; then
+  need "loop_target_hz: 4000"
+else
+  need "loop_target_hz: 1000"
+fi
+
 if [[ "$BOARD_SEL" == "dummy" ]]; then
   need "board: dummy"
   need "ir: dummy"
