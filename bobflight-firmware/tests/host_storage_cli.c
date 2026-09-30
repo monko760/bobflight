@@ -48,7 +48,7 @@ unsigned dshot_speed_kbps(void){return 300;}
 int main(void){
  config_init();board.rx_uart=BOARD_GENERATED_RX_UART;strcpy(board.board_id,"dummy");
  cmd_config_export(false);assert(strstr(output,"# kind: diff\r\n"));assert(!strstr(output,"\r\nset "));assert(!strstr(output,"\r\nmode_range "));assert(strstr(output,"# config_end: 1\r\n"));assert(!writes);
- output[0]=0;cmd_config_export(true);assert(strstr(output,"set rate_max_roll 800\r\n"));assert(strstr(output,"mode_range ANGLE 1 2 900 2100\r\n"));assert(strlen(output)<1800);assert(!strstr(output,"\r\nsave\r\n"));assert(!strstr(output,"\r\narm\r\n"));assert(strstr(output,"\r\ncontrol_mode angle\r\n"));assert(!writes);
+ output[0]=0;cmd_config_export(true);assert(strstr(output,"set rate_max_roll 800\r\n"));assert(strstr(output,"mode_range ANGLE 1 2 900 2100\r\n"));assert(strlen(output)<2048);assert(!strstr(output,"\r\nsave\r\n"));assert(!strstr(output,"\r\narm\r\n"));assert(strstr(output,"\r\ncontrol_mode angle\r\n"));assert(!writes);
  assert(config_set_key("rate_max_roll",555.f));modes[1]=(mode_config_t){false,12,1100,1450};map="TAER";
  output[0]=0;cmd_config_export(false);assert(strstr(output,"set rate_max_roll 555\r\n"));assert(strstr(output,"receiver_map TAER\r\n"));assert(strstr(output,"mode_range ANGLE 0 12 1100 1450\r\n"));assert(!strstr(output,"set rate_expo"));assert(!writes);
  output[0]=0;dirty=true;cmd_storage();assert(strstr(output,"storage_api: 1\r\nbackend: flash\r\n"));assert(strstr(output,"dirty: 1\r\n"));assert(strstr(output,"storage_end: 1\r\n"));assert(!writes);

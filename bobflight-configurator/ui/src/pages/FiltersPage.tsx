@@ -26,6 +26,18 @@ import {
   type NotchDraft,
   type NotchSnapshot,
 } from "../filters/gyroNotch";
+import {
+  applyRpmSetting,
+  emptyRpmSnapshot,
+  readRpm,
+  rpmDirtyKeys,
+  rpmDraftFromView,
+  rpmDraftProblem,
+  rpmDraftValues,
+  rpmView,
+  type RpmDraft,
+  type RpmSnapshot,
+} from "../filters/rpmFilter";
 
 const FILTER_LABELS: Record<FilterKey, string> = {
   gyro_lpf_hz: "Gyro LPF (Hz)",
@@ -96,6 +108,17 @@ export function FiltersPage() {
     2: { enabled: false, center: "", cutoff: "" },
   });
   const [notchFcLine, setNotchFcLine] = useState<string | null>(null);
+  const [rpmSnap, setRpmSnap] = useState<RpmSnapshot>(emptyRpmSnapshot);
+  const [rpmDraft, setRpmDraft] = useState<RpmDraft>({ harmonics: "", minHz: "", q: "" });
+  const [rpmFcLine, setRpmFcLine] = useState<string | null>(null);
+
+  /** Re-read the RPM filter (`get` x4 + `rpm_filter`); inputs return to what the FC holds. */
+  const reloadRpm = useCallback(async (schema: number | null) => {
+    const snap = await readRpm(host);
+    setRpmSnap(snap);
+    setRpmDraft(rpmDraftFromView(rpmView(snap, schema)));
+    return snap;
+  }, [host]);
 
   /** Re-read the notch rows from the FC (`get` x4 + `filters` + `storage`). Never optimistic. */
   const reloadNotches = useCallback(async () => {
@@ -116,7 +139,8 @@ export function FiltersPage() {
       setLoadedValues(mapped);
       setUsingFallback(false);
       setReady(true);
-      await reloadNotches();
+      const notches = await reloadNotches();
+      await reloadRpm(notches.schema);
     } catch (e) {
       try {
         const fb = loadFiltersViaFallback();
@@ -124,6 +148,8 @@ export function FiltersPage() {
         setLoadedValues(fb);
         // No FC behind the fallback: notch rows stay unknown (never 0/off).
         setNotchSnap(emptyNotchSnapshot());
+        setRpmSnap(emptyRpmSnapshot());
+        setRpmDraft({ harmonics: "", minHz: "", q: "" });
         setUsingFallback(true);
         setReady(true);
         setErr(
@@ -134,7 +160,7 @@ export function FiltersPage() {
         setReady(false);
       }
     }
-  }, [host, reloadNotches]);
+  }, [host, reloadNotches, reloadRpm]);
 
   useEffect(() => {
     void load();
@@ -154,6 +180,7 @@ export function FiltersPage() {
     setErr(null);
     setMsg(null);
     setNotchFcLine(null);
+    setRpmFcLine(null);
     for (const key of FILTER_KEYS) {
       if (!validateFilterHz(values[key])) {
         // Client-side check (not an FC reply), so it must not read like FW text.
@@ -168,6 +195,16 @@ export function FiltersPage() {
       const problem = draftProblem(drafts[r.index]);
       if (problem) {
         setErr(`Notch ${r.index}: ${problem}`);
+        return;
+      }
+    }
+    const rpmNow = rpmView(rpmSnap, notchSnap.schema);
+    const rpmChanges = rpmDirtyKeys(rpmNow, rpmDraft);
+    {
+      // Client-side hint only; the FC re-checks and its line wins.
+      const problem = rpmDraftProblem(rpmNow, rpmDraft);
+      if (problem) {
+        setErr(`RPM filter: ${problem}`);
         return;
       }
     }
@@ -213,6 +250,23 @@ export function FiltersPage() {
           return;
         }
       }
+      // RPM filter: each set is followed by `get <key>` and `rpm_filter` (never optimistic).
+      let rs = rpmSnap;
+      const rpmValues = rpmDraftValues(rpmDraft);
+      for (const k of rpmChanges) {
+        const n = rpmValues[k];
+        if (n === null) continue;
+        const res = await applyRpmSetting(host, rs, k, n);
+        rs = res.snap;
+        setRpmSnap(rs);
+        if (!res.ok) {
+          // Show the FC's refusal exactly; inputs show what the FC holds now.
+          setRpmFcLine(res.fcLine);
+          setRpmDraft(rpmDraftFromView(rpmView(rs, notchSnap.schema)));
+          await reloadNotches();
+          return;
+        }
+      }
       // Re-read after the sets (no optimistic update) before saving.
       await reloadNotches();
       await host.saveSettings();
@@ -250,7 +304,17 @@ export function FiltersPage() {
   const rows = notchRows(notchSnap);
   const supported = notchesSupported(notchSnap);
   const lpfDirty = FILTER_KEYS.some((k) => values[k] !== loadedValues[k]);
-  const pageDirty = lpfDirty || rows.some((r) => draftDirty(r, drafts[r.index]));
+  const rpm = rpmView(rpmSnap, notchSnap.schema);
+  const rpmDirty = rpmDirtyKeys(rpm, rpmDraft);
+  const rpmHint = rpmDirty.length ? rpmDraftProblem(rpm, rpmDraft) : null;
+  const pageDirty = lpfDirty || rows.some((r) => draftDirty(r, drafts[r.index])) || rpmDirty.length > 0;
+
+  function updateRpmDraft(patch: Partial<RpmDraft>) {
+    setRpmDraft((prev) => ({ ...prev, ...patch }));
+    setMsg(null);
+    setErr(null);
+    setRpmFcLine(null);
+  }
 
   function updateDraft(i: GyroNotchIndex, patch: Partial<NotchDraft>) {
     setDrafts((prev) => ({ ...prev, [i]: { ...prev[i], ...patch } }));
@@ -277,7 +341,7 @@ export function FiltersPage() {
     <div className="panel">
       <h2>Filters</h2>
       <p className="muted">
-        Gyro and D-term low-pass plus two manual gyro notches (FW schema 8). Protocol{" "}
+        Gyro and D-term low-pass, two manual gyro notches (FW schema 8) and the RPM filter (FW schema 9). Protocol{" "}
         <code>get/set/save/defaults</code>. Keys: {protocolKeys.join(", ") || FILTER_KEYS.join(", ")}.
         Range: <code>0</code> = off; else <code>10..1000</code> Hz. Defaults{" "}
         <code>320</code> / <code>53</code>.
@@ -371,6 +435,74 @@ export function FiltersPage() {
           </tbody>
         </table>
         {notchFcLine && <p className="fail" data-testid="notch-fc-line">{notchFcLine}</p>}
+      </fieldset>
+
+      <fieldset className="tuning-axis" data-testid="rpm-filter">
+        <legend>RPM filter</legend>
+        <p className="muted">
+          Notches that follow each motor from bidirectional DShot eRPM. Harmonics <code>0</code> = off,
+          else <code>1..3</code>; minimum <code>50..200</code> Hz; Q <code>1..10</code> (sent ×100 as{" "}
+          <code>rpm_filter_q_x100</code>). The FC trims harmonics to the loop rate and reports the state
+          and each motor&apos;s tracked frequency below, exactly as sent.
+          {!rpm.supported && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
+        </p>
+        <div className="tuning-grid">
+          <div className="tuning-field">
+            <label htmlFor="rpm_filter_harmonics">Harmonics <span className="muted">(rpm_filter_harmonics)</span></label>
+            <input id="rpm_filter_harmonics" aria-label="rpm_filter_harmonics" type="text" inputMode="numeric"
+              disabled={!rpm.supported} value={rpm.supported ? rpmDraft.harmonics : rpm.harmonics}
+              onChange={(e) => updateRpmDraft({ harmonics: e.target.value })} />
+          </div>
+          <div className="tuning-field">
+            <label htmlFor="rpm_filter_min_hz">Minimum (Hz) <span className="muted">(rpm_filter_min_hz)</span></label>
+            <input id="rpm_filter_min_hz" aria-label="rpm_filter_min_hz" type="text" inputMode="numeric"
+              disabled={!rpm.supported} value={rpm.supported ? rpmDraft.minHz : rpm.minHz}
+              onChange={(e) => updateRpmDraft({ minHz: e.target.value })} />
+          </div>
+          <div className="tuning-field">
+            <label htmlFor="rpm_filter_q">Q <span className="muted">(rpm_filter_q_x100 = Q × 100)</span></label>
+            <input id="rpm_filter_q" aria-label="rpm_filter_q" type="text" inputMode="decimal"
+              disabled={!rpm.supported} value={rpm.supported ? rpmDraft.q : rpm.q}
+              onChange={(e) => updateRpmDraft({ q: e.target.value })} />
+          </div>
+          <div className="tuning-field">
+            <span>Motor poles <span className="muted">(motor_poles, set on the Motors tab)</span></span>
+            <code data-rpm="motor_poles">{rpm.motorPoles}</code>
+          </div>
+        </div>
+        <table className="tuning-grid">
+          <thead>
+            <tr><th>Filter rate (Hz)</th><th>Harmonics running</th><th>Filter active</th><th>Filter reason</th></tr>
+          </thead>
+          <tbody>
+            <tr data-rpm-status="1">
+              <td><code>{rpm.sampleHz}</code></td>
+              <td><code>{rpm.harmonicsActive}</code></td>
+              <td><code>{rpm.active}</code></td>
+              <td><code>{rpm.reason}</code></td>
+            </tr>
+          </tbody>
+        </table>
+        {rpm.bidirOff && (
+          <p className="banner-warn" data-testid="rpm-bidir-off">
+            Bidirectional DShot is off, so no motor is tracked. Enable it yourself on the controller (<code>set dshot_bidir on</code>, see the Motors tab); this page never enables it.
+          </p>
+        )}
+        <table className="tuning-grid">
+          <thead>
+            <tr><th>Motor</th><th>Tracked (Hz)</th></tr>
+          </thead>
+          <tbody>
+            {rpm.motors.map((m) => (
+              <tr key={m.motor} data-rpm-motor={m.motor}>
+                <td>M{m.motor}</td>
+                <td><code>{m.hz}</code></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rpmHint && <p className="fail" data-testid="rpm-hint">{rpmHint}</p>}
+        {rpmFcLine && <p className="fail" data-testid="rpm-fc-line">{rpmFcLine}</p>}
       </fieldset>
 
       <div className="row" style={{ marginTop: "1rem" }}>

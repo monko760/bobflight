@@ -41,6 +41,14 @@ typedef struct {
     float gyro_notch1_cutoff_hz;
     float gyro_notch2_hz;
     float gyro_notch2_cutoff_hz;
+    /* RPM notch filter (schema 9), whole numbers stored as floats:
+     * rpm_filter_harmonics 0..3 (0 = off, default 0), rpm_filter_min_hz
+     * 50..200 (default 100), rpm_filter_q_x100 100..1000 (Q x 100, default 500),
+     * motor_poles even 4..36 (default 14). See docs/RPM-FILTER.md. */
+    float rpm_filter_harmonics;
+    float rpm_filter_min_hz;
+    float rpm_filter_q_x100;
+    float motor_poles;
 } bf_config_t;
 
 void config_init(void);
@@ -53,6 +61,10 @@ const bf_config_t *config_blob(void);
 bool config_gyro_notch_pair_valid(float center_hz, float cutoff_hz);
 /** Set notch idx (1 or 2) centre+cutoff together (persist restore); false leaves both unchanged. */
 bool config_set_gyro_notch(unsigned idx, float center_hz, float cutoff_hz);
+/** Schema 9 RPM filter keys: true for rpm_filter_harmonics/min_hz/q_x100 and motor_poles. */
+bool config_is_rpm_key(const char *key);
+/** Static domain of one schema 9 RPM key (whole number in range; motor_poles even). */
+bool config_rpm_value_valid(const char *key, float value);
 void config_load_blob(const bf_config_t *src);
 
 #ifdef __cplusplus

@@ -97,6 +97,8 @@ jobs:
           node ../.github/scripts/loop-status-contract.cjs
       - name: Firmware gyro notch CLI (schema 8) to Filters tab notch contract
         run: node ../.github/scripts/gyro-notch-contract.cjs
+      - name: Firmware RPM filter CLI (schema 9) to Filters tab RPM contract
+        run: node ../.github/scripts/rpm-filter-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
@@ -117,6 +119,10 @@ jobs:
         run: npm --prefix ui run test:gyro-notch
       - name: Filters tab render test (FiltersPage cells per mock, Save order, refused set verbatim)
         run: npm --prefix ui run test:filters-page
+      - name: RPM filter parsers, view, Q x100, SETTINGS_KEYS and mock scenarios
+        run: npm --prefix protocol run test:rpm-filter
+      - name: RPM filter render test (Filters section per mock, Save order, refused set verbatim, Motors tab motor_poles)
+        run: npm --prefix ui run test:rpm-filter-page
       - name: Zero-output PID diagnostic CLI and framing tests
         run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests

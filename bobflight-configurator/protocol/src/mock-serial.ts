@@ -21,6 +21,8 @@ import {
 } from "./settings";
 import { MockGyroNotch, type GyroNotchMockScenario } from "./gyro-notch-mock";
 import { isGyroNotchKey } from "./gyro-notch";
+import { MockRpmFilter, type RpmFilterMockScenario } from "./rpm-filter-mock";
+import { isRpmFilterKey } from "./rpm-filter";
 
 /** Path prefix for MockSerial ports (enumerate + connect). */
 export const MOCK_PORT_PATH = "mock://bobflight";
@@ -67,6 +69,8 @@ export interface MockSerialOptions {
   blackboxCard?: MockBlackboxCard;
   /** Manual gyro notches (schema 8): off (default) | ok | above-nyquist | invalid | old-fc. */
   gyroNotchScenario?: GyroNotchMockScenario;
+  /** RPM notch filter (schema 9): off (default) | ok | bidir-off | erpm-unavailable | trimmed-1k | old-fc | off-erpm-live. */
+  rpmFilterScenario?: RpmFilterMockScenario;
 }
 
 /**
@@ -94,6 +98,8 @@ export class MockSerial extends EventEmitter {
   private readonly loopRateSetting = new MockLoopRateSetting(() => this.loopRateScenario);
   /** `get/set gyro_notch*` + `filters` (schema 8 notches; old-fc = older firmware). */
   private readonly gyroNotch: MockGyroNotch;
+  /** `get/set rpm_filter_* / motor_poles` + `rpm_filter` (schema 9; old-fc = older firmware). */
+  private readonly rpmFilter: MockRpmFilter;
   /** Numeric store mirroring bf_config_t floats. */
   private settings: Record<SettingsKey, number>;
   private readonly opts: Required<
@@ -118,6 +124,7 @@ export class MockSerial extends EventEmitter {
     this.loopRateScenario = opts.loopRateScenario ?? "missing";
     this.blackbox = new MockOnboardBlackbox(opts.blackboxCard ?? "none");
     this.gyroNotch = new MockGyroNotch(opts.gyroNotchScenario ?? "off");
+    this.rpmFilter = new MockRpmFilter(opts.rpmFilterScenario ?? "off");
     this.modesPorts.reset();
     this.dshotBidir = mockLoopRateBidir(this.loopRateScenario);
     this.settings = cloneDefaultSettingValues();
@@ -139,6 +146,11 @@ export class MockSerial extends EventEmitter {
       { path: "mock://bobflight-notch-nyquist", manufacturer: "BobFlight", friendlyName: "Gyro notch above Nyquist (600 Hz at 1 kHz loop) demo — SIMULATED", serialNumber: "MOCK-NOTCH-NYQ" },
       { path: "mock://bobflight-notch-invalid", manufacturer: "BobFlight", friendlyName: "Gyro notch reported invalid demo — SIMULATED", serialNumber: "MOCK-NOTCH-INV" },
       { path: "mock://bobflight-notch-old", manufacturer: "BobFlight", friendlyName: "Older firmware without gyro notches demo — SIMULATED", serialNumber: "MOCK-NOTCH-OLD" },
+      { path: "mock://bobflight-rpm-ok", manufacturer: "BobFlight", friendlyName: "RPM filter tracking 4 motors demo — SIMULATED", serialNumber: "MOCK-RPM-OK" },
+      { path: "mock://bobflight-rpm-bidir-off", manufacturer: "BobFlight", friendlyName: "RPM filter with bidir DShot off demo — SIMULATED", serialNumber: "MOCK-RPM-BIDIR" },
+      { path: "mock://bobflight-rpm-no-erpm", manufacturer: "BobFlight", friendlyName: "RPM filter without eRPM telemetry demo — SIMULATED", serialNumber: "MOCK-RPM-NOERPM" },
+      { path: "mock://bobflight-rpm-1k", manufacturer: "BobFlight", friendlyName: "RPM filter trimmed to 1 harmonic at 1 kHz demo — SIMULATED", serialNumber: "MOCK-RPM-1K" },
+      { path: "mock://bobflight-rpm-old", manufacturer: "BobFlight", friendlyName: "Older firmware without RPM filter demo — SIMULATED", serialNumber: "MOCK-RPM-OLD" },
     ]);
   }
 
@@ -215,6 +227,7 @@ export class MockSerial extends EventEmitter {
     if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
     {const lr=this.loopRateSetting.handle(line,this.armed);if(lr!==null){this.emitData(lr);return;}}
     {const gn=this.gyroNotch.handle(line,this.armed);if(gn!==null){this.emitData(gn);return;}}
+    {const rf=this.rpmFilter.handle(line,this.armed);if(rf!==null){this.emitData(rf);return;}}
     const pm = this.modesPorts.handle(line,this.armed,this.bench.active);
     if(pm!==null){this.emitData(pm);return;}
     const sensorReply = mockSensorReply(line, this.armed);
@@ -285,6 +298,7 @@ export class MockSerial extends EventEmitter {
     this.settings = cloneDefaultSettingValues();
       this.loopRateSetting.defaults();
       this.gyroNotch.defaults();
+      this.rpmFilter.defaults();
       this.emitData("defaults restored\r\n");
     } else if (line.startsWith("get ") || line === "get") {
       const key = line === "get" ? "" : line.slice(4).trim();
@@ -396,10 +410,11 @@ export class MockSerial extends EventEmitter {
   getSettingsSnapshot(): Record<SettingsKey, string> {
     const out = {} as Record<SettingsKey, string>;
     for (const key of Object.keys(this.settings) as SettingsKey[]) {
-      if (isGyroNotchKey(key)) continue;
+      if (isGyroNotchKey(key) || isRpmFilterKey(key)) continue;
       out[key] = formatFwFloat(this.settings[key]);
     }
     if (this.gyroNotch.supported) Object.assign(out, this.gyroNotch.snapshot());
+    if (this.rpmFilter.supported) Object.assign(out, this.rpmFilter.snapshot());
     return out;
   }
 }

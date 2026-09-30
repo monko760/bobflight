@@ -61,6 +61,7 @@ export {
   SCHEMA5_FLOAT_KEYS,
   SCHEMA6_FLOAT_KEYS,
   SCHEMA8_FLOAT_KEYS,
+  SCHEMA9_INT_KEYS,
   isOptionalSettingsKey,
   DEFAULT_SETTINGS,
   DEFAULT_SETTING_VALUES,
@@ -80,6 +81,7 @@ export type {
   Schema5FloatKey,
   Schema6FloatKey,
   Schema8FloatKey,
+  Schema9IntKey,
   ParsedGetReply,
   ParsedSetReply,
 } from "./settings";
@@ -158,3 +160,12 @@ export {
 export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, NotchSetResult, NotchReport, FiltersReport, FiltersReportResult, NotchRowView } from "./gyro-notch";
 export { MockGyroNotch, GYRO_NOTCH_MOCK_SCENARIOS } from "./gyro-notch-mock";
 export type { GyroNotchMockScenario } from "./gyro-notch-mock";
+
+export {
+  RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, RPM_FILTER_REASONS,
+  isRpmFilterKey, isRpmFilterCliCommand, rpmValueProblem, qFromX100, qToX100,
+  parseRpmGetReply, parseRpmSetReply, parseRpmFilterReport, rpmFilterView,
+} from "./rpm-filter";
+export type { RpmFilterKey, RpmFilterMotor, RpmGetResult, RpmSetResult, RpmFilterReport, RpmFilterReportResult, RpmFilterView } from "./rpm-filter";
+export { MockRpmFilter, RPM_FILTER_MOCK_SCENARIOS } from "./rpm-filter-mock";
+export type { RpmFilterMockScenario } from "./rpm-filter-mock";
