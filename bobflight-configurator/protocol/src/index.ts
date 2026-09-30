@@ -60,6 +60,8 @@ export {
   SETTINGS_KEYS,
   SCHEMA5_FLOAT_KEYS,
   SCHEMA6_FLOAT_KEYS,
+  SCHEMA8_FLOAT_KEYS,
+  isOptionalSettingsKey,
   DEFAULT_SETTINGS,
   DEFAULT_SETTING_VALUES,
   cloneDefaultSettings,
@@ -77,6 +79,7 @@ export type {
   SettingsKey,
   Schema5FloatKey,
   Schema6FloatKey,
+  Schema8FloatKey,
   ParsedGetReply,
   ParsedSetReply,
 } from "./settings";
@@ -145,3 +148,13 @@ export * from "./storage";
 export * from "./loop-rate";
 export * from "./loop-rate-mock";
 export * from "./loop-rate-setting";
+
+export {
+  GYRO_NOTCH_KEYS, GYRO_NOTCH_INDEXES, GYRO_NOTCH_UNKNOWN, GYRO_NOTCH_REASONS,
+  notchCenterKey, notchCutoffKey, isGyroNotchKey, isGyroNotchCliCommand,
+  validateNotchCenter, validateNotchCutoffAlone, notchPairProblem, notchWritePlan,
+  parseNotchGetReply, parseNotchSetReply, parseFiltersReport, notchRowView,
+} from "./gyro-notch";
+export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, NotchSetResult, NotchReport, FiltersReport, FiltersReportResult, NotchRowView } from "./gyro-notch";
+export { MockGyroNotch, GYRO_NOTCH_MOCK_SCENARIOS } from "./gyro-notch-mock";
+export type { GyroNotchMockScenario } from "./gyro-notch-mock";
