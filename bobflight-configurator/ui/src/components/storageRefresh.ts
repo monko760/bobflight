@@ -7,7 +7,7 @@
  * (`storage` → dirty=1): settings applied to the FC that are not yet saved to
  * flash. It is the same flag the panel shows as "unsaved changes".
  */
-export const REFRESH_CONFIRM_MESSAGE = "Reload from FC? Unsaved changes will be lost";
+export const REFRESH_CONFIRM_MESSAGE = "Re-read storage status from the FC? Your unsaved changes stay on the FC until you Save.";
 
 export type ConfirmFn = (message: string) => boolean;
 

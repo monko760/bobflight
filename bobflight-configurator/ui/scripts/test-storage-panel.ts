@@ -42,11 +42,11 @@ class FakeHost {
 
 async function main() {
   await test("dirty: confirm shown with exact copy before any reload", () => {
-    assert.equal(REFRESH_CONFIRM_MESSAGE, "Reload from FC? Unsaved changes will be lost");
+    assert.equal(REFRESH_CONFIRM_MESSAGE, "Re-read storage status from the FC? Your unsaved changes stay on the FC until you Save.");
     assert.equal(shouldConfirmRefresh(true), true);
     const h = harness(true);
     requestRefresh({ dirty: true, confirm: h.confirm, refresh: () => { assert.equal(h.prompts.length, 1, "confirm must come first"); h.refresh(); } });
-    assert.deepEqual(h.prompts, ["Reload from FC? Unsaved changes will be lost"]);
+    assert.deepEqual(h.prompts, ["Re-read storage status from the FC? Your unsaved changes stay on the FC until you Save."]);
     assert.equal(h.refreshes(), 1);
   });
   await test("dirty + cancel: nothing happens (no refresh)", () => {
