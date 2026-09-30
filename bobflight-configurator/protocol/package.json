@@ -24,7 +24,7 @@
     "test:motors": "tsc && node tests/motors.cjs",
     "test:sensors": "tsc && node tests/sensors.cjs && node tests/calibration-persistence.cjs",
     "test:timing": "tsc && node tests/timing.cjs",
-    "test:loop-rate": "tsc && node tests/loop-rate.cjs",
+    "test:loop-rate": "tsc && node tests/loop-rate.cjs && node tests/loop-rate-setting.cjs",
     "test:ports-modes": "tsc && node tests/ports-modes.cjs",
     "test:flight-modes": "tsc && node tests/flight-modes.cjs",
     "test:bootloader": "tsc && node tests/bootloader.cjs",
