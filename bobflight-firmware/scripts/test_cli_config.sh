@@ -11,7 +11,7 @@ cmake -S . -B build-host -DBOBFLIGHT_BOARD=dummy >/tmp/bf-cli-cfg-cmake.log
 cmake --build build-host --target bobflight_host >/tmp/bf-cli-cfg-build.log
 BIN="$ROOT/build-host/bobflight_host"
 
-OUT="$(printf 'set pid_roll_p 0.01\nget pid_roll_p\nset pid_yaw_d 0.0002\nget pid_yaw_d\nset pid_yaw_d 11\nset rate_max_yaw 600\nget rate_max_yaw\nset gyro_lpf_hz 400\nget gyro_lpf_hz\nset dterm_lpf_hz 100\nget dterm_lpf_hz\nset gyro_lpf_hz 5\nset dterm_lpf_hz 0\nget dterm_lpf_hz\nsave\ndefaults\nget pid_roll_p\nget pid_yaw_d\nget gyro_lpf_hz\nget dterm_lpf_hz\nget nope\nget dshot_bidir\nget erpm_m1\nget erpm_m2\nget erpm_m3\nget erpm_m4\nget dshot_telem_m1\nget dshot_telem_m2\nget dshot_telem_m3\nget dshot_telem_m4\nset dshot_bidir on\nget dshot_bidir\nset dshot_bidir maybe\nset dshot_bidir off\nget dshot_bidir\nget erpm_m1\nget erpm_m4\nstatus\nloop_rate\n' | "$BIN")"
+OUT="$(printf 'get loop_rate_hz\nset loop_rate_hz 4000\nset loop_rate_hz 3000\nset loop_rate_hz 1000\nset pid_roll_p 0.01\nget pid_roll_p\nset pid_yaw_d 0.0002\nget pid_yaw_d\nset pid_yaw_d 11\nset rate_max_yaw 600\nget rate_max_yaw\nset gyro_lpf_hz 400\nget gyro_lpf_hz\nset dterm_lpf_hz 100\nget dterm_lpf_hz\nset gyro_lpf_hz 5\nset dterm_lpf_hz 0\nget dterm_lpf_hz\nsave\ndefaults\nget pid_roll_p\nget pid_yaw_d\nget gyro_lpf_hz\nget dterm_lpf_hz\nget nope\nget dshot_bidir\nget erpm_m1\nget erpm_m2\nget erpm_m3\nget erpm_m4\nget dshot_telem_m1\nget dshot_telem_m2\nget dshot_telem_m3\nget dshot_telem_m4\nset dshot_bidir on\nget dshot_bidir\nset dshot_bidir maybe\nset dshot_bidir off\nget dshot_bidir\nget erpm_m1\nget erpm_m4\nstatus\nloop_rate\n' | "$BIN")"
 echo "$OUT"
 
 need() {
@@ -68,7 +68,14 @@ if ! grep -E -q $'^loop_overruns: (0|[1-9][0-9]*)\r?$' <<<"$OUT"; then
   exit 1
 fi
 need "loop_rate_profile: 1000/1"
-need "loop_rate_reason: board-profile"
+need "loop_rate_hz=1000"
+need "set failed: loop_rate_hz 4000 not supported on dummy (no 8 kHz gyro path)"
+need "set failed: loop_rate_hz must be 1000, 4000 or 8000"
+need "ok loop_rate_hz=1000"
+need "note: loop_rate_hz takes effect after save + reboot"
+need "loop_rate_reason: setting"
+need "loop_rate_setting_hz: 1000"
+need "loop_rate_pending_reboot: 0"
 need "loop_rate_end: 1"
 
-echo "PASS: CLI get/set/save/defaults (schema6 pid_yaw_d + LPF + rates/PID + dshot R0c M1-M4) + status loop_target/actual/overruns"
+echo "PASS: CLI get/set/save/defaults (schema7 loop_rate_hz + schema6 pid_yaw_d + LPF + rates/PID + dshot R0c M1-M4) + status loop_target/actual/overruns"
