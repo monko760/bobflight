@@ -14,6 +14,7 @@
 #include "flight/config.h"
 #include "board/board.h"
 #include "sched/scheduler.h"
+#include "sched/loop_rate.h"
 #include "hal/hal.h"
 #include "flight/attitude.h"
 #include "sched/tasks.h"
@@ -40,6 +41,7 @@ static void cli_write_str(const char *s)
 
 #include "drivers/sensor_cli.h"
 #include "drivers/timing_cli.h"
+#include "drivers/loop_status_cli.h"
 #include "drivers/ports_modes_cli.h"
 #include "drivers/storage_cli.h"
 #include "drivers/bootloader_cli.h"
@@ -93,6 +95,7 @@ static void cmd_help(void)
         "  disarm   - disarm\r\n"
         "  pid_diag [status|start|start rx|stop] - 60s zero-output rate/PID diagnostic\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
+        "  loop_rate - loop-rate policy: profile, active gyro/denom and fallback reason\r\n"
         "  bl / BL  - ST ROM bootloader; bl discard explicitly loses unsaved RAM changes\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
 }
@@ -108,7 +111,8 @@ static void cmd_status(void)
 {
     const board_t *b = board_get();
     const scheduler_stats_t *st = scheduler_stats();
-    char buf[1000];
+    char buf[1200], loop_lines[128];
+    if (loop_status_lines(loop_lines, sizeof loop_lines, hal_micros()) < 0) loop_lines[0] = '\0';
     const float *rates=gyro_latest_dps(),*acc=gyro_accel_g(),*angles=attitude_degrees(),*rc=rx_channels();
     const char *flight="bench-only";
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
@@ -135,6 +139,7 @@ static void cmd_status(void)
              "arm: %s\r\n"
              "failsafe: %s\r\n"
              "loop: gyro=%lu Hz denom=%lu cascade=%lu bg=%lu\r\n"
+             "%s"
              "flight_mode: %s\r\n"
              "gyro_calibrated: %s\r\n"
              "gyro_dps: %.2f %.2f %.2f\r\n"
@@ -161,7 +166,7 @@ static void cmd_status(void)
              (unsigned long)(st ? st->gyro_hz : 0),
              (unsigned long)(st ? st->pid_process_denom : 0),
              (unsigned long)(st ? st->cascade_runs : 0),
-             (unsigned long)(st ? st->bg_runs : 0),flight,gyro_calibrated()?"yes":"no",
+             (unsigned long)(st ? st->bg_runs : 0),loop_lines,flight,gyro_calibrated()?"yes":"no",
              (double)rates[0],(double)rates[1],(double)rates[2],(double)acc[0],(double)acc[1],(double)acc[2],
              (double)angles[0],(double)angles[1],b?b->rx_uart:0,rx_frame_fresh()?"yes":"no",(unsigned long)rx_frame_count(),
              (double)rc[0],(double)rc[1],(double)rc[2],(double)rc[3],(double)rc[4],(double)rc[5],(double)rc[6],(double)rc[7],
@@ -376,6 +381,8 @@ static void handle_line(char *line)
         /* Handled ports, modes, mode_range, or receiver_uart */
     } else if (strcmp(line, "timing") == 0) {
         cmd_timing();
+    } else if (strcmp(line, "loop_rate") == 0) {
+        cmd_loop_rate();
     } else if (strncmp(line, "control_source ", 15) == 0) {
         const char *arg=line+15;
         bool valid=strcmp(arg,"manual")==0 || strcmp(arg,"aux")==0;
