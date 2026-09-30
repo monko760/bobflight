@@ -34,6 +34,15 @@ void scheduler_run(void); /* one cooperative slice; call in for(;;) */
 
 const scheduler_stats_t *scheduler_stats(void);
 
+/* Background time budget: microseconds a cooperative background task may use
+ * starting at `now` without delaying the next gyro deadline. Leaves
+ * SCHEDULER_BG_GUARD_US before the deadline and caps at SCHEDULER_BG_MAX_US.
+ * Before scheduler_init it returns SCHEDULER_BG_UNSCHEDULED_US. */
+#define SCHEDULER_BG_GUARD_US 20u
+#define SCHEDULER_BG_MAX_US 200u
+#define SCHEDULER_BG_UNSCHEDULED_US 50u
+uint32_t scheduler_bg_budget_us(uint64_t now);
+
 #ifdef __cplusplus
 }
 #endif
