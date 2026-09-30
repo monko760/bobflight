@@ -15,6 +15,7 @@
 #include "board/board.h"
 #include "sched/scheduler.h"
 #include "sched/loop_rate.h"
+#include "sched/loop_rate_setting.h"
 #include "hal/hal.h"
 #include "flight/attitude.h"
 #include "sched/tasks.h"
@@ -95,7 +96,7 @@ static void cmd_help(void)
         "  disarm   - disarm\r\n"
         "  pid_diag [status|start|start rx|stop] - 60s zero-output rate/PID diagnostic\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
-        "  loop_rate - loop-rate policy: profile, active gyro/denom and fallback reason\r\n"
+        "  loop_rate - loop-rate policy: setting, pending reboot, active gyro/denom and fallback reason\r\n"
         "  bl / BL  - ST ROM bootloader; bl discard explicitly loses unsaved RAM changes\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
 }
@@ -281,6 +282,11 @@ static void cmd_get(const char *key)
         cli_write_str(dshot_bidir_enabled() ? "dshot_bidir=on\r\n" : "dshot_bidir=off\r\n");
         return;
     }
+    if (strcmp(key, "loop_rate_hz") == 0) {
+        snprintf(buf, sizeof(buf), "loop_rate_hz=%lu\r\n", (unsigned long)loop_rate_setting_get());
+        cli_write_str(buf);
+        return;
+    }
     if (!config_get_key(key, &v)) {
         cli_write_str("unknown key\r\n");
         return;
@@ -317,6 +323,27 @@ static void cmd_set(const char *key, const char *valstr)
         dshot_bidir_set_enabled(on);
         snprintf(buf, sizeof(buf), "ok dshot_bidir=%s\r\n", on ? "on" : "off");
         cli_write_str(buf);
+        return;
+    }
+    /* Persisted loop rate: exactly 1000|4000|8000, applied at boot only. */
+    if (strcmp(key, "loop_rate_hz") == 0) {
+        uint32_t hz = 0;
+        const board_t *b = board_get();
+        char msg[160];
+        if (!loop_rate_setting_parse(valstr, &hz)) {
+            cli_write_str("set failed: loop_rate_hz must be 1000, 4000 or 8000\r\n");
+            return;
+        }
+        if (loop_rate_setting_unsupported_reason(hz)) {
+            snprintf(msg, sizeof(msg), "set failed: loop_rate_hz %lu not supported on %s (no 8 kHz gyro path)\r\n",
+                     (unsigned long)hz, b ? b->board_id : "unknown");
+            cli_write_str(msg);
+            return;
+        }
+        (void)loop_rate_setting_set(hz);
+        snprintf(msg, sizeof(msg), "ok loop_rate_hz=%lu\r\nnote: loop_rate_hz takes effect after save + reboot\r\n",
+                 (unsigned long)loop_rate_setting_get());
+        cli_write_str(msg);
         return;
     }
     v = strtof(valstr, &end);
@@ -439,6 +466,7 @@ static void handle_line(char *line)
     } else if (strcmp(line, "defaults") == 0) {
         if (arming_state() == ARM_ARMED || bench_motor_active()) { cli_write_str("refused: disarm and stop motors\r\n"); return; }
         config_defaults();
+        loop_rate_setting_defaults();
         cli_write_str("defaults restored\r\n");
     } else if (strcmp(line, "arm") == 0) {
         if (arming_try_arm()) {
@@ -518,6 +546,8 @@ void cli_poll(void)
             else handle_line(g_line);
             g_len = 0;
             g_discard_line = false;
+            /* Never execute bytes queued behind `reboot` (the reset follows). */
+            if (g_reboot_req) break;
         } else if (g_discard_line) {
             /* Discard the WHOLE invalid line, never execute its suffix. */
         } else if (c == '\0') {
