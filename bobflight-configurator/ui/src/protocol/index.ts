@@ -42,3 +42,5 @@ export { parseLoopStatus, loopRateView, LOOP_LABELS, LOOP_STATUS_KEYS, LOOP_UNKN
 export type { LoopStatus, LoopRateView, LoopRateItem, LoopRateMockScenario } from "@bobflight/protocol";
 export { LOOP_RATE_SETTING_KEY, LOOP_RATE_OPTIONS, LOOP_RATE_OPTION_LABELS, LOOP_RATE_SETTING_UNKNOWN, isLoopRateOption, loopRateSetCommand, parseLoopRateGetReply, parseLoopRateSetReply, parseLoopRateReport, loopRateSettingView } from "@bobflight/protocol";
 export type { LoopRateOption, LoopRateGetResult, LoopRateSetResult, LoopRateReport, LoopRateSettingView } from "@bobflight/protocol";
+export { GYRO_NOTCH_KEYS, GYRO_NOTCH_INDEXES, GYRO_NOTCH_UNKNOWN, notchCenterKey, notchCutoffKey, isGyroNotchKey, notchPairProblem, notchWritePlan, parseNotchGetReply, parseFiltersReport, notchRowView, GYRO_NOTCH_MOCK_SCENARIOS } from "@bobflight/protocol";
+export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, FiltersReportResult, NotchRowView, GyroNotchMockScenario } from "@bobflight/protocol";
