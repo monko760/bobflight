@@ -56,6 +56,9 @@ size_t hal_dshot_ic_take(unsigned motor) { (void)motor; return 0; }
 void hal_dshot_ic_cancel(unsigned motor) { (void)motor; }
 void hal_dshot_ic_cancel_all(void) {}
 uint16_t hal_dshot_ic_bit_period_ticks(unsigned motor) { (void)motor; return 1u; }
+hal_dshot_ic_result_t hal_dshot_ic_result(unsigned motor) { (void)motor; return HAL_DSHOT_IC_NO_HW; }
+uint16_t hal_dshot_ic_tail_ticks(unsigned motor) { (void)motor; return HAL_DSHOT_IC_TAIL_QUIET; }
+void hal_tim_dma_set_inverted(bool inverted) { (void)inverted; }
 
 
 bool hal_exti_attach(hal_pin_t pin, hal_exti_cb_t cb, void *ctx)

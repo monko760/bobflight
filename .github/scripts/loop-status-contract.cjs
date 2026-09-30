@@ -7,7 +7,7 @@ const assert=require('node:assert/strict');
 const path=require('node:path');
 const {spawnSync}=require('node:child_process');
 const fs=require('node:fs');
-const {ResponseCollector,parseLoopStatus,loopRateView,parseStatus,parseLoopRateGetReply,parseLoopRateSetReply,parseLoopRateReport,loopRateSettingView,
+const {ResponseCollector,parseLoopStatus,loopRateView,parseStatus,parseLoopRateGetReply,parseLoopRateSetReply,parseLoopRateReport,loopRateSettingView,loopRateReasonView,
  MockLoopRateSetting,LOOP_RATE_ARMED_LINE,LOOP_RATE_INVALID_LINE,loopRateUnsupportedLine}=require('../../bobflight-configurator/protocol/dist');
 const binary=process.argv[2]?path.resolve(process.argv[2]):path.resolve(__dirname,'../../bobflight-firmware/build-contract/bobflight_host');
 const no8kBinary=process.argv[3]?path.resolve(process.argv[3]):path.resolve(__dirname,'../../bobflight-firmware/build-contract-tmotor/bobflight_host');
@@ -56,6 +56,38 @@ function settingFlow(){
  assert.equal(view.display,'8 kHz');assert.equal(view.pendingReboot,false);assert.ok(!view.notices.some(n=>/instead of/.test(n)));
  console.log('PASS firmware loop_rate_hz -> Configurator selector model: default 4000, 2000 rejected, 8000 pending until save + reboot, then loop_target_hz 8000. Host build.');
 }
+/* B2 bidir over the real FW CLI (host build, no ESC): the Configurator reason
+ * card shows loop_rate_reason exactly as the FW sends it. Default 4000 keeps
+ * 8000/2 with bidir on (reason setting); 8000 + bidir is capped to 8000/2
+ * (dshot-bidir-reply-window); bidir off restores 8000/1. The pre-B2
+ * dshot-bidir-polled-listen reason is never sent. */
+function bidirFlow(){
+ const pad=' '.repeat(64);
+ const reports=cmds=>{
+  const r=spawnSync(binary,[],{input:cmds.join('\n')+'\n',encoding:'utf8',maxBuffer:1024*1024,timeout:60000,env:{...process.env,BOBFLIGHT_HOST_REBOOT_REINIT:'1'}});
+  assert.equal(r.status,0,r.stdout+r.stderr);
+  assert.doesNotMatch(r.stdout,/dshot-bidir-polled-listen/,'B2 firmware never reports the polled-listen reason');
+  return {out:r.stdout,reps:[...r.stdout.matchAll(/loop_rate_api: 1\r?\n[\s\S]*?loop_rate_end: 1\r?\n/g)].map(m=>({text:m[0],rep:parseLoopRateReport(m[0])}))};
+ };
+ const raw=t=>/^loop_rate_reason: (.*?)\r?$/m.exec(t)[1];
+ const k=reports(['set dshot_bidir on',pad,'loop_rate','get dshot_bidir']);
+ assert.match(k.out,/^ok dshot_bidir=on\r?$/m);assert.equal(k.reps.length,1);
+ assert.equal(k.reps[0].rep.active,'8000/2','4000 + bidir keeps 4 kHz');assert.equal(k.reps[0].rep.reason,'setting');
+ const kv=loopRateReasonView(k.reps[0].rep);assert.equal(kv.token,raw(k.reps[0].text));assert.equal(kv.fallback,false);
+ const c=reports(['set loop_rate_hz 8000','save','reboot',pad,'loop_rate','set dshot_bidir on',pad,'loop_rate','status','set dshot_bidir off',pad,'loop_rate']);
+ assert.equal(c.reps.length,3);
+ assert.equal(c.reps[0].rep.active,'8000/1');assert.equal(c.reps[0].rep.reason,'setting');
+ assert.equal(c.reps[1].rep.active,'8000/2');assert.equal(c.reps[1].rep.reason,'dshot-bidir-reply-window');
+ const cv=loopRateReasonView(c.reps[1].rep);
+ assert.equal(cv.token,raw(c.reps[1].text),'reason card token is exactly the FW line');assert.equal(cv.fallback,true);
+ assert.doesNotMatch(cv.explanation,/forces a 1 kHz|polled/,'no pre-B2 copy for a B2 reason');
+ const after=c.out.slice(c.out.indexOf(c.reps[1].text)+c.reps[1].text.length);const st=parseLoopStatus(after.slice(after.indexOf('board: ')));
+ assert.equal(st.targetHz,'4000','8000 + bidir runs 4000 (host build)');
+ const view=loopRateSettingView({kind:'value',value:'8000'},c.reps[1].rep,st.targetHz);
+ assert.ok(view.notices.some(n=>n.includes('instead of its boot setting 8000 Hz (dshot-bidir-reply-window)')),view.notices.join(' | '));
+ assert.equal(c.reps[2].rep.active,'8000/1');assert.equal(c.reps[2].rep.reason,'setting','bidir off restores the setting');
+ console.log('PASS firmware bidir -> Configurator reason card: 4000 kept (setting), 8000 capped to 8000/2 (dshot-bidir-reply-window, target 4000), bidir off restores 8000/1. Host build.');
+}
 const run=spawnSync(binary,[],{input:'status\nloop_rate\n',encoding:'utf8',maxBuffer:1024*1024,timeout:60000});
 assert.equal(run.status,0,run.stdout+run.stderr);
 const out=run.stdout;
@@ -89,5 +121,6 @@ setTimeout(()=>{
  assert.equal(boot.bootSettingHz,'4000');assert.equal(boot.pendingReboot,false);assert.equal(boot.reason,'setting');
  settingFlow();
  no8kFlow();
+ bidirFlow();
  console.log(`PASS firmware status -> Configurator loop-rate readout: target ${v.items[0].value}, actual ${v.items[1].value}, overruns ${v.items[2].value}. Host build, not a hardware rate claim.`);
 },20);

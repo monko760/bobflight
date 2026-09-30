@@ -150,4 +150,11 @@ static inline uint32_t hal_f7_timclk(bool apb2) {
     uint32_t p = hal_f7_pclk(apb2);
     return p == SystemCoreClock ? p : p * 2u;
 }
+/* DShot bidir capture <-> TX coupling (hal_tim_ic.c / hal_tim_dma.c, B2).
+ * group 0 = TIM3 (M1/M2, TX DMA1 S2), 1 = TIM1 (M3/M4, TX DMA2 S5). */
+bool hal_f7_dshot_ic_tc_irq_wanted(unsigned group); /* TX stream needs TCIE */
+void hal_f7_dshot_ic_quiesce(unsigned group);       /* end a window before TX */
+void DMA1_Stream2_IRQHandler(void);
+void DMA2_Stream5_IRQHandler(void);
+
 #endif /* BOBFLIGHT_HAL_F7_PRIV_H */

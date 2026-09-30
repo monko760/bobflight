@@ -38,6 +38,12 @@ IR: `board-defs/.../kakute_f7_hdv.M1-M4-AF-DMA-LOCK.md` (`ir_verified=false`).
 
 ## Open HAL questions
 
+> **Superseded by B2** ([DSHOT-BIDIR-4K.md](DSHOT-BIDIR-4K.md)): the polled IC
+> was replaced by pipelined DMA input capture (no spin, no quiet gap), the
+> bidir frame now uses the inverted CRC and an inverted line, and bidir no
+> longer forces a 1 kHz loop. CLI keys and statuses are unchanged.
+
+
 - Polled IC is bring-up only; IRQ/DMA IC + tighter window next.
 - Settle-after-TC is coarse (CNT delta vs ARR); may need ESC-specific skew.
 - GPIO AF left to TX path (AF2 TIM3 / AF1 TIM1) — no remap in IC.

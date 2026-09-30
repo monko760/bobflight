@@ -25,6 +25,11 @@ static uint32_t *test_register(uintptr_t base,unsigned offset);
 #define R(base,offset) (*test_register((base),(offset)))
 #define __DMB() flush_io()
 static uint32_t hal_f7_timclk(bool apb2){return apb2?core_hz:core_hz/2u;}
+/* B2 capture coupling (hal_tim_ic.c is not linked here). */
+static bool g_tc_wanted;
+static unsigned g_quiesce_calls;
+bool hal_f7_dshot_ic_tc_irq_wanted(unsigned group){(void)group;return g_tc_wanted;}
+void hal_f7_dshot_ic_quiesce(unsigned group){(void)group;g_quiesce_calls++;}
 #include "../src/hal/stm32f7/hal_tim_dma.c"
 
 static board_t board={.board_id="kakute_f7_hdv",.motor_count=4,.motors={
@@ -71,6 +76,7 @@ static void timed_update(unsigned g){
         if(!dr[g][off+1])dr[g][off]&=~1u;
     }
 }
+#define DSHOT_TC_SLOT 18u /* update 19 latches slot 18 (dshot_bidir_budget.h: 19 bits) */
 #define CHECK(c) do{if(!(c)){fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c);return 1;}}while(0)
 int main(void){
     hal_tim_dma_t *handles[4];
@@ -100,15 +106,47 @@ int main(void){
                 CHECK(dr[g][off+3]==(uint32_t)(uintptr_t)&frames[g][1][0]);
                 CHECK(tr[g][0x2C/4]+1==hal_f7_timclk(g==1)/bit_rate);
                 for(unsigned j=0;j<20;j++){
+                    const bool was_enabled=(dr[g][off]&1u)!=0;
                     timed_update(g);
                     for(unsigned c=0;c<4;c++)CHECK(active[g][c]==frames[g][j][c]);
+                    /* B2 budget assumption: the TX DMA transfer-complete (EN
+                     * clears) happens at update 19, after all 16 data bits
+                     * (slots 0..15) were latched; the line is idle there. */
+                    if(was_enabled && !(dr[g][off]&1u)){
+                        CHECK(j==DSHOT_TC_SLOT);
+                        for(unsigned c=0;c<4;c++)CHECK(active[g][c]==0);
+                    }
                 }
                 CHECK(!(dr[g][off]&1u));CHECK(dr[g][off+1]==0);
                 timed_update(g);for(unsigned c=0;c<4;c++)CHECK(active[g][c]==0);
             }
         }
     }
+    /* B2: TCIE only when a bidir capture is armed; quiesce before TX. */
+    {
+        uint16_t words[20]={0};
+        const unsigned q0=g_quiesce_calls;
+        g_tc_wanted=false;
+        for(unsigned i=0;i<4;i++)CHECK(hal_tim_dma_start_burst(handles[i],words,20));
+        flush_io();
+        for(unsigned g=0;g<2;g++){unsigned off=(unsigned)(stream(g)-dmas[g])/4;CHECK(!(dr[g][off]&(1u<<4)));
+            for(unsigned j=0;j<20;j++)timed_update(g);}
+        g_tc_wanted=true;
+        for(unsigned i=0;i<4;i++)CHECK(hal_tim_dma_start_burst(handles[i],words,20));
+        flush_io();
+        for(unsigned g=0;g<2;g++){unsigned off=(unsigned)(stream(g)-dmas[g])/4;CHECK(dr[g][off]&(1u<<4));
+            for(unsigned j=0;j<20;j++)timed_update(g);}
+        CHECK(g_quiesce_calls>=q0+4u);
+        g_tc_wanted=false;
+        /* Bidir polarity: CCxP on exactly the motor channels, and back. */
+        hal_tim_dma_set_inverted(true);flush_io();
+        CHECK((tr[0][0x20/4]&((1u<<9)|(1u<<13)))==((1u<<9)|(1u<<13)));
+        CHECK((tr[1][0x20/4]&((1u<<1)|(1u<<5)))==((1u<<1)|(1u<<5)));
+        CHECK((tr[0][0x20/4]&0x1100u)==0x1100u && (tr[1][0x20/4]&0x11u)==0x11u);
+        hal_tim_dma_set_inverted(false);flush_io();
+        CHECK(!(tr[0][0x20/4]&((1u<<9)|(1u<<13))) && !(tr[1][0x20/4]&((1u<<1)|(1u<<5))));
+    }
     stop();flush_io();CHECK(!early_high);
-    puts("PASS: real HAL setup stays low; all 16 bits + four idle slots follow timed updates at 168/216 MHz and DShot300/600, repeated frames and stop");
+    puts("PASS: real HAL setup stays low; all 16 bits + four idle slots follow timed updates at 168/216 MHz and DShot300/600, repeated frames and stop; TX DMA TC at slot 18 after the 16 data bits; TCIE only when bidir capture armed; bidir CCxP polarity");
     return 0;
 }

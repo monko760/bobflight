@@ -27,6 +27,9 @@ static gyro_diagnostics_t diag;
 const board_t *board_get(void){return &board;}
 bool hal_time_high_resolution(void){return high_res;}
 bool dshot_bidir_enabled(void){return bidir;}
+static unsigned kbps=300;static bool cap_failed;
+unsigned dshot_speed_kbps(void){return kbps;}
+bool dshot_telem_capture_failed(void){return bidir&&cap_failed;}
 bool gyro_is_healthy(void){return gyro_ok;}
 const gyro_diagnostics_t *gyro_diagnostics(void){return &diag;}
 arm_state_t arming_state(void){return arm;}
@@ -50,7 +53,7 @@ static const char *status_lines(void){static char b[160];loop_status_lines(b,siz
 static void fast_board(void){
  memset(&board,0,sizeof board);strcpy(board.board_id,"kakute_f7_hdv");
  diag=(gyro_diagnostics_t){0};diag.config_ok=true;diag.odr_hz=8000;diag.spi_read_hz=13500000u;
- high_res=true;bidir=false;gyro_ok=true;arm=ARM_DISARMED;gyro_cost=pid_cost=0;
+ high_res=true;bidir=false;cap_failed=false;kbps=300;gyro_ok=true;arm=ARM_DISARMED;gyro_cost=pid_cost=0;
  loop_rate_setting_defaults();
 }
 int main(void){
@@ -106,18 +109,39 @@ int main(void){
  CHECK(s->overruns>overruns_before); /* since-boot counter survived both rate changes */
  /* Guard never raises the rate again by itself. */
  pid_cost=0;run_until(now+3000000);CHECK(s->gyro_hz==1000&&loop_rate_guard_level()==2);
- /* --- Blocking polled bidir listen forces 1000/1; restores when off. --- */
+ /* --- B2: bidir with non-blocking DMA capture keeps 4000 (8000/2). --- */
  fast_board();now=0;loop_rate_init();CHECK(s->gyro_hz==8000);
  bidir=true;loop_rate_tick();
- CHECK(s->gyro_hz==1000&&s->pid_process_denom==1&&!strcmp(loop_rate_reason(),"dshot-bidir-polled-listen"));
- gyro_cost=1100; /* ~1 ms listen: overruns at 1 kHz are counted, never judged by the guard */
- run_until(now+3000000);CHECK(s->overruns>0&&loop_rate_guard_level()==0);
- gyro_cost=0;bidir=false;arm=ARM_ARMED;loop_rate_tick();
- CHECK(s->gyro_hz==1000); /* no rate raise while armed */
- arm=ARM_DISARMED;loop_rate_tick();CHECK(s->gyro_hz==8000&&s->pid_process_denom==2);
- CHECK(!strcmp(loop_rate_reason(),"setting"));
- /* A drop is applied even while armed. */
- arm=ARM_ARMED;bidir=true;loop_rate_tick();CHECK(s->gyro_hz==1000);arm=ARM_DISARMED;bidir=false;
+ CHECK(s->gyro_hz==8000&&s->pid_process_denom==2&&scheduler_loop_target_hz()==4000&&!strcmp(loop_rate_reason(),"setting"));
+ /* Nominal cascade with the harvest/decode cost included, no listen spin. */
+ {uint64_t ov0=s->overruns;uint32_t hz4=0;gyro_cost=15;pid_cost=70;run_until(now+3000000);
+  CHECK(s->overruns==ov0&&loop_rate_guard_level()==0&&s->gyro_hz==8000&&s->pid_process_denom==2);
+  CHECK(scheduler_loop_actual_hz(now,&hz4)&&hz4==4000);
+  CHECK(strstr(status_lines(),"loop_target_hz: 4000\r\n"));}
+ gyro_cost=pid_cost=0;
+ /* Capture failure latched by dshot_telem: 1000/1 with its reason, applied
+  * even while armed (a drop). */
+ arm=ARM_ARMED;cap_failed=true;loop_rate_tick();
+ CHECK(s->gyro_hz==1000&&s->pid_process_denom==1&&!strcmp(loop_rate_reason(),"dshot-bidir-capture-failed"));
+ out[0]=0;cmd_loop_rate();
+ CHECK(strstr(out,"loop_rate_active: 1000/1\r\nloop_rate_reason: dshot-bidir-capture-failed\r\n"));
+ CHECK(strstr(status_lines(),"loop_target_hz: 1000\r\n"));
+ /* 1000/1 fallback is not judged by the guard even if it overruns. */
+ gyro_cost=1100;run_until(now+3000000);CHECK(loop_rate_guard_level()==0&&s->gyro_hz==1000);gyro_cost=0;
+ /* Latch cleared (bidir off/on): no raise while armed; raise once disarmed. */
+ cap_failed=false;loop_rate_tick();CHECK(s->gyro_hz==1000);
+ arm=ARM_DISARMED;loop_rate_tick();CHECK(s->gyro_hz==8000&&s->pid_process_denom==2&&!strcmp(loop_rate_reason(),"setting"));
+ /* Bidir overruns: guard ladder still steps 8000/2 -> 4000/2 -> 1000/1. */
+ gyro_cost=20;pid_cost=200;CHECK(run_until_level(1,4000000));
+ CHECK(s->gyro_hz==4000&&s->pid_process_denom==2&&!strcmp(loop_rate_reason(),"overrun-guard"));
+ gyro_cost=pid_cost=0;
+ /* The guard latches: turning bidir off does not raise the rate by itself. */
+ bidir=false;loop_rate_tick();CHECK(s->gyro_hz==4000&&loop_rate_guard_level()==1);
+ /* Capture failure with setting 1000: still 1000/1, cause reported. */
+ fast_board();loop_rate_setting_set(1000);diag.odr_hz=1000;diag.spi_read_hz=843750u;now=0;bidir=true;loop_rate_init();
+ CHECK(s->gyro_hz==1000&&!strcmp(loop_rate_reason(),"setting"));
+ cap_failed=true;loop_rate_tick();CHECK(s->gyro_hz==1000&&!strcmp(loop_rate_reason(),"dshot-bidir-capture-failed"));
+ cap_failed=false;bidir=false;
  /* --- Other fallbacks and boards. --- */
  fast_board();high_res=false;now=0;loop_rate_init();
  CHECK(s->gyro_hz==1000&&!strcmp(loop_rate_reason(),"no-high-res-timebase"));
@@ -141,9 +165,30 @@ int main(void){
  pid_cost=1500;CHECK(run_until_level(3,4000000));
  CHECK(loop_rate_guard_level()==3&&s->gyro_hz==1000&&s->pid_process_denom==1&&scheduler_loop_target_hz()==1000);
  run_until(now+3000000);CHECK(loop_rate_guard_level()==3); /* bottom of the ladder */
- /* 8000 with bidir DShot: forced 1000/1 and reported, never silently slower. */
- fast_board();loop_rate_setting_set(8000);bidir=true;loop_rate_init();
- CHECK(s->gyro_hz==1000&&!strcmp(loop_rate_reason(),"dshot-bidir-polled-listen")&&scheduler_loop_target_hz()==1000);
+ /* 8000 with bidir: the 125 us reply window is not proven at DShot300 or
+  * DShot600 (dshot_bidir_budget.h), so 8000/1 is dropped: 8000/2, reported. */
+ for(unsigned k=0;k<2;k++){
+  fast_board();kbps=k?600:300;loop_rate_setting_set(8000);bidir=true;now=0;loop_rate_init();
+  CHECK(s->gyro_hz==8000&&s->pid_process_denom==2&&scheduler_loop_target_hz()==4000);
+  CHECK(!strcmp(loop_rate_reason(),"dshot-bidir-reply-window"));
+  out[0]=0;cmd_loop_rate();
+  CHECK(strstr(out,"loop_rate_profile: 8000/1\r\nloop_rate_active: 8000/2\r\nloop_rate_reason: dshot-bidir-reply-window\r\n"));
+ }
+ /* ...and its guard continues from 8000/2: next step 4000/2, then 1000/1. */
+ gyro_cost=20;pid_cost=200;CHECK(run_until_level(1,4000000));
+ CHECK(s->gyro_hz==4000&&s->pid_process_denom==2&&!strcmp(loop_rate_reason(),"overrun-guard"));
+ gyro_cost=pid_cost=0;
+ /* Bidir off (disarmed) on a fresh boot: back to 8000/1. */
+ fast_board();loop_rate_setting_set(8000);bidir=true;now=0;loop_rate_init();CHECK(s->pid_process_denom==2);
+ bidir=false;loop_rate_tick();CHECK(s->gyro_hz==8000&&s->pid_process_denom==1&&!strcmp(loop_rate_reason(),"setting"));
+ /* Pure ladders. */
+ {loop_rate_t l[LOOP_RATE_LADDER_MAX];bool capped=false;
+  CHECK(loop_rate_ladder_bidir(8000,true,300,l,&capped)==3&&capped&&l[0].gyro_hz==8000&&l[0].pid_denom==2&&l[2].gyro_hz==1000);
+  CHECK(loop_rate_ladder_bidir(8000,true,600,l,&capped)==3&&capped);
+  CHECK(loop_rate_ladder_bidir(4000,true,300,l,&capped)==3&&!capped&&l[0].pid_denom==2);
+  CHECK(loop_rate_ladder_bidir(8000,false,300,l,&capped)==4&&!capped);
+  CHECK(loop_rate_ladder_bidir(1000,true,300,l,&capped)==1&&!capped&&l[0].gyro_hz==1000);
+  CHECK(loop_rate_ladder_bidir(4000,true,0,l,&capped)==1&&capped); /* unknown speed: only 1000/1 */}
  /* --- Setting 1000 on Kakute: 1000 / 1, never judged by the guard. --- */
  fast_board();loop_rate_setting_set(1000);diag.odr_hz=1000;diag.spi_read_hz=843750u;now=0;loop_rate_init();
  CHECK(s->gyro_hz==1000&&s->pid_process_denom==1&&!strcmp(loop_rate_reason(),"setting"));
@@ -174,6 +219,6 @@ int main(void){
  /* uint64 overruns print in full. */
  {scheduler_stats_t *w=(scheduler_stats_t*)s;w->overruns=18446744073709551615ull;}
  CHECK(strstr(status_lines(),"loop_overruns: 18446744073709551615\r\n"));
- puts("PASS loop rate: loop_rate_hz parse/support, default 4000 = 8000/2 at 250 us, 8000 = 8000/1 at 125 us with 4-step guard ladder, 1000 on Kakute, pending reboot, rolling 1 s loop_actual_hz (unavailable, drops, stall), overrun counter, guard 4k->2k->1k, bidir/timebase/gyro fallbacks, frozen status lines");
+ puts("PASS loop rate: loop_rate_hz parse/support, default 4000 = 8000/2 at 250 us, 8000 = 8000/1 at 125 us with 4-step guard ladder, 1000 on Kakute, pending reboot, rolling 1 s loop_actual_hz (unavailable, drops, stall), overrun counter, guard 4k->2k->1k, bidir keeps 4000 (8000 capped to 8000/2, capture failure -> 1000/1), timebase/gyro fallbacks, frozen status lines");
  return 0;
 }

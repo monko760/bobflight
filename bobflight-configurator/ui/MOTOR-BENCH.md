@@ -73,8 +73,10 @@ termination or lost USB. A stuck USB command can delay Stop until timeout.
 
 There is no measured RPM, motor direction, active-sequence telemetry or physical
 stop sensor. RPM reads `— / No telemetry`, never a fake zero or a throttle-based
-estimate, including in the mock. Bidirectional DShot is not implemented or
-silently enabled; see the [RPM implementation roadmap](RPM-ROADMAP.md). No automatic direction reversal, flight arming, continuous
+estimate, including in the mock. Bidirectional DShot is never silently
+enabled: it is an explicit, RAM-only controller mode (`set dshot_bidir on`),
+and eRPM is shown only when the controller reports telem `ok`; see the
+[RPM implementation roadmap](RPM-ROADMAP.md). No automatic direction reversal, flight arming, continuous
 slider drive, master/all-motor slider, or persistent speed setting is introduced.
 
 On old firmware without `motor_pulse`, adjustable sliders stay disabled with
