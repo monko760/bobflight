@@ -20,11 +20,12 @@ int fatlog_poll(fatlog_t *f,uint64_t t){(void)t;
  return f->phase;
 }
 bool fatlog_write(fatlog_t *f,const uint8_t s[512],uint16_t used,uint64_t t){(void)t;assert(f->phase==FATLOG_READY&&used&&used<=512);memcpy(pending,s,512);pending_used=used;delay=2;f->phase=FATLOG_WRITING;return true;}
+bool fatlog_rewrite_first_sector(fatlog_t *f,const uint8_t s[512],uint64_t t){(void)t;assert(f->phase==FATLOG_READY&&length>=512);memcpy(bytes,s,512);return true;}
 bool fatlog_close(fatlog_t *f,uint64_t t){(void)t;assert(f->phase==FATLOG_READY);f->phase=FATLOG_CLOSING;delay=2;return true;}
 static void poll_n(unsigned count){for(unsigned i=0;i<count;i++)bb_session_poll(&session,now);}
 static void finish(void){for(unsigned i=0;i<10000&&bb_session_busy(&session);i++)bb_session_poll(&session,now);assert(session.phase==BBS_DONE);assert(length==session.file.bytes_written);}
 int main(int argc,char **argv){
- config_init();pid_init();fatlog_io_t io={0};blackbox_metadata_t m={500,1000,300,"0.2.0-session-test",config_get()};
+ config_init();pid_init();fatlog_io_t io={0};blackbox_metadata_t m={500,1000,300,"0.2.0-session-test",config_get(),0,NULL};
  assert(bb_session_start(&session,&io,&m,now));assert(!bb_session_start(&session,&io,&m,now));poll_n(200);assert(session.phase==BBS_RECORDING);
  expected_len=blackbox_header((char*)expected,sizeof expected,&m);assert(expected_len);
  float raw[3]={26,-13,4},gyro[3]={25,-12.5f,4},setpoint[3]={35,-10,5},motor[4]={.2f,.4f,.6f,.8f},rc[4]={.1f,-.05f,.02f,.25f};pid_axis_out_t out;

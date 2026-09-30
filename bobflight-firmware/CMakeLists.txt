@@ -455,6 +455,13 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)
   target_link_libraries(bobflight_blackbox_cli_test m)
   add_test(NAME blackbox_cli_guards COMMAND bobflight_blackbox_cli_test)
+  add_executable(bobflight_blackbox_throughput_test tests/host_blackbox_throughput.c
+    src/drivers/sd_spi.c src/drivers/sd_probe.c src/drivers/fat32_log.c
+    src/flight/blackbox_session.c src/flight/blackbox_capture.c src/flight/flight_recorder.c
+    src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)
+  target_link_libraries(bobflight_blackbox_throughput_test m)
+  add_test(NAME blackbox_sd_throughput_model COMMAND bobflight_blackbox_throughput_test)
+  set_tests_properties(blackbox_sd_throughput_model PROPERTIES TIMEOUT 120)
   add_executable(bobflight_blackbox_card_test tests/host_blackbox_card.c
     src/drivers/fat32_log.c src/flight/blackbox_session.c src/flight/blackbox_capture.c
     src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)

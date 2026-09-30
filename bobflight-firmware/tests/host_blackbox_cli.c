@@ -18,10 +18,12 @@ arm_state_t arming_state(void){return armed?ARM_ARMED:ARM_DISARMED;}
 bool bench_motor_active(void){return bench;}
 bool gyro_manual_calibration_active(void){return cal;}
 bool hal_usb_cdc_connected(void){return usb;}
-uint64_t hal_micros(void){return now;}
+/* Each clock read advances 1 us so deadline-bounded quanta end as on hardware. */
+uint64_t hal_micros(void){return now++;}
 bool persist_dirty(void){return dirty;}
 unsigned dshot_speed_kbps(void){return 300;}
 const scheduler_stats_t *scheduler_stats(void){static scheduler_stats_t s={.gyro_hz=1000,.pid_process_denom=1};return &s;}
+uint32_t scheduler_bg_budget_us(uint64_t t){(void)t;return 50u;}
 bool sd_spi_hw_bind(sd_spi_io_t *io){binds++;*io=create_mock_io();return true;}
 void sd_spi_hw_cancel(void){cancels++;g_mock.cs_asserted=false;g_mock.io_pending=false;}
 #define BOBFLIGHT_MCU 1
@@ -45,7 +47,7 @@ int main(void){
  usb=false;now+=10;blackbox_cli_poll();assert(blackbox_cli_busy()); /* Disconnect does not cancel the recorder. */
  output[0]=0;assert(cmd_blackbox("blackbox stop"));
  for(unsigned i=0;i<10000&&blackbox_cli_busy();i++){now+=10;blackbox_cli_poll();}
- assert(!blackbox_cli_busy()&&bbl.phase==BBS_DONE&&!g_mock.write_commands);assert(!strcmp(bbl.reason,"stopped-before-file-creation"));
+assert(!blackbox_cli_busy()&&bbl.phase==BBS_DONE&&!g_mock.write_commands);assert(!strcmp(bbl.reason,"stopped-before-file-creation"));
  usb=true;sd_cli_read_active=true;output[0]=0;unsigned prior_binds=binds;
  assert(cmd_blackbox("blackbox start")&&strstr(output,"refused")&&binds==prior_binds);
  output[0]=0;assert(blackbox_cli_filter("bl"));assert(!blackbox_cli_filter("disarm"));sd_cli_read_active=false;
