@@ -183,6 +183,10 @@ export class MockTransportFactory implements TransportFactory {
       ...(path === "mock://bobflight-sd" ? { blackboxCard: "ok" as const } : {}),
       ...(path === "mock://bobflight-sd-slow" ? { blackboxCard: "slow" as const } : {}),
       ...(path === "mock://bobflight-sd-api1" ? { blackboxCard: "api1" as const } : {}),
+      ...(path === "mock://bobflight-notch-ok" ? { gyroNotchScenario: "ok" as const } : {}),
+      ...(path === "mock://bobflight-notch-nyquist" ? { gyroNotchScenario: "above-nyquist" as const } : {}),
+      ...(path === "mock://bobflight-notch-invalid" ? { gyroNotchScenario: "invalid" as const } : {}),
+      ...(path === "mock://bobflight-notch-old" ? { gyroNotchScenario: "old-fc" as const } : {}),
       ...this.mockOpts,
     });
     await mock.open();

@@ -29,12 +29,13 @@ import { MOCK_PORT_PATH } from "./mock-serial";
 import {
   SETTINGS_KEYS,
   isSettingsKey,
+  isOptionalSettingsKey,
   parseDefaultsReply,
   parseGetReply,
   parseSetReply,
   type SettingsKey,
 } from "./settings";
-
+import { isGyroNotchCliCommand } from "./gyro-notch";
 
 /** R0b patterned CLI: get erpm_m1..4 / dshot_telem_m1..4 / get|set dshot_bidir on|off. */
 export function isR0bDshotCliCommand(cmd: string): boolean {
@@ -281,7 +282,7 @@ export class BobFlightCliClient {
     opts?: SendCommandOptions
   ): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd)) {
+    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd) && !isGyroNotchCliCommand(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);
@@ -381,6 +382,9 @@ export class BobFlightCliClient {
     const raw = await this.sendRaw(`set ${key} ${value}`, opts);
     const parsed = parseSetReply(raw);
     if (!parsed.ok || parsed.key !== key || parsed.value === undefined) {
+      // FW refusal lines ("set failed…", "unknown key") are surfaced verbatim.
+      const first = raw.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? "";
+      if (/^set failed\b/.test(first) || first === "unknown key") throw new Error(first);
       throw new Error(
         `set ${key} failed: ${JSON.stringify(raw.trim())}`
       );
@@ -418,6 +422,15 @@ export class BobFlightCliClient {
   ): Promise<Record<SettingsKey, string>> {
     const out = {} as Record<SettingsKey, string>;
     for (const key of SETTINGS_KEYS) {
+      if (isOptionalSettingsKey(key)) {
+        // Schema 8 notch keys: an older FC answers "unknown key" -> omitted (unknown), never defaulted.
+        const raw = await this.sendRaw(`get ${key}`, opts);
+        const parsed = parseGetReply(raw);
+        if (parsed.unknown) continue;
+        if (!parsed.ok || parsed.key !== key || parsed.value === undefined) throw new Error(`get ${key} failed: ${JSON.stringify(raw.trim())}`);
+        out[key] = parsed.value;
+        continue;
+      }
       const { value } = await this.getSetting(key, opts);
       out[key] = value;
     }
