@@ -71,9 +71,24 @@ export function onboardAutoLowered(s: Pick<OnboardSnapshot, 'rateReason'>): bool
   return s.rateReason === 'auto-lowered-card-slow';
 }
 
+/** Exact label of the api 1 row: the FC's fixed target, not an effective rate. */
+export const ONBOARD_API1_TARGET_LABEL = 'Target sampling rate (api 1 FC; effective rate not reported)';
+
+const isOnboardApi2 = (s: Pick<OnboardSnapshot, 'api'>) => Number.isInteger(s.api) && s.api >= 2;
+
+/** Only api 2+ firmware reports an effective rate; api 1 or an unknown api is null ("unknown"). */
+export function onboardEffectiveHz(s: Pick<OnboardSnapshot, 'api' | 'rateHz'>): number | null {
+  return isOnboardApi2(s) ? s.rateHz : null;
+}
+
+/** api 1 FC: its fixed target as sent in `blackbox_rate_hz` (own row); null on api 2+ (row hidden). */
+export function describeOnboardApi1Target(s: Pick<OnboardSnapshot, 'api' | 'rateHz'>): string | null {
+  return isOnboardApi2(s) ? null : formatOnboardHz(s.rateHz);
+}
+
 /** Effective rate; the auto-lowered note appears only for that reported reason. */
-export function describeOnboardRate(s: Pick<OnboardSnapshot, 'rateHz' | 'requestedHz' | 'rateReason'>): string {
-  const rate = formatOnboardHz(s.rateHz);
+export function describeOnboardRate(s: Pick<OnboardSnapshot, 'api' | 'rateHz' | 'requestedHz' | 'rateReason'>): string {
+  const rate = formatOnboardHz(onboardEffectiveHz(s));
   if (onboardAutoLowered(s)) {
     return `${rate} (requested ${formatOnboardHz(s.requestedHz)}; auto-lowered because the SD card could not keep up)`;
   }

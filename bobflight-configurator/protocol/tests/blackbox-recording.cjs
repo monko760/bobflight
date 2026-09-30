@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const path=require('node:path');
 const {BobFlightCliClient,MockTransportFactory,ResponseCollector,MockOnboardBlackbox,formatOnboardStatus,formatOnboardStatusV1,formatDropPct}=require('../dist');
 const {loadUiTs}=require('./load-ui-ts.cjs');
-const {parseOnboardReply,describeOnboardRate,describeOnboardDrops,onboardAutoLowered,formatOnboardHz,formatOnboardRateReason,formatOnboardDropPct}=loadUiTs(path.join(__dirname,'../../ui/src/blackbox/onboard.ts'));
+const {parseOnboardReply,describeOnboardRate,describeOnboardDrops,onboardAutoLowered,formatOnboardHz,formatOnboardRateReason,formatOnboardDropPct,describeOnboardApi1Target,ONBOARD_API1_TARGET_LABEL}=loadUiTs(path.join(__dirname,'../../ui/src/blackbox/onboard.ts'));
 (async()=>{
  const client=new BobFlightCliClient(new MockTransportFactory());
  await client.connect({path:'mock://bobflight',transport:'mock'});await new Promise(r=>setTimeout(r,15));
@@ -18,7 +18,7 @@ const {parseOnboardReply,describeOnboardRate,describeOnboardDrops,onboardAutoLow
  let snap=parseOnboardReply(await ok.sendCommand('blackbox status'));
  assert.equal(snap.api,2);assert.equal(snap.state,'idle');assert.equal(snap.rateHz,500);assert.equal(snap.requestedHz,500);assert.equal(snap.rateReason,'default');assert.equal(snap.dropPct,'0.0');assert(!onboardAutoLowered(snap));
  snap=parseOnboardReply(await ok.sendCommand('blackbox start'));assert.equal(snap.state,'recording');assert(snap.active);
- snap=parseOnboardReply(await ok.sendCommand('blackbox status'));assert.equal(snap.frames,500);assert.equal(snap.dropped,0);assert.equal(snap.rateHz,500);assert.equal(describeOnboardRate(snap),'500 Hz');assert.equal(describeOnboardDrops(snap),'0 dropped (0.0%)');
+ snap=parseOnboardReply(await ok.sendCommand('blackbox status'));assert.equal(snap.frames,500);assert.equal(snap.dropped,0);assert.equal(snap.rateHz,500);assert.equal(describeOnboardRate(snap),'500 Hz');assert.equal(describeOnboardApi1Target(snap),null);assert.equal(describeOnboardDrops(snap),'0 dropped (0.0%)');
  assert.match(await ok.sendCommand('blackbox start'),/blackbox refused/);
  snap=parseOnboardReply(await ok.sendCommand('blackbox stop'));assert.equal(snap.state,'done');assert(!snap.active);
  await ok.disconnect();
@@ -43,6 +43,8 @@ const {parseOnboardReply,describeOnboardRate,describeOnboardDrops,onboardAutoLow
  assert.equal(snap.requestedHz,null);assert.equal(snap.rateReason,null);assert.equal(snap.dropPct,null);assert(!onboardAutoLowered(snap));
  assert.equal(formatOnboardHz(snap.requestedHz),'unknown');assert.equal(formatOnboardRateReason(snap.rateReason),'unknown');assert.equal(formatOnboardDropPct(snap.dropPct),'unknown');
  assert.equal(describeOnboardDrops(snap),'425 dropped (unknown)'); // never computed as 85.0
+ assert.equal(describeOnboardRate(snap),'unknown'); // api 1 does not report an effective rate
+ assert.equal(ONBOARD_API1_TARGET_LABEL,'Target sampling rate (api 1 FC; effective rate not reported)');assert.equal(describeOnboardApi1Target(snap),'500 Hz'); // FC's fixed target, own row
  snap=parseOnboardReply(await v1.sendCommand('blackbox stop'));assert.equal(snap.state,'done');assert.equal(snap.dropPct,null);
  await v1.disconnect();
 
