@@ -111,5 +111,6 @@ need "set failed: motor_poles must be even, 4..36"
 need "ok motor_poles=12"
 need "rpm_filter_reason: bidir-off"
 need "rpm_filter_m1_hz: unavailable"
+if printf '%s\n' "$OUT" | tr -d '\r' | grep -q '^rpm_filter_harmonics: '; then echo "FAIL: rpm_filter report must not carry rpm_filter_harmonics (frozen format)"; exit 1; fi
 
 echo "PASS: CLI get/set/save/defaults (schema9 RPM filter + schema8 gyro notches + schema7 loop_rate_hz + schema6 pid_yaw_d + LPF + rates/PID + dshot R0c M1-M4) + status loop_target/actual/overruns"

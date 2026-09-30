@@ -8,14 +8,15 @@
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {spawnSync}=require('node:child_process');
-const {RPM_FILTER_KEYS,parseRpmGetReply,parseRpmSetReply,parseRpmFilterReport,rpmFilterView,MockRpmFilter,parseStorage,STORAGE_SCOPE_V9}=require('../../bobflight-configurator/protocol/dist');
+const {RPM_FILTER_KEYS,RPM_FILTER_REPORT_FIELDS,rpmFilterReportIsExact,parseRpmGetReply,parseRpmSetReply,parseRpmFilterReport,rpmFilterView,MockRpmFilter,parseStorage,STORAGE_SCOPE_V9}=require('../../bobflight-configurator/protocol/dist');
 const binary=process.argv[2]?path.resolve(process.argv[2]):path.resolve(__dirname,'../../bobflight-firmware/build-contract/bobflight_host');
 const PAD=' '.repeat(64);
 function run(cmds,reinit=false){
  const r=spawnSync(binary,[],{input:cmds.join('\n')+'\n',encoding:'utf8',maxBuffer:1024*1024,timeout:60000,env:{...process.env,...(reinit?{BOBFLIGHT_HOST_REBOOT_REINIT:'1'}:{})}});
  assert.equal(r.status,0,r.stdout+r.stderr);return r.stdout;
 }
-const reports=o=>[...o.matchAll(/rpm_filter_api: 1\r?\n[\s\S]*?rpm_filter_end: 1\r?\n/g)].map(m=>m[0]);
+const reports=o=>[...o.matchAll(/rpm_filter_api: 1\r?\n[\s\S]*?rpm_filter_end: 1\r?\n/g)].map(m=>{
+ assert.ok(rpmFilterReportIsExact(m[0]),'FW report is not in the frozen shape:\n'+m[0]);return m[0];});
 const get=(o,k)=>[...o.matchAll(new RegExp(`^${k}=.*$`,'gm'))].map(m=>parseRpmGetReply(m[0],k));
 const setLines=o=>[...o.matchAll(/^(?:ok (?:rpm_filter_\w+|motor_poles)=\S+|set failed.*)$/gm)].map(m=>m[0].replace(/\r$/,''));
 const storage=o=>parseStorage(o.slice(o.lastIndexOf('storage_api: 1'),o.lastIndexOf('storage_end: 1')+'storage_end: 1'.length));
@@ -27,7 +28,8 @@ const norm=s=>s.replace(/\r/g,'');
  const o=run([...RPM_FILTER_KEYS.map(k=>`get ${k}`),'rpm_filter','get dshot_bidir','storage']);
  assert.deepEqual(RPM_FILTER_KEYS.map(k=>get(o,k)),[[{kind:'value',value:'0'}],[{kind:'value',value:'100'}],[{kind:'value',value:'500'}],[{kind:'value',value:'14'}]]);
  const [raw]=reports(o);
- assert.deepEqual(norm(raw).trim().split('\n'),['rpm_filter_api: 1','rpm_filter_sample_hz: 4000','rpm_filter_harmonics: 0','rpm_filter_harmonics_active: 0','rpm_filter_active: no','rpm_filter_reason: off',
+ // Frozen report: exactly these lines, in this order (the harmonics setting is read with get).
+ assert.deepEqual(norm(raw).trim().split('\n'),['rpm_filter_api: 1','rpm_filter_active: no','rpm_filter_reason: off','rpm_filter_sample_hz: 4000','rpm_filter_harmonics_active: 0',
   'rpm_filter_m1_hz: unavailable','rpm_filter_m2_hz: unavailable','rpm_filter_m3_hz: unavailable','rpm_filter_m4_hz: unavailable','rpm_filter_end: 1']);
  const v=rpmFilterView(values(o),parseRpmFilterReport(raw));
  assert.deepEqual([v.supported,v.harmonics,v.minHz,v.q,v.motorPoles,v.reason,v.active,v.bidirOff],[true,'0','100','5','14','off','no',false]);
@@ -73,8 +75,8 @@ const norm=s=>s.replace(/\r/g,'');
  const after=o.slice(o.indexOf('reboot'));
  assert.deepEqual(RPM_FILTER_KEYS.map(k=>get(after,k)[0]?.value),['3','80','250','16']);
  const rep=parseRpmFilterReport(reports(after).at(-1));
- assert.deepEqual([rep.report.sampleHz,rep.report.harmonics,rep.report.reason],['1000','3','bidir-off']);
+ assert.deepEqual([rep.report.sampleHz,rep.report.reason],['1000','bidir-off']);
  const v=rpmFilterView(values(after),rep);assert.deepEqual([v.q,v.minHz,v.motorPoles,v.harmonicsActive],['2.5','80','16','0']);
  const st=storage(after);assert.equal(st.schema,9);assert.equal(st.dirty,false);
 }
-console.log('PASS firmware rpm_filter CLI -> Configurator RPM parsers/view: defaults 0/100/500/14 with the exact report, refusals verbatim (== mock) with values unchanged, accepted sets re-read, bidir-off/erpm-unavailable (== mock), bidir never enabled, save + reboot keeps the settings at 1 kHz, schema 9 scope. Host build.');
+console.log('PASS firmware rpm_filter CLI -> Configurator RPM parsers/view: defaults 0/100/500/14, every report in the frozen shape ('+RPM_FILTER_REPORT_FIELDS.length+' fields, no rpm_filter_harmonics line), refusals verbatim (== mock) with values unchanged, accepted sets re-read, bidir-off/erpm-unavailable (== mock), bidir never enabled, save + reboot keeps the settings at 1 kHz, schema 9 scope. Host build.');

@@ -2,12 +2,12 @@
  * RPM notch filter (FW schema 9): parsers, view model, Q conversion,
  * allowlist, SETTINGS_KEYS and the MockSerial scenarios over the real client. */
 const assert=require('node:assert/strict');
-const {RPM_FILTER_KEYS,RPM_FILTER_UNKNOWN,RPM_FILTER_REASONS,isRpmFilterCliCommand,rpmValueProblem,qFromX100,qToX100,parseRpmGetReply,parseRpmSetReply,parseRpmFilterReport,rpmFilterView,
+const {RPM_FILTER_KEYS,RPM_FILTER_UNKNOWN,RPM_FILTER_REASONS,RPM_FILTER_REPORT_FIELDS,rpmFilterReportIsExact,isRpmFilterCliCommand,rpmValueProblem,qFromX100,qToX100,parseRpmGetReply,parseRpmSetReply,parseRpmFilterReport,rpmFilterView,
   MockRpmFilter,RPM_FILTER_MOCK_SCENARIOS,SETTINGS_KEYS,DEFAULT_SETTINGS,validateSettingValue,BobFlightCliClient,MockTransportFactory}=require('../dist');
 let passed=0;const test=async(name,fn)=>{await fn();passed++;console.log(`PASS ${name}`);};
 const val=v=>({kind:'value',value:v});
-const report=(o={})=>['rpm_filter_api: 1',`rpm_filter_sample_hz: ${o.hz??'4000'}`,`rpm_filter_harmonics: ${o.h??'3'}`,`rpm_filter_harmonics_active: ${o.run??'3'}`,
-  `rpm_filter_active: ${o.active??'yes'}`,`rpm_filter_reason: ${o.reason??'ok'}`,...[1,2,3,4].map(m=>`rpm_filter_m${m}_hz: ${o.m?.[m-1]??'180'}`),'rpm_filter_end: 1'].join('\r\n')+'\r\n';
+const report=(o={})=>['rpm_filter_api: 1',`rpm_filter_active: ${o.active??'yes'}`,`rpm_filter_reason: ${o.reason??'ok'}`,`rpm_filter_sample_hz: ${o.hz??'4000'}`,
+  `rpm_filter_harmonics_active: ${o.run??'3'}`,...[1,2,3,4].map(m=>`rpm_filter_m${m}_hz: ${o.m?.[m-1]??'180'}`),'rpm_filter_end: 1'].join('\r\n')+'\r\n';
 const values=(o={})=>({rpm_filter_harmonics:val(o.h??'3'),rpm_filter_min_hz:val(o.min??'100'),rpm_filter_q_x100:val(o.q??'500'),motor_poles:val(o.p??'14')});
 async function main(){
  await test('SETTINGS_KEYS carries the 4 schema 9 keys with FW defaults and integer domains',()=>{
@@ -40,7 +40,7 @@ async function main(){
  });
  await test('report: exact fields, unknown tokens verbatim, malformed/missing/duplicate = null',()=>{
   const r=parseRpmFilterReport(report({hz:'1000',run:'1',m:['180','unavailable','179','185']}));
-  assert.deepEqual(r,{kind:'report',report:{sampleHz:'1000',harmonics:'3',harmonicsActive:'1',active:'yes',reason:'ok',motorHz:{1:'180',2:'unavailable',3:'179',4:'185'}}});
+  assert.deepEqual(r,{kind:'report',report:{active:'yes',reason:'ok',sampleHz:'1000',harmonicsActive:'1',motorHz:{1:'180',2:'unavailable',3:'179',4:'185'}}});
   assert.equal(parseRpmFilterReport(report({reason:'esc-fallback'})).report.reason,'esc-fallback','unknown token kept, never mapped');
   assert.equal(parseRpmFilterReport(report({reason:'bidir off'})).report.reason,null,'two words: not one \\S+ token');
   assert.equal(parseRpmFilterReport(report({active:'yes please'})).report.active,null);
@@ -48,6 +48,18 @@ async function main(){
   assert.equal(parseRpmFilterReport(report().replace(/rpm_filter_m3_hz: 180\r\n/,'')).report.motorHz[3],null,'missing');
   assert.deepEqual(parseRpmFilterReport('unknown — try help\r\n'),{kind:'unsupported'});
   assert.equal(parseRpmFilterReport('rpm_filter_api: 1\r\n').kind,'malformed');
+ });
+ await test('frozen report shape: exact lines and order; no rpm_filter_harmonics line (setting comes from get)',()=>{
+  assert.deepEqual([...RPM_FILTER_REPORT_FIELDS],['rpm_filter_active','rpm_filter_reason','rpm_filter_sample_hz','rpm_filter_harmonics_active','rpm_filter_m1_hz','rpm_filter_m2_hz','rpm_filter_m3_hz','rpm_filter_m4_hz']);
+  assert.equal(rpmFilterReportIsExact(report()),true);
+  const extra=report().replace('rpm_filter_harmonics_active: 3','rpm_filter_harmonics: 3\r\nrpm_filter_harmonics_active: 3');
+  assert.equal(rpmFilterReportIsExact(extra),false,'extra rpm_filter_harmonics line is not the frozen shape');
+  assert.equal('harmonics' in parseRpmFilterReport(extra).report,false,'parser has no report harmonics field');
+  assert.equal(rpmFilterView(values({h:'2'}),parseRpmFilterReport(extra)).harmonics,'2','harmonics shown from get, never from the report');
+  const swapped=report().replace(/rpm_filter_active: yes\r\nrpm_filter_reason: ok/,'rpm_filter_reason: ok\r\nrpm_filter_active: yes');
+  assert.equal(rpmFilterReportIsExact(swapped),false,'order is frozen');
+  assert.equal(rpmFilterReportIsExact(report().replace(/rpm_filter_m4_hz: \S+\r\n/,'')),false,'missing line');
+  assert.equal(rpmFilterReportIsExact(report({reason:'bidir off'})),false,'one token per field');
  });
  await test('view: tokens verbatim, bidirOff only for the exact token, older FC unknown (never 0/off)',()=>{
   const v=rpmFilterView(values({q:'350'}),parseRpmFilterReport(report({m:['180','182','unavailable','185']})));
@@ -75,8 +87,10 @@ async function main(){
   const exp={off:['4000','0','0','no','off',[U,U,U,U]],ok:['4000','3','3','yes','ok',live],'bidir-off':['4000','2','0','no','bidir-off',[U,U,U,U]],
    'erpm-unavailable':['4000','2','0','no','erpm-unavailable',[U,U,U,U]],'trimmed-1k':['1000','3','1','yes','ok',live],'off-erpm-live':['4000','0','0','no','off',[U,U,U,U]]};
   for(const [s,[hz,h,run,a,r,m]] of Object.entries(exp)){
-   const rep=parseRpmFilterReport(new MockRpmFilter(s).handle('rpm_filter',false)).report;
-   assert.deepEqual([rep.sampleHz,rep.harmonics,rep.harmonicsActive,rep.active,rep.reason,Object.values(rep.motorHz)],[hz,h,run,a,r,m],s);
+   const mock=new MockRpmFilter(s),raw=mock.handle('rpm_filter',false),rep=parseRpmFilterReport(raw).report;
+   assert.ok(rpmFilterReportIsExact(raw),`${s}: mock report in the frozen shape`);
+   assert.equal(mock.handle('get rpm_filter_harmonics',false),`rpm_filter_harmonics=${h}\r\n`,`${s}: harmonics via get`);
+   assert.deepEqual([rep.sampleHz,rep.harmonicsActive,rep.active,rep.reason,Object.values(rep.motorHz)],[hz,run,a,r,m],s);
   }
   assert.equal(new MockRpmFilter('off-erpm-live').handle('get erpm_m1',false),'erpm_m1=75600\r\n','live eRPM while the filter is off');
   assert.equal(new MockRpmFilter('ok').handle('get erpm_m1',false),null,'other scenarios leave eRPM to the host mock');

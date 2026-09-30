@@ -14,16 +14,16 @@
  *                    set failed: motor_poles must be even, 4..36
  *                    set failed            (not a whole number)
  *                    set failed: armed
- *   rpm_filter  -> framed report:
+ *   rpm_filter  -> framed report, frozen (exactly these lines, in this order):
  *                    rpm_filter_api: 1
- *                    rpm_filter_sample_hz: <actual gyro-filter rate, Hz>
- *                    rpm_filter_harmonics: <setting>
- *                    rpm_filter_harmonics_active: <running harmonics, trimmed to the loop rate>
  *                    rpm_filter_active: yes|no
- *                    rpm_filter_reason: off|bidir-off|erpm-unavailable|ok
- *                    rpm_filter_m1_hz: <Hz>|unavailable      (m1..m4)
+ *                    rpm_filter_reason: off|ok|bidir-off|erpm-unavailable
+ *                    rpm_filter_sample_hz: <int>
+ *                    rpm_filter_harmonics_active: <0..3>
+ *                    rpm_filter_m1_hz: <int>|unavailable     (m1..m4)
  *                    rpm_filter_end: 1
  *                  older FC: "unknown — try help"
+ *                  The harmonics setting is not in the report: `get rpm_filter_harmonics`.
  *
  * The FC is the authority: motor frequencies come only from rpm_filter_mN_hz
  * (never computed from erpm_mN and motor_poles here), the harmonic trim and
@@ -93,9 +93,13 @@ export function parseRpmSetReply(raw: string, key: RpmFilterKey): RpmSetResult {
   return { ok: false, unsupported: first === "unknown key", message: first || "no reply" };
 }
 
+/** Frozen `rpm_filter` field lines, in wire order (between `rpm_filter_api: 1` and `rpm_filter_end: 1`). */
+export const RPM_FILTER_REPORT_FIELDS = [
+  "rpm_filter_active", "rpm_filter_reason", "rpm_filter_sample_hz", "rpm_filter_harmonics_active",
+  "rpm_filter_m1_hz", "rpm_filter_m2_hz", "rpm_filter_m3_hz", "rpm_filter_m4_hz",
+] as const;
 export interface RpmFilterReport {
-  sampleHz: string | null; harmonics: string | null; harmonicsActive: string | null;
-  active: string | null; reason: string | null;
+  active: string | null; reason: string | null; sampleHz: string | null; harmonicsActive: string | null;
   motorHz: Record<RpmFilterMotor, string | null>;
 }
 export type RpmFilterReportResult = { kind: "report"; report: RpmFilterReport } | { kind: "unsupported" } | { kind: "malformed"; raw: string };
@@ -120,11 +124,22 @@ export function parseRpmFilterReport(raw: string): RpmFilterReportResult {
   return {
     kind: "report",
     report: {
-      sampleHz: get("rpm_filter_sample_hz"), harmonics: get("rpm_filter_harmonics"), harmonicsActive: get("rpm_filter_harmonics_active"),
       active: get("rpm_filter_active"), reason: get("rpm_filter_reason"),
+      sampleHz: get("rpm_filter_sample_hz"), harmonicsActive: get("rpm_filter_harmonics_active"),
       motorHz: { 1: get("rpm_filter_m1_hz"), 2: get("rpm_filter_m2_hz"), 3: get("rpm_filter_m3_hz"), 4: get("rpm_filter_m4_hz") },
     },
   };
+}
+
+/**
+ * True only for a report in the exact frozen shape: the framing lines, then
+ * the RPM_FILTER_REPORT_FIELDS lines in order with one token each, nothing
+ * else (contract tests use it; the UI parser stays per-field tolerant).
+ */
+export function rpmFilterReportIsExact(raw: string): boolean {
+  const ls = String(raw).split(/\r?\n/).filter((l) => l !== "");
+  if (ls.length !== RPM_FILTER_REPORT_FIELDS.length + 2 || ls[0] !== "rpm_filter_api: 1" || ls[ls.length - 1] !== "rpm_filter_end: 1") return false;
+  return RPM_FILTER_REPORT_FIELDS.every((k, i) => new RegExp(`^${k}: \\S+$`).test(ls[i + 1]));
 }
 
 export interface RpmFilterView {

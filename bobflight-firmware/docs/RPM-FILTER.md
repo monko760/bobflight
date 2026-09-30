@@ -40,13 +40,14 @@ browser-only preference.
 
 ## `rpm_filter` report
 
+Frozen by the Configurator Lead: exactly these lines, in this order.
+
 ```
 rpm_filter_api: 1
-rpm_filter_sample_hz: 4000
-rpm_filter_harmonics: 3
-rpm_filter_harmonics_active: 3
 rpm_filter_active: yes
 rpm_filter_reason: ok
+rpm_filter_sample_hz: 4000
+rpm_filter_harmonics_active: 3
 rpm_filter_m1_hz: 180
 rpm_filter_m2_hz: 182
 rpm_filter_m3_hz: 179
@@ -54,8 +55,10 @@ rpm_filter_m4_hz: 185
 rpm_filter_end: 1
 ```
 
+* `rpm_filter_active`: `yes` if and only if the reason is `ok`.
 * `rpm_filter_sample_hz`: the filter rate running now (the loop rate).
 * `rpm_filter_harmonics_active`: harmonics that run after the loop-rate trim (0 unless the reason is `ok`).
+  The setting itself is not in the report; read it with `get rpm_filter_harmonics`.
 * `rpm_filter_reason`, highest precedence first:
   * `off`: harmonics 0.
   * `bidir-off`: `dshot_bidir` is off.

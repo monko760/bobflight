@@ -164,7 +164,7 @@ export type { GyroNotchMockScenario } from "./gyro-notch-mock";
 export {
   RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, RPM_FILTER_REASONS,
   isRpmFilterKey, isRpmFilterCliCommand, rpmValueProblem, qFromX100, qToX100,
-  parseRpmGetReply, parseRpmSetReply, parseRpmFilterReport, rpmFilterView,
+  parseRpmGetReply, parseRpmSetReply, parseRpmFilterReport, rpmFilterView, RPM_FILTER_REPORT_FIELDS, rpmFilterReportIsExact,
 } from "./rpm-filter";
 export type { RpmFilterKey, RpmFilterMotor, RpmGetResult, RpmSetResult, RpmFilterReport, RpmFilterReportResult, RpmFilterView } from "./rpm-filter";
 export { MockRpmFilter, RPM_FILTER_MOCK_SCENARIOS } from "./rpm-filter-mock";

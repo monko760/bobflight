@@ -59,8 +59,9 @@ export class MockRpmFilter {
       const f = this.erpm[m] / (this.values.motor_poles / 2) / 60;
       return String(Math.floor(Math.max(f, this.values.rpm_filter_min_hz) + 0.5));
     };
-    return `rpm_filter_api: 1\r\nrpm_filter_sample_hz: ${this.rateHz}\r\nrpm_filter_harmonics: ${this.values.rpm_filter_harmonics}\r\n` +
-      `rpm_filter_harmonics_active: ${active}\r\nrpm_filter_active: ${reason === "ok" ? "yes" : "no"}\r\nrpm_filter_reason: ${reason}\r\n` +
+    // Frozen FW report: exactly these lines, in this order.
+    return `rpm_filter_api: 1\r\nrpm_filter_active: ${reason === "ok" ? "yes" : "no"}\r\nrpm_filter_reason: ${reason}\r\n` +
+      `rpm_filter_sample_hz: ${this.rateHz}\r\nrpm_filter_harmonics_active: ${active}\r\n` +
       `rpm_filter_m1_hz: ${hz(0)}\r\nrpm_filter_m2_hz: ${hz(1)}\r\nrpm_filter_m3_hz: ${hz(2)}\r\nrpm_filter_m4_hz: ${hz(3)}\r\nrpm_filter_end: 1\r\n`;
   }
   /** FW-identical reply for an RPM filter line, or null when the line is not ours. */

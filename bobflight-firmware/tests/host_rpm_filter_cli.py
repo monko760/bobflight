@@ -22,16 +22,17 @@ def reports(lines):
         try: s=lines.index('rpm_filter_api: 1',i)
         except ValueError: return out
         e=lines.index('rpm_filter_end: 1',s);out.append(lines[s:e+1]);i=e+1
-def expect(h,active,yes,reason,hz=('unavailable',)*4):
-    return ['rpm_filter_api: 1',f'rpm_filter_sample_hz: {RATE}',f'rpm_filter_harmonics: {h}',f'rpm_filter_harmonics_active: {active}',
-            f'rpm_filter_active: {yes}',f'rpm_filter_reason: {reason}']+[f'rpm_filter_m{m+1}_hz: {hz[m]}' for m in range(4)]+['rpm_filter_end: 1']
+def expect(active,yes,reason,hz=('unavailable',)*4):
+    # Frozen report: exactly these lines, in this order (no rpm_filter_harmonics line).
+    return ['rpm_filter_api: 1',f'rpm_filter_active: {yes}',f'rpm_filter_reason: {reason}',f'rpm_filter_sample_hz: {RATE}',
+            f'rpm_filter_harmonics_active: {active}']+[f'rpm_filter_m{m+1}_hz: {hz[m]}' for m in range(4)]+['rpm_filter_end: 1']
 KEYS=['rpm_filter_harmonics','rpm_filter_min_hz','rpm_filter_q_x100','motor_poles']
 DEF=['0','100','500','14']
 
 # Defaults, exact report shape, help line.
 lines=run([f'get {k}' for k in KEYS]+['rpm_filter','help'])
 assert [l for l in lines if l.split('=')[0] in KEYS]==[f'{k}={v}' for k,v in zip(KEYS,DEF)],lines
-assert reports(lines)==[expect(0,0,'no','off')],reports(lines)
+assert reports(lines)==[expect(0,'no','off')],reports(lines)
 assert any(l.startswith('  rpm_filter - ') for l in lines),lines
 
 # Refusals: exact FW lines, value unchanged afterwards; accepted values echo.
@@ -57,7 +58,7 @@ assert got==exp,(got,lines)
 lines=run(['set rpm_filter_harmonics 2','rpm_filter','get dshot_bidir','set dshot_bidir on','rpm_filter','get erpm_m1',
            'set rpm_filter_harmonics 0','rpm_filter'])
 r=reports(lines)
-assert r==[expect(2,0,'no','bidir-off'),expect(2,0,'no','erpm-unavailable'),expect(0,0,'no','off')],r
+assert r==[expect(0,'no','bidir-off'),expect(0,'no','erpm-unavailable'),expect(0,'no','off')],r
 assert lines.index('dshot_bidir=off')<lines.index('ok dshot_bidir=on') and 'erpm_m1=none' in lines,lines
 
 # diff lists non-defaults, dump lists all four, defaults resets, storage schema 9.
@@ -89,5 +90,5 @@ lines=run(['set rpm_filter_harmonics 2','set rpm_filter_min_hz 80','set rpm_filt
           [f'get {k}' for k in KEYS]+['storage','rpm_filter'],reinit=True)
 assert [l for l in lines if l.split('=')[0] in KEYS][-4:]==['rpm_filter_harmonics=2','rpm_filter_min_hz=80','rpm_filter_q_x100=350','motor_poles=12'],lines
 assert values(lines,'state')[-1]=='saved' and values(lines,'dirty')[-1]=='0',lines
-assert reports(lines)[-1]==expect(2,0,'no','bidir-off'),reports(lines)
+assert reports(lines)[-1]==expect(0,'no','bidir-off'),reports(lines)
 print(f'PASS rpm_filter CLI ({board}, {RATE} Hz): get/set/refusals verbatim, report, bidir never auto-enabled, diff/dump/defaults, schema 9, save+reboot')

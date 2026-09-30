@@ -21,15 +21,15 @@
  * enables bidir (the report says bidir-off). motor_poles applies at the next
  * filter update (no reboot).
  *
- * Read-only `rpm_filter` report (framed):
+ * Read-only `rpm_filter` report (framed; frozen: exactly these lines, in this order):
  *   rpm_filter_api: 1
- *   rpm_filter_sample_hz: <actual gyro-filter rate, integer Hz>
- *   rpm_filter_harmonics: <setting>
- *   rpm_filter_harmonics_active: <harmonics running: setting trimmed to the loop rate, 0 unless ok>
  *   rpm_filter_active: yes|no                      (yes iff reason ok)
- *   rpm_filter_reason: off|bidir-off|erpm-unavailable|ok
+ *   rpm_filter_reason: off|ok|bidir-off|erpm-unavailable
+ *   rpm_filter_sample_hz: <actual gyro-filter rate, integer Hz>
+ *   rpm_filter_harmonics_active: <0..3: setting trimmed to the loop rate, 0 unless ok>
  *   rpm_filter_m1_hz: <tracked fundamental, integer Hz>|unavailable   (m1..m4)
  *   rpm_filter_end: 1
+ * The harmonics setting itself is read with `get rpm_filter_harmonics`.
  */
 
 /* Returns true if key was an RPM filter key (reply written). */
@@ -73,14 +73,13 @@ static void cmd_rpm_filter(void)
             snprintf(hz[m], sizeof hz[m], "unavailable");
     }
     int n = snprintf(buf, sizeof buf,
-        "rpm_filter_api: 1\r\nrpm_filter_sample_hz: %lu\r\n"
-        "rpm_filter_harmonics: %u\r\nrpm_filter_harmonics_active: %u\r\n"
+        "rpm_filter_api: 1\r\n"
         "rpm_filter_active: %s\r\nrpm_filter_reason: %s\r\n"
+        "rpm_filter_sample_hz: %lu\r\nrpm_filter_harmonics_active: %u\r\n"
         "rpm_filter_m1_hz: %s\r\nrpm_filter_m2_hz: %s\r\nrpm_filter_m3_hz: %s\r\nrpm_filter_m4_hz: %s\r\n"
         "rpm_filter_end: 1\r\n",
-        (unsigned long)(isfinite(fs) && fs > 0.f ? fs + 0.5f : 0.f),
-        st.harmonics, st.harmonics_active,
         st.reason == RPM_FILTER_OK ? "yes" : "no", rpm_filter_reason_name(st.reason),
+        (unsigned long)(isfinite(fs) && fs > 0.f ? fs + 0.5f : 0.f), st.harmonics_active,
         hz[0], hz[1], hz[2], hz[3]);
     if (n < 0 || (size_t)n >= sizeof buf) { cli_write_str("rpm_filter response failed: overflow\r\n"); return; }
     cli_write_str(buf);

@@ -119,8 +119,8 @@ async function rig(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
   return { ...h, root, rereadAfter, done: async () => { root.unmount(); await h.mock.disconnect(); } };
 }
 
-const report = (o: { reason?: string; active?: string; running?: string } = {}) => ["rpm_filter_api: 1", "rpm_filter_sample_hz: 4000", "rpm_filter_harmonics: 3",
-  `rpm_filter_harmonics_active: ${o.running ?? "3"}`, `rpm_filter_active: ${o.active ?? "yes"}`, `rpm_filter_reason: ${o.reason ?? "ok"}`,
+const report = (o: { reason?: string; active?: string; running?: string } = {}) => ["rpm_filter_api: 1", `rpm_filter_active: ${o.active ?? "yes"}`,
+  `rpm_filter_reason: ${o.reason ?? "ok"}`, "rpm_filter_sample_hz: 4000", `rpm_filter_harmonics_active: ${o.running ?? "3"}`,
   "rpm_filter_m1_hz: 180", "rpm_filter_m2_hz: 182", "rpm_filter_m3_hz: 179", "rpm_filter_m4_hz: 185", "rpm_filter_end: 1"].join("\r\n") + "\r\n";
 
 let passed = 0;
