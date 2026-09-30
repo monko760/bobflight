@@ -14,6 +14,8 @@ import {
   MockOnboardBlackbox,
   mockSensorReply,
   cloneDefaultSettings,
+  mockLoopStatusLines,
+  type LoopRateMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
 import type {
@@ -64,9 +66,13 @@ export class MockBobFlightHost implements BobFlightHost {
   private connectDelayMs: number;
   private settings: Record<SettingsKey, string> = cloneDefaultSettings();
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean }) {
+  /** `status` loop-rate keys; default "missing" (older FC). */
+  private loopRateScenario: LoopRateMockScenario;
+
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario }) {
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
     this.gyroHealthy = opts?.gyroHealthy ?? false;
+    this.loopRateScenario = opts?.loopRateScenario ?? "missing";
   }
 
   getLastError(): string | null {
@@ -303,7 +309,7 @@ export class MockBobFlightHost implements BobFlightHost {
           "mmio: denied",
           `arm: ${arm}`,
           `failsafe: ${failsafe}`,
-          "loop: gyro=0 Hz denom=1 cascade=0 bg=0",
+          ...mockLoopStatusLines(this.loopRateScenario),
         ].join("\r\n");
       }
       case "arm":
@@ -338,7 +344,9 @@ export class MockBobFlightHost implements BobFlightHost {
   setMockGates(opts: {
     gyroHealthy?: boolean;
     failsafeActive?: boolean;
+    loopRateScenario?: LoopRateMockScenario;
   }): void {
+    if (opts.loopRateScenario !== undefined) this.loopRateScenario = opts.loopRateScenario;
     if (opts.gyroHealthy !== undefined) this.gyroHealthy = opts.gyroHealthy;
     if (opts.failsafeActive !== undefined) {
       this.failsafeActive = opts.failsafeActive;
