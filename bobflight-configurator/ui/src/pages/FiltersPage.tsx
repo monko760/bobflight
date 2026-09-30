@@ -382,7 +382,7 @@ export function FiltersPage() {
           reports the result below; its reply is shown as sent.
           {!supported && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
         </p>
-        <table className="tuning-grid">
+        <table style={{ width: "100%", marginTop: "0.75rem" }}>
           <thead>
             <tr><th>Notch</th><th>Enabled</th><th>Centre (Hz)</th><th>Cutoff (Hz)</th><th>Active</th><th>Reason</th></tr>
           </thead>
@@ -470,7 +470,7 @@ export function FiltersPage() {
             <code data-rpm="motor_poles">{rpm.motorPoles}</code>
           </div>
         </div>
-        <table className="tuning-grid">
+        <table style={{ width: "100%", marginTop: "0.75rem" }}>
           <thead>
             <tr><th>Filter rate (Hz)</th><th>Harmonics running</th><th>Filter active</th><th>Filter reason</th></tr>
           </thead>
@@ -488,7 +488,7 @@ export function FiltersPage() {
             Bidirectional DShot is off, so no motor is tracked. Enable it yourself on the controller (<code>set dshot_bidir on</code>, see the Motors tab); this page never enables it.
           </p>
         )}
-        <table className="tuning-grid">
+        <table style={{ width: "100%", marginTop: "0.75rem" }}>
           <thead>
             <tr><th>Motor</th><th>Tracked (Hz)</th></tr>
           </thead>
