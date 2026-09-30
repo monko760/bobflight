@@ -65,6 +65,10 @@ jobs:
         run: npm run typecheck
       - name: USB bench blackbox recorder
         run: node ui/scripts/test-blackbox.cjs
+      - name: Onboard Blackbox status api 1/2 parser
+        run: node ui/scripts/test-onboard.cjs
+      - name: Onboard Blackbox protocol and api 2 SD mocks
+        run: npm --prefix protocol run test:blackbox
       - name: Protocol smoke
         run: npm --prefix protocol run smoke
       - name: DFU flash model test
@@ -78,12 +82,14 @@ jobs:
       - name: Firmware to configurator Ports and Modes contract
         run: |
           cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract -DBOBFLIGHT_BOARD=kakute_f7_hdv
-          cmake --build ../bobflight-firmware/build-contract --target bobflight_host bobflight_pid_mpu_freshness_test -j 4
+          cmake --build ../bobflight-firmware/build-contract --target bobflight_host bobflight_pid_mpu_freshness_test bobflight_blackbox_throughput_test -j 4
           node ../.github/scripts/ports-modes-contract.cjs
       - name: Firmware to configurator persistent storage and exports
         run: node ../.github/scripts/storage-contract.cjs
       - name: Actual firmware PID diagnostic framing and config isolation
         run: node ../.github/scripts/pid-diagnostics-contract.cjs
+      - name: Firmware to configurator Blackbox status api 2 (SD throughput model)
+        run: node ../.github/scripts/blackbox-status-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
@@ -92,6 +98,8 @@ jobs:
         run: node ui/scripts/test-switch-bench.cjs
       - name: Motor bench UI safety tests
         run: npm --prefix ui run test:motors
+      - name: Storage panel refresh guard and Motors flicker lock tests
+        run: npm --prefix ui run test:storage
       - name: Zero-output PID diagnostic CLI and framing tests
         run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests
