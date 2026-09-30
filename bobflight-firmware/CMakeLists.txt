@@ -296,6 +296,17 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_filter_test m)
   add_test(NAME filter_lpf_math COMMAND bobflight_filter_test)
 
+  add_executable(bobflight_filter_notch_test
+    src/flight/filter.c
+    src/flight/config.c
+    tests/host_filter_notch.c)
+  target_include_directories(bobflight_filter_notch_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(bobflight_filter_notch_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_filter_notch_test m)
+  add_test(NAME filter_notch COMMAND bobflight_filter_notch_test)
+
   add_executable(bobflight_rates_math_test
     src/flight/rates.c
     src/flight/config.c
@@ -357,7 +368,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_crsf_parse_test m)
 
   add_executable(bobflight_gyro_inject_test
-    src/drivers/gyro.c src/drivers/sensor_calibration.c
+    src/drivers/gyro.c src/drivers/sensor_calibration.c src/flight/filter.c src/flight/config.c
     tests/host_gyro_inject.c)
   target_include_directories(bobflight_gyro_inject_test PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -399,10 +410,10 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_compile_definitions(bobflight_pid_mpu_freshness_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_pid_mpu_freshness_test m)
   add_test(NAME pid_mpu_freshness COMMAND bobflight_pid_mpu_freshness_test)
-  add_executable(bobflight_mpu6000_test src/drivers/gyro.c src/drivers/sensor_calibration.c tests/host_mpu6000.c)
+  add_executable(bobflight_mpu6000_test src/drivers/gyro.c src/drivers/sensor_calibration.c src/flight/filter.c src/flight/config.c tests/host_mpu6000.c)
   target_compile_definitions(bobflight_mpu6000_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_mpu6000_test m)
-  add_executable(bobflight_mpu6000_relaxed_test src/drivers/gyro.c src/drivers/sensor_calibration.c tests/host_mpu6000.c)
+  add_executable(bobflight_mpu6000_relaxed_test src/drivers/gyro.c src/drivers/sensor_calibration.c src/flight/filter.c src/flight/config.c tests/host_mpu6000.c)
   target_compile_definitions(bobflight_mpu6000_relaxed_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_ACCEL_BENCH_RELAXED=1)
   target_link_libraries(bobflight_mpu6000_relaxed_test m)
   add_test(NAME mpu6000_relaxed COMMAND bobflight_mpu6000_relaxed_test)
@@ -441,6 +452,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/tests/host_loop_status_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   add_test(NAME loop_rate_setting_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_loop_rate_setting_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
+  add_test(NAME gyro_notch_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_gyro_notch_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
 
   foreach(task_test pid_elapsed loop_dt bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)
