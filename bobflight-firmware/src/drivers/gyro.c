@@ -17,11 +17,14 @@
 #include "flight/arming.h"
 #include "flight/config.h"
 #include "flight/filter.h"
+#include "sched/loop_rate.h"
+#include "sched/scheduler.h"
 
 #include <string.h>
 #include <math.h>
 static float g_acc[3], g_latest[3], g_filter[3];
-static float g_filter_dt = 1.f / 4000.f;
+/* Until the first loop_filter() call: the scheduler's fallback PID period. */
+static float g_filter_dt = (float)SCHEDULER_DEFAULT_PID_DENOM / (float)SCHEDULER_DEFAULT_GYRO_HZ;
 static sensor_calibration_t g_cal;
 static uint8_t g_sensor_id;
 static bool g_manual;
@@ -122,8 +125,17 @@ static uint8_t gyro_chipid_bmi(void)
     return id;
 }
 
-static bool configure_mpu6k(void)
+/* MPU6000 register map (RM-MPU-6000A-00): CONFIG 0x1A DLPF_CFG sets the gyro
+ * output rate: 8 kHz when DLPF_CFG = 0 (gyro bandwidth 256 Hz), 1 kHz with the
+ * DLPF enabled (DLPF_CFG = 3: 42 Hz). SMPLRT_DIV 0x19 = 0 keeps that rate.
+ * Product spec (PS-MPU-6000A-00) SPI clock: 1 MHz for all register access,
+ * 20 MHz for reading sensor and interrupt registers only. */
+#define MPU6K_DLPF_8K 0u
+#define MPU6K_DLPF_1K 3u
+#define MPU6K_SPI_SENSOR_READ_MAX_HZ 20000000u
+static bool configure_mpu6k(bool fast)
 {
+    const uint8_t dlpf = fast ? MPU6K_DLPF_8K : MPU6K_DLPF_1K;
     g_diag.chip="MPU6K-class";
     if(!gyro_spi_write_reg(0x6B,0x80))return false;
     hal_delay_ms(100);
@@ -131,7 +143,7 @@ static bool configure_mpu6k(void)
     hal_delay_ms(100);
     if(!gyro_spi_write_reg(0x6B,0x01) || !gyro_spi_write_reg(0x6C,0) ||
        !gyro_spi_write_reg(0x6A,0x10) || !gyro_spi_write_reg(0x19,0) ||
-       !gyro_spi_write_reg(0x1A,3) || !gyro_spi_write_reg(0x1B,0x18) ||
+       !gyro_spi_write_reg(0x1A,dlpf) || !gyro_spi_write_reg(0x1B,0x18) ||
        !gyro_spi_write_reg(0x1C,0x10) || !gyro_spi_write_reg(0x38,1))return false;
     hal_delay_ms(20);
     uint8_t pwr, divider, filter;
@@ -142,8 +154,12 @@ static bool configure_mpu6k(void)
        !gyro_spi_read_regs(0x19,&divider,1) ||
        !gyro_spi_read_regs(0x1A,&filter,1))return false;
     if(g_diag.gyro_config!=0x18 || g_diag.accel_config!=0x10 ||
-       pwr!=0x01 || divider!=0 || filter!=3)return false;
+       pwr!=0x01 || divider!=0 || filter!=dlpf)return false;
     g_diag.config_ok=true;
+    g_diag.odr_hz = fast ? 8000u : 1000u;
+    /* All configuration writes are done; sample reads touch only INT_STATUS
+     * and sensor output registers, which the part allows up to 20 MHz. */
+    if(fast)g_diag.spi_read_hz=hal_spi_set_hz(g_spi,MPU6K_SPI_SENSOR_READ_MAX_HZ);
     g_dps_per_lsb=1.f/16.4f;
     return true;
 }
@@ -159,6 +175,7 @@ static bool configure_icm42688(void)
     if (!gyro_spi_write_reg(0x4Fu, 0x06u)) {
         return false;
     }
+    g_diag.odr_hz = 1000u; /* GYRO_CONFIG0 ODR field 0x6 = 1 kHz */
     g_dps_per_lsb = 1.f / 16.4f;
     return true;
 }
@@ -180,6 +197,7 @@ static bool configure_bmi270(void)
 static bool probe_and_configure(const char *chip_str)
 {
     uint8_t id;
+    const bool fast = loop_rate_board_fast(board_get());
     g_kind = GYRO_CHIP_NONE;
 #if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
     /* Initial target intentionally supports the MPU6000 revision only.
@@ -187,7 +205,7 @@ static bool probe_and_configure(const char *chip_str)
     id=gyro_whoami_inv();
     if(id!=0x68u)return false;
     g_kind=GYRO_CHIP_MPU6K;
-    return configure_mpu6k();
+    return configure_mpu6k(fast);
 #endif
 
     /* MULTI / unknown: try public IDs in order MPU → ICM → BMI. */
@@ -197,7 +215,7 @@ static bool probe_and_configure(const char *chip_str)
         id = gyro_whoami_inv();
         if (id == 0x68u || id == 0x70u || id == 0x71u) {
             g_kind = GYRO_CHIP_MPU6K;
-            return configure_mpu6k();
+            return configure_mpu6k(fast);
         }
         if (id == 0x47u) {
             g_kind = GYRO_CHIP_ICM42688;
@@ -215,7 +233,7 @@ static bool probe_and_configure(const char *chip_str)
         id = gyro_whoami_inv();
         if (id == 0x68u || id == 0x70u || id == 0x71u) {
             g_kind = GYRO_CHIP_MPU6K;
-            return configure_mpu6k();
+            return configure_mpu6k(fast);
         }
         return false;
     }
@@ -240,7 +258,7 @@ static bool probe_and_configure(const char *chip_str)
     id = gyro_whoami_inv();
     if (id == 0x68u || id == 0x70u || id == 0x71u) {
         g_kind = GYRO_CHIP_MPU6K;
-        return configure_mpu6k();
+        return configure_mpu6k(fast);
     }
     if (id == 0x47u) {
         g_kind = GYRO_CHIP_ICM42688;
