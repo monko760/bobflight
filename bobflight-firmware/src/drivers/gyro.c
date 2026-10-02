@@ -21,6 +21,7 @@
 #include "sched/scheduler.h"
 
 #include <string.h>
+#include <stdio.h>
 #include <math.h>
 static float g_acc[3], g_latest[3], g_filter[3];
 /* Manual gyro notches (2 x 3 axes), in series after the soft gyro LPF. */
@@ -47,6 +48,16 @@ static hal_pin_t g_cs;
 static const char *g_bind = "unbound";
 static gyro_chip_kind_t g_kind;
 static float g_dps_per_lsb = 1.f / 16.4f; /* ±2000 dps common scale */
+
+/* Gyro sanity state (see gyro.h). */
+static gyro_health_t g_health;
+static uint64_t g_sat_count;
+static bool g_stuck_window;
+static int16_t g_stuck_raw[3];
+static uint32_t g_stuck_since_ms;
+static bool g_health_polled;
+static uint32_t g_health_last_ms;
+static unsigned g_health_step;
 
 #if BOBFLIGHT_HOST
 static bool g_host_inject;
@@ -312,6 +323,121 @@ static int16_t le16(const uint8_t *p)
     return (int16_t)(((uint16_t)p[1] << 8) | (uint16_t)p[0]);
 }
 
+/* Latch the first fault until reboot and take the existing invalid-gyro path. */
+static void gyro_health_fault(gyro_health_t why)
+{
+    if (g_health == GYRO_HEALTH_OK) g_health = why;
+    g_healthy = false;
+    arming_set_gyro_healthy(false);
+}
+
+/* Every fresh raw sample: count saturation; stuck check only while armed. */
+static void gyro_health_raw(int16_t x, int16_t y, int16_t z)
+{
+    const int16_t r[3] = {x, y, z};
+    bool sat = false;
+    for (unsigned i = 0; i < 3u; i++) sat = sat || r[i] == INT16_MAX || r[i] == INT16_MIN;
+    if (sat) g_sat_count++;
+    if (arming_state() != ARM_ARMED) {
+        g_stuck_window = false;
+        return;
+    }
+    const uint32_t now = hal_millis();
+    if (!g_stuck_window || memcmp(r, g_stuck_raw, sizeof r) != 0) {
+        memcpy(g_stuck_raw, r, sizeof r);
+        g_stuck_since_ms = now;
+        g_stuck_window = true;
+        return;
+    }
+    if ((uint32_t)(now - g_stuck_since_ms) > GYRO_STUCK_MS) gyro_health_fault(GYRO_HEALTH_STUCK);
+}
+
+gyro_health_t gyro_health(void) { return g_health; }
+uint64_t gyro_sat_count(void) { return g_sat_count; }
+const char *gyro_health_name(gyro_health_t health)
+{
+    switch (health) {
+    case GYRO_HEALTH_OK: return "ok";
+    case GYRO_HEALTH_STUCK: return "stuck";
+    case GYRO_HEALTH_WHOAMI_MISMATCH: return "whoami-mismatch";
+    case GYRO_HEALTH_CONFIG_LOST: return "config-lost";
+    default: return "config-lost";
+    }
+}
+
+/* MPU6000 configuration registers are read at the <= 1 MHz register clock even
+ * when sensor reads run at 20 MHz (PS-MPU-6000A-00); one 2-byte transfer. */
+static bool mpu6k_read_config_reg(uint8_t reg, uint8_t *val)
+{
+    const bool fast = g_diag.spi_read_hz > MPU6K_SPI_REGISTER_MAX_HZ;
+    if (fast && !hal_spi_set_hz(g_spi, MPU6K_SPI_REGISTER_MAX_HZ)) return false;
+    const bool ok = gyro_spi_read_regs(reg, val, 1);
+    if (fast) {
+        g_diag.spi_read_hz = hal_spi_set_hz(g_spi, MPU6K_SPI_SENSOR_READ_MAX_HZ);
+        if (!g_diag.spi_read_hz) return false;
+    }
+    return ok;
+}
+
+void gyro_health_poll(uint32_t budget_us)
+{
+    if (!g_healthy || !g_spi || g_kind == GYRO_CHIP_NONE) return; /* nothing bound, or already latched */
+#if BOBFLIGHT_HOST
+    if (g_host_inject) return;
+#endif
+    const uint32_t now = hal_millis();
+    if (g_health_polled && (uint32_t)(now - g_health_last_ms) < GYRO_HEALTH_PERIOD_MS) return;
+    if (budget_us < GYRO_HEALTH_MIN_BUDGET_US) return; /* retry on a later background pass */
+    g_health_polled = true;
+    g_health_last_ms = now;
+    uint8_t v = 0;
+    if (g_kind != GYRO_CHIP_MPU6K) {
+        /* Chip ID only: these paths do not verify configuration readback at init. */
+        const bool ok = g_kind == GYRO_CHIP_BMI270 ? bmi_spi_read_regs(0x00u, &v, 1) : gyro_spi_read_regs(0x75u, &v, 1);
+        if (!ok || v != g_sensor_id) gyro_health_fault(GYRO_HEALTH_WHOAMI_MISMATCH);
+        return;
+    }
+    /* MPU6000-class: WHO_AM_I, then each register gyro_init wrote and verified. */
+    static const uint8_t regs[] = {0x75u, 0x6Bu, 0x19u, 0x1Au, 0x1Bu, 0x1Cu};
+    const unsigned step = g_health_step % (unsigned)sizeof regs;
+    g_health_step = (step + 1u) % (unsigned)sizeof regs;
+    if (step != 0u && !g_diag.config_ok) return; /* no verified configuration to compare */
+    const bool ok = mpu6k_read_config_reg(regs[step], &v);
+    if (step == 0u) {
+        if (!ok || v != g_sensor_id) gyro_health_fault(GYRO_HEALTH_WHOAMI_MISMATCH);
+        return;
+    }
+    uint8_t want = 0;
+    switch (regs[step]) {
+    case 0x6Bu: want = 0x01u; break;                                              /* PWR_MGMT_1 */
+    case 0x19u: want = 0x00u; break;                                              /* SMPLRT_DIV */
+    case 0x1Au: want = g_diag.odr_hz == 8000u ? MPU6K_DLPF_8K : MPU6K_DLPF_1K; break; /* CONFIG */
+    case 0x1Bu: want = 0x18u; break;                                              /* GYRO_CONFIG */
+    default:    want = 0x10u; break;                                              /* ACCEL_CONFIG */
+    }
+    if (!ok || v != want) gyro_health_fault(GYRO_HEALTH_CONFIG_LOST);
+}
+
+/* uint64 in decimal without relying on printf %llu (newlib-nano). */
+static void u64_dec(char out[21], uint64_t v)
+{
+    char tmp[21];
+    unsigned n = 0;
+    do { tmp[n++] = (char)('0' + (unsigned)(v % 10u)); v /= 10u; } while (v);
+    for (unsigned i = 0; i < n; i++) out[i] = tmp[n - 1u - i];
+    out[n] = '\0';
+}
+
+int gyro_status_lines(char *buf, unsigned len)
+{
+    char sat[21];
+    u64_dec(sat, g_sat_count);
+    const bool ok = g_healthy && g_health == GYRO_HEALTH_OK;
+    const int n = snprintf(buf, len, "gyro_ok: %s\r\ngyro_health: %s\r\ngyro_sat_count: %s\r\n",
+                           ok ? "yes" : "no", gyro_health_name(g_health), sat);
+    return (n < 0 || (unsigned)n >= len) ? -1 : n;
+}
+
 void gyro_init(void)
 {
     const board_t *b = board_get();
@@ -329,6 +455,11 @@ void gyro_init(void)
     g_spi = NULL;
     g_cs = HAL_PIN_INVALID;
     g_healthy = false;
+    g_health = GYRO_HEALTH_OK;
+    g_sat_count = 0;
+    g_stuck_window = false;
+    g_health_polled = false;
+    g_health_step = 0;
     g_kind = GYRO_CHIP_NONE;
     g_bind = "unbound";
 #if BOBFLIGHT_HOST
@@ -448,6 +579,11 @@ bool gyro_sample(float dps[3])
         return false;
     }
 
+    gyro_health_raw(x, y, z);
+    if (!g_healthy) {
+        dps[0] = dps[1] = dps[2] = 0.f;
+        return false; /* just latched (stuck): the existing invalid-gyro path */
+    }
     dps[0] = (float)x * g_dps_per_lsb;
     dps[1] = (float)y * g_dps_per_lsb;
     dps[2] = (float)z * g_dps_per_lsb;
@@ -548,6 +684,8 @@ void gyro_filter(const float in_dps[3], float out_dps[3])
 }
 
 #if BOBFLIGHT_HOST
+void gyro_host_set_sat_count(uint64_t count) { g_sat_count = count; }
+
 void gyro_host_inject_dps(const float dps[3], bool healthy)
 {
     g_host_inject = true;

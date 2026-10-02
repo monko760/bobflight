@@ -1,5 +1,5 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
 import {
@@ -14,6 +14,7 @@ import {
 } from "../protocol";
 import { LoopRatePoller, type LoopRatePollState } from "../setup/loopRatePoller";
 import { LoopRateReasonCard } from "../setup/LoopRateReasonCard";
+import { GyroHealthCards, GyroHealthNote } from "../setup/GyroHealthCards";
 import {
   LOOP_RATE_SETTING_EMPTY,
   LoopTargetWatcher,
@@ -248,16 +249,18 @@ export function SetupPage() {
             const val = fieldValue(key);
             const warn = fieldWarn(key, val);
             return (
-              <div
-                key={key}
-                className={`status-card${warn ? " status-card-warn" : ""}`}
-              >
-                <div className="k">{key}</div>
-                <div className="v">{val}</div>
-              </div>
+              <Fragment key={key}>
+                <div className={`status-card${warn ? " status-card-warn" : ""}`}>
+                  <div className="k">{key}</div>
+                  <div className="v">{val}</div>
+                </div>
+                {/* Gyro sanity readout next to the gyro rows (live Setup poll). */}
+                {key === "gyro_bind" && <GyroHealthCards raw={connected ? loopPoll.raw : null} />}
+              </Fragment>
             );
           })}
         </div>
+        {connected && <GyroHealthNote raw={loopPoll.raw} />}
       </section>
 
       {/* Loop rate — frozen status keys loop_target_hz / loop_actual_hz / loop_overruns */}

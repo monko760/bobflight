@@ -97,6 +97,8 @@ jobs:
           node ../.github/scripts/loop-status-contract.cjs
       - name: Firmware gyro notch CLI (schema 8) to Filters tab notch contract
         run: node ../.github/scripts/gyro-notch-contract.cjs
+      - name: Firmware status gyro_health / gyro_sat_count to Setup gyro sanity cards contract
+        run: node ../.github/scripts/gyro-status-contract.cjs
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
@@ -111,6 +113,8 @@ jobs:
         run: npm --prefix ui run test:loop-rate
       - name: Setup loop-rate poll starts after an in-flight command (SetupPage render test)
         run: npm --prefix ui run test:setup-poll
+      - name: Setup gyro sanity cards (gyro_health / gyro_sat_count verbatim, mocks, live re-read) render tests
+        run: npm --prefix ui run test:gyro-health
       - name: Gyro notch parsers, write plan, SETTINGS_KEYS and five mock scenarios
         run: npm --prefix protocol run test:gyro-notch
       - name: Filters tab gyro notch controller (mocks, write plan, refused set, reload guard) tests

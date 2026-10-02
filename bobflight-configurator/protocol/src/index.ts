@@ -158,3 +158,5 @@ export {
 export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, NotchSetResult, NotchReport, FiltersReport, FiltersReportResult, NotchRowView } from "./gyro-notch";
 export { MockGyroNotch, GYRO_NOTCH_MOCK_SCENARIOS } from "./gyro-notch-mock";
 export type { GyroNotchMockScenario } from "./gyro-notch-mock";
+
+export * from "./gyro-health";

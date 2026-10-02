@@ -65,6 +65,45 @@ bool gyro_rate_ready(void);
 const float *gyro_accel_g(void);
 const float *gyro_latest_dps(void);
 bool gyro_sample(float dps[3]);
+
+/*
+ * Gyro sanity (no setting). Any non-ok health is LATCHED until reboot: the
+ * gyro is marked invalid (gyro_is_healthy() false, gyro_sample() fails), which
+ * takes the existing invalid-gyro disarm path and makes `status` print
+ * `gyro_ok: no`.
+ *  - stuck: raw output unchanged on all three axes for more than
+ *    GYRO_STUCK_MS of the millisecond clock (so at least 50 ms) WHILE ARMED.
+ *    Detection runs only while armed; the window restarts on disarm.
+ *  - whoami-mismatch: the periodic chip-ID read (WHO_AM_I / BMI270 CHIP_ID)
+ *    differs from the ID seen at probe, or the read fails.
+ *  - config-lost: (MPU6000-class only) a periodic readback of a register that
+ *    gyro_init wrote and verified (PWR_MGMT_1, SMPLRT_DIV, CONFIG, GYRO_CONFIG,
+ *    ACCEL_CONFIG) differs from the verified value, or the read fails.
+ * Saturation (a raw axis at INT16_MIN / INT16_MAX) is only counted.
+ */
+#define GYRO_STUCK_MS 50u
+/* One register per call, at most every GYRO_HEALTH_PERIOD_MS, and only when the
+ * caller's background budget covers the bounded transfer. */
+#define GYRO_HEALTH_PERIOD_MS 100u
+#define GYRO_HEALTH_MIN_BUDGET_US 60u
+typedef enum {
+    GYRO_HEALTH_OK = 0,
+    GYRO_HEALTH_STUCK,
+    GYRO_HEALTH_WHOAMI_MISMATCH,
+    GYRO_HEALTH_CONFIG_LOST
+} gyro_health_t;
+gyro_health_t gyro_health(void);
+const char *gyro_health_name(gyro_health_t health);
+/** Samples with at least one raw axis at full scale, since boot (never wraps in practice). */
+uint64_t gyro_sat_count(void);
+/** Background chip-ID / config check; budget_us = time left before the next gyro slot. */
+void gyro_health_poll(uint32_t budget_us);
+/** `gyro_ok`, `gyro_health` and `gyro_sat_count` status lines; returns the length or -1. */
+int gyro_status_lines(char *buf, unsigned len);
+#if BOBFLIGHT_HOST
+/* Host test hook: exercise the uint64 status formatting without 2^32 samples. */
+void gyro_host_set_sat_count(uint64_t count);
+#endif
 bool gyro_is_healthy(void);
 void gyro_filter(const float in_dps[3], float out_dps[3]);
 /** Sample period for soft gyro LPF (seconds); set every PID cycle from the
