@@ -22,6 +22,10 @@ void rpm_filter_gyro_install(void);
 void rpm_filter_gyro_process(float v[3], float dt);
 /** Refresh the state at filter period dt (no samples filtered) and report it. */
 void rpm_filter_gyro_status(rpm_filter_status_t *st, float dt);
+/** Read-only snapshot of the state the gyro path last applied: no refresh, no
+ * coefficient recompute, no telemetry read (Blackbox logger). Before the first
+ * update it reports reason off with nothing tracked. */
+void rpm_filter_gyro_snapshot(rpm_filter_status_t *st);
 #ifdef __cplusplus
 }
 #endif

@@ -524,6 +524,12 @@ bool gyro_notch_status(unsigned idx, bool *active, const char **reason)
     return true;
 }
 
+bool gyro_notch_active_snapshot(unsigned idx)
+{
+    return idx >= 1u && idx <= FILTER_NOTCH_COUNT && g_notch.configured &&
+           g_notch.reason[idx - 1u] == FILTER_NOTCH_OK;
+}
+
 uint32_t gyro_notch_recomputes(void)
 {
     return g_notch.recomputes;

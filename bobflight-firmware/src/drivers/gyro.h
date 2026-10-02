@@ -77,6 +77,9 @@ float gyro_filter_dt(void);
 /** Runtime state of manual notch idx (1|2): active and reason token
  * ("off" | "ok" | "above-nyquist" | "invalid"). False for a bad idx. */
 bool gyro_notch_status(unsigned idx, bool *active, const char **reason);
+/** Read-only: whether manual notch idx (1|2) was running at the last filter
+ * update. No refresh/recompute (Blackbox logger); false for a bad idx. */
+bool gyro_notch_active_snapshot(unsigned idx);
 /** Notch coefficient recomputations since boot (diagnostics/tests). */
 uint32_t gyro_notch_recomputes(void);
 /* Post-filter applied in place after the manual notches (target builds; the

@@ -130,6 +130,7 @@ set(BF_COMMON_SOURCES
   src/drivers/dshot.c
   src/drivers/dshot_gcr.c
   src/drivers/dshot_telem.c src/drivers/rpm_filter_gyro.c
+  src/drivers/blackbox_inputs.c
   src/drivers/rx.c
   src/drivers/crsf.c
   src/drivers/cli.c
@@ -157,6 +158,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_blackbox_encode_test src/flight/blackbox_encode.c src/flight/config.c tests/host_blackbox_encode.c)
   target_link_libraries(bobflight_blackbox_encode_test m)
   add_test(NAME blackbox_encode COMMAND bobflight_blackbox_encode_test)
+  add_test(NAME blackbox_schema3_decode COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_blackbox_decode.py $<TARGET_FILE:bobflight_blackbox_encode_test>)
   add_executable(bobflight_pid_trace_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/pid_pr38_baseline.c tests/host_pid_trace.c)
   target_link_libraries(bobflight_pid_trace_test m)
   add_test(NAME pid_trace_bit_exact COMMAND bobflight_pid_trace_test)
@@ -317,6 +320,12 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_compile_definitions(bobflight_rpm_filter_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_rpm_filter_test m)
   add_test(NAME rpm_filter COMMAND bobflight_rpm_filter_test)
+  add_executable(bobflight_blackbox_inputs_test tests/host_blackbox_inputs.c
+    src/drivers/blackbox_inputs.c src/drivers/rpm_filter_gyro.c src/flight/rpm_filter.c
+    src/flight/filter.c src/flight/config.c)
+  target_compile_definitions(bobflight_blackbox_inputs_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_blackbox_inputs_test m)
+  add_test(NAME blackbox_schema3_inputs COMMAND bobflight_blackbox_inputs_test)
 
   add_executable(bobflight_rates_math_test
     src/flight/rates.c
@@ -500,7 +509,14 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)
   target_link_libraries(bobflight_blackbox_throughput_test m)
   add_test(NAME blackbox_sd_throughput_model COMMAND bobflight_blackbox_throughput_test)
-  set_tests_properties(blackbox_sd_throughput_model PROPERTIES TIMEOUT 120)
+  set_tests_properties(blackbox_sd_throughput_model PROPERTIES TIMEOUT 300)
+  # Same model with the recorder default raised to 1000 Hz (drop matrix at 1 kHz).
+  get_target_property(BB_THROUGHPUT_SOURCES bobflight_blackbox_throughput_test SOURCES)
+  add_executable(bobflight_blackbox_throughput_1k_test ${BB_THROUGHPUT_SOURCES})
+  target_compile_definitions(bobflight_blackbox_throughput_1k_test PRIVATE BLACKBOX_RATE_DEFAULT_HZ=1000u)
+  target_link_libraries(bobflight_blackbox_throughput_1k_test m)
+  add_test(NAME blackbox_sd_throughput_model_1k COMMAND bobflight_blackbox_throughput_1k_test)
+  set_tests_properties(blackbox_sd_throughput_model_1k PROPERTIES TIMEOUT 300)
   add_executable(bobflight_blackbox_card_test tests/host_blackbox_card.c
     src/drivers/fat32_log.c src/flight/blackbox_session.c src/flight/blackbox_capture.c
     src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/pid.c src/flight/filter.c src/flight/config.c)

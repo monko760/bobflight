@@ -15,7 +15,7 @@
 #include <string.h>
 #include <limits.h>
 
-#define FIELD_COUNT 46u
+#define FIELD_COUNT BLACKBOX_FIELD_COUNT
 static const char *const names[FIELD_COUNT]={
  "loopIteration","time",
  "gyroADC[0]","gyroADC[1]","gyroADC[2]",
@@ -29,9 +29,12 @@ static const char *const names[FIELD_COUNT]={
  "rcCommand[0]","rcCommand[1]","rcCommand[2]","rcCommand[3]",
  "bobflightError[0]","bobflightError[1]","bobflightError[2]",
  "bobflightArmed","bobflightMode","bobflightFailsafe",
- "bobflightDtUs","bobflightDropped","bobflightIteration","bobflightSchema",
- "bobflightPidValid","bobflightGyroValid","bobflightRxFresh","bobflightOutputHealthy"
+ "bobflightDtUs","bobflightDropped","bobflightSchema",
+ "bobflightPidValid","bobflightGyroValid","bobflightRxFresh","bobflightOutputHealthy",
+ "eRPM[0]","eRPM[1]","eRPM[2]","eRPM[3]",
+ "bobflightTelemOk","bobflightFilterFlags","bobflightEvents","bobflightLoopCode","bobflightOverruns"
 };
+_Static_assert(sizeof names/sizeof names[0]==FIELD_COUNT,"field table must match BLACKBOX_FIELD_COUNT");
 /* Unsigned absolute 32-bit integers avoid overflow in sequence/counter fields. */
 static bool unsigned_field(unsigned i){return i<2u || i>=35u;}
 static size_t add(char *b,size_t n,size_t cap,const char *s){ size_t k=strlen(s);if(n>=cap||k>=cap-n)return cap;memcpy(b+n,s,k);b[n+k]=0;return n+k; }
@@ -39,7 +42,14 @@ size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
  if(!dst||!m||!m->revision||!m->config)return 0; uint32_t hz=m->sample_hz;const char *revision=m->revision;
  if((hz!=125u&&hz!=250u&&hz!=500u&&hz!=1000u)||m->loop_hz<hz||m->loop_hz>8000u||m->loop_hz%hz||(m->dshot_kbps!=300&&m->dshot_kbps!=600))return 0;
  size_t len=0;while(revision[len]){if(len>=96u||!((revision[len]>='a'&&revision[len]<='z')||(revision[len]>='A'&&revision[len]<='Z')||(revision[len]>='0'&&revision[len]<='9')||revision[len]=='.'||revision[len]=='-'||revision[len]=='_'))return 0;len++;}
- if(!len)return 0; char b[4096],t[160];size_t n=0;
+ if(!len)return 0;
+ /* Board id is informational: never block a log over it. Sanitised to
+  * [A-Za-z0-9._-] (others -> '_'), at most BLACKBOX_BOARD_MAX chars, "unknown" if empty. */
+ char board[BLACKBOX_BOARD_MAX+1u];size_t board_len=0;
+ for(const char *p=m->board;p&&*p&&board_len<BLACKBOX_BOARD_MAX;p++){char c=*p;
+  board[board_len++]=((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='.'||c=='-'||c=='_')?c:'_';}
+ board[board_len]=0;if(!board_len)memcpy(board,"unknown",8);
+ char b[4096],t[160];size_t n=0;
  n=add(b,n,sizeof b,"H Product:Blackbox flight data recorder by Nicholas Sherlock\nH Data version:2\nH Firmware type:BobFlight\nH Firmware revision:BobFlight "); n=add(b,n,sizeof b,revision);n=add(b,n,sizeof b,"\n");
  {
   /* Fixed-width rate block: the BobFlight line is space-padded so the block is
@@ -57,7 +67,16 @@ size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
  n=add(b,n,sizeof b,"H gyro.scale:30efe050\nH minthrottle:1000\nH maxthrottle:2000\nH motorOutput:48,2047\n"); snprintf(t,sizeof t,"H motor_pwm_protocol:%u\n",m->dshot_kbps==300?6:7);n=add(b,n,sizeof b,t);
  const bf_config_t *c=m->config; const float values[]={c->rate_max_roll,c->rate_max_pitch,c->rate_max_yaw,c->rate_expo,c->pid_roll_p,c->pid_roll_i,c->pid_roll_d,c->pid_pitch_p,c->pid_pitch_i,c->pid_pitch_d,c->pid_yaw_p,c->pid_yaw_i,c->pid_yaw_d}; const char *keys[]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo","pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d","pid_yaw_p","pid_yaw_i","pid_yaw_d"};
  for(unsigned k=0;k<13;k++){if(!isfinite(values[k]))return 0;snprintf(t,sizeof t,"H BobFlight %s:%.9g\n",keys[k],(double)values[k]);n=add(b,n,sizeof b,t);}
- n=add(b,n,sizeof b,"H BobFlight units:gyro=0.1dps;setpoint,error=1dps;PID=0.001command;motor=DShot;dt=us\nH BobFlight warning:plot setpoint[] and bobflightError[]; legacy computed rate/error fields are not BobFlight\nH Field I name:");
+ /* Schema 3 context. Configuration is frozen while recording (blackbox_cli.h),
+  * so these stay true for the whole file; a loop-rate change mid-session is
+  * carried per frame by bobflightLoopCode and bobflightEvents bit 5. */
+ snprintf(t,sizeof t,"H BobFlight log_schema:%u\nH BobFlight board:",BLACKBOX_LOG_SCHEMA);n=add(b,n,sizeof b,t);n=add(b,n,sizeof b,board);
+ n=add(b,n,sizeof b,"\nH BobFlight fw_version:");n=add(b,n,sizeof b,revision);
+ snprintf(t,sizeof t,"\nH BobFlight loop_rate_hz:%lu gyro_hz:%lu pid_denom:%lu\n",(unsigned long)m->loop_hz,(unsigned long)m->gyro_hz,(unsigned long)m->pid_denom);n=add(b,n,sizeof b,t);
+ {const float fv[]={c->gyro_lpf_hz,c->gyro_notch1_hz,c->gyro_notch1_cutoff_hz,c->gyro_notch2_hz,c->gyro_notch2_cutoff_hz,c->rpm_filter_harmonics,c->rpm_filter_min_hz,c->rpm_filter_q_x100,c->motor_poles};
+  const char *fk[]={"gyro_lpf_hz","gyro_notch1_hz","gyro_notch1_cutoff_hz","gyro_notch2_hz","gyro_notch2_cutoff_hz","rpm_filter_harmonics","rpm_filter_min_hz","rpm_filter_q_x100","motor_poles"};
+  for(unsigned k=0;k<sizeof fv/sizeof fv[0];k++){if(!isfinite(fv[k]))return 0;snprintf(t,sizeof t,"H BobFlight %s:%.6g\n",fk[k],(double)fv[k]);n=add(b,n,sizeof b,t);}}
+ n=add(b,n,sizeof b,"H BobFlight units:gyro=0.1dps;setpoint,error=1dps;PID=0.001command;motor=DShot;dt=us;eRPM=eRPM/100;events,flags=bits(docs/BLACKBOX-FIELDS.md)\nH BobFlight warning:plot setpoint[] and bobflightError[]; legacy computed rate/error fields are not BobFlight\nH Field I name:");
  for(unsigned i=0;i<FIELD_COUNT;i++){if(i)n=add(b,n,sizeof b,",");n=add(b,n,sizeof b,names[i]);} n=add(b,n,sizeof b,"\nH Field I signed:");
  for(unsigned i=0;i<FIELD_COUNT;i++){if(i)n=add(b,n,sizeof b,",");n=add(b,n,sizeof b,unsigned_field(i)?"0":"1");}
  const char *lines[]={"\nH Field I predictor:","\nH Field I encoding:","\nH Field P predictor:","\nH Field P encoding:"};
@@ -67,11 +86,14 @@ size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
 static bool quant(float value,double scale,int32_t *out){if(!isfinite(value))return false;double v=(double)value*scale;double q=v<0?ceil(v-0.5):floor(v+0.5);if(q<(double)INT32_MIN||q>(double)INT32_MAX)return false;*out=(int32_t)q;return true;}
 static size_t uv(uint8_t *dst,uint32_t v){size_t n=0;while(v>=128u){dst[n++]=(uint8_t)((v&127u)|128u);v>>=7;}dst[n++]=(uint8_t)v;return n;}
 size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){
- if(!dst||!s||s->armed>1u||s->mode>2u||s->failsafe>2u||s->pid_valid>1u||s->gyro_valid>1u||s->rx_fresh>1u||s->output_healthy>1u)return 0;
+ if(!dst||!s||!flight_log_sample_flags_valid(s))return 0;
  int32_t v[FIELD_COUNT]={0};uint32_t u[FIELD_COUNT]={0};u[0]=s->iteration;u[1]=s->time_us;
  for(unsigned a=0;a<3;a++){if(!quant(s->gyro[a],10,&v[2+a])||!quant(s->gyro_raw[a],10,&v[5+a])||!quant(s->setpoint[a],1,&v[8+a])||!quant(s->p[a],1000,&v[12+a])||!quant(s->i[a],1000,&v[15+a])||!quant(s->d[a],1000,&v[18+a])||!quant(s->pid_output[a],1000,&v[21+a])||!quant(s->setpoint[a]-s->gyro[a],1,&v[32+a]))return 0;if(!isfinite(s->rc[a])||s->rc[a]<-1||s->rc[a]>1||!quant(s->rc[a],500,&v[28+a]))return 0;}
  for(unsigned a=0;a<4;a++){float m=s->motor[a];if(!isfinite(m)||m<0||m>1)return 0;v[24+a]=m<=0?0:(int32_t)(48u+(unsigned)(m*1999.f));}
- if(!isfinite(s->rc[3])||s->rc[3]<0||s->rc[3]>1||!quant(s->rc[3],1000,&v[11]))return 0; v[31]=1000+v[11];u[35]=s->armed;u[36]=s->mode;u[37]=s->failsafe;u[38]=s->dt_us;u[39]=s->dropped;u[40]=s->iteration;u[41]=2;u[42]=s->pid_valid;u[43]=s->gyro_valid;u[44]=s->rx_fresh;u[45]=s->output_healthy;
- uint8_t b[1+FIELD_COUNT*5];size_t n=0;b[n++]='I';for(unsigned i=0;i<FIELD_COUNT;i++){uint32_t bits=unsigned_field(i)?u[i]:((uint32_t)v[i]<<1)^(v[i]<0?UINT32_MAX:0u);n+=uv(b+n,bits);}if(cap<n)return 0;memcpy(dst,b,n);return n;
+ if(!isfinite(s->rc[3])||s->rc[3]<0||s->rc[3]>1||!quant(s->rc[3],1000,&v[11]))return 0; v[31]=1000+v[11];u[35]=s->armed;u[36]=s->mode;u[37]=s->failsafe;u[38]=s->dt_us;u[39]=s->dropped;u[40]=BLACKBOX_LOG_SCHEMA;u[41]=s->pid_valid;u[42]=s->gyro_valid;u[43]=s->rx_fresh;u[44]=s->output_healthy;
+ /* eRPM/100, truncated (integer division); 0 means no valid telemetry. */
+ for(unsigned m=0;m<4;m++)u[45+m]=s->erpm[m]/100u;
+ u[49]=s->telem_ok;u[50]=s->filter_flags;u[51]=s->events;u[52]=s->loop_code;u[53]=s->overruns;
+ uint8_t b[BLACKBOX_FRAME_MAX_BYTES];size_t n=0;b[n++]='I';for(unsigned i=0;i<FIELD_COUNT;i++){uint32_t bits=unsigned_field(i)?u[i]:((uint32_t)v[i]<<1)^(v[i]<0?UINT32_MAX:0u);n+=uv(b+n,bits);}if(cap<n)return 0;memcpy(dst,b,n);return n;
 }
 size_t blackbox_end(uint8_t *dst,size_t cap){static const uint8_t end[]={'E',255,'E','n','d',' ','o','f',' ','l','o','g',0};if(!dst||cap<sizeof end)return 0;memcpy(dst,end,sizeof end);return sizeof end;}
