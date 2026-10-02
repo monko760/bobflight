@@ -233,9 +233,10 @@ export class SdDownloadController {
    * Runs one command through the shared CommandGate, retrying for gateRetryMs
    * while another command holds it (nothing is sent meanwhile). `sd` marks SD
    * commands: once one was handed to the link (not refused by the gate) the
-   * operation ends with `sd cancel`.
+   * operation ends with `sd cancel`. `cancellable` is false only for that
+   * closing `sd cancel`, which still waits for the gate after a user Cancel.
    */
-  private async withGate<T>(what: string, work: () => Promise<T>, sd = false): Promise<T> {
+  private async withGate<T>(what: string, work: () => Promise<T>, sd = false, cancellable = true): Promise<T> {
     const deadline = this.now() + this.gateRetryMs;
     for (;;) {
       try {
@@ -245,7 +246,9 @@ export class SdDownloadController {
       } catch (e) {
         const notSent = isGateBusy(e) || isSessionChanged(e);
         if (sd && !notSent) this.sdOnWire = true;
-        if (isGateBusy(e) && this.now() < deadline && !this.cancelReason) { await this.sleep(40); continue; }
+        if (isGateBusy(e) && this.now() < deadline && !(cancellable && this.cancelReason)) { await this.sleep(40); continue; }
+        // Cancel/tab leave while waiting on a busy gate: the cancel text, not the busy text.
+        if (isGateBusy(e) && cancellable) this.checkCancel(what);
         if (isTimeoutError(e)) throw new TimeoutAbort(what, `no complete reply: ${errText(e)}`);
         if (!this.connected()) throw new Abort(this.cancelText('disconnected', what), null, 'info');
         if (isGateBusy(e)) throw new GateBusyAbort(errText(e));
@@ -388,7 +391,7 @@ export class SdDownloadController {
     if (!this.sdOnWire) return '';
     if (!this.connected()) return ' sd cancel was not sent (not connected).';
     try {
-      const raw = await this.withGate('Download', () => this.link.sendCommand('sd cancel'));
+      const raw = await this.withGate('Download', () => this.link.sendCommand('sd cancel'), false, false);
       const st = parseSdStatusReply(raw);
       return st.kind === 'refused' ? ` Sent sd cancel; the controller replied: ${st.line}` : ' Sent sd cancel.';
     } catch (e) {

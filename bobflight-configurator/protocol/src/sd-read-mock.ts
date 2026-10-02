@@ -255,6 +255,8 @@ export class MockSdCliFirmware {
   readsInFlight = 0;
   /** Highest readsInFlight seen: 1 for a correct host, 2+ when reads are pipelined. */
   maxReadsInFlight = 0;
+  /** Commands the FW leaves unanswered once each (the host then sees a real client timeout). */
+  noReplyOnce: string[] = [];
   private readActive: { sector: number; timer: ReturnType<typeof setTimeout> | null; done: () => void } | null = null;
   private probeTimer: ReturnType<typeof setTimeout> | null = null;
   readonly faults = new Map<number, SdReadFault[]>();
@@ -312,6 +314,8 @@ export class MockSdCliFirmware {
   /** Handle one trimmed command line; `emit` writes FW output (may be called later for async replies). */
   handle(line: string, emitRaw: (text: string) => void): void {
     this.log.push(line);
+    const silent = this.noReplyOnce.indexOf(line);
+    if (silent >= 0) { this.noReplyOnce.splice(silent, 1); return; }
     let emit = emitRaw;
     let readDone = () => {};
     if (line.startsWith("sd read") && (line.length === 7 || line[7] === " ")) {

@@ -64,8 +64,10 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
   // Freshness of the polled values (arm state, loop_overruns, recorder counters): polls pause while an
   // SD download holds the connection, and a failed refresh keeps the last values. Both are marked visibly.
   const statusRefreshError = useRef<string | null>(null);
-  const pausedForSd = useRef(false);
-  if (sdLogs.busy) pausedForSd.current = true;
+  // Why the 2 s status refresh last paused: an SD download or the SD check (both hold the link).
+  const pausedForSd = useRef<'download' | 'sd-check' | null>(null);
+  if (sdLogs.busy) pausedForSd.current = 'download';
+  else if (sd.busy && pausedForSd.current === null) pausedForSd.current = 'sd-check';
   useEffect(() => {
     onboard.setEnabled(onboardEnabled);
     update();
@@ -76,13 +78,14 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
       void (async () => {
         try {
           await onboard.tick();
-          if (!sdLogs.busy && performance.now() >= nextStatusPoll.current) {
+          // The status refresh pauses while the SD check runs (as during a download), so it never collides with it.
+          if (!sdLogs.busy && !sd.busy && performance.now() >= nextStatusPoll.current) {
             nextStatusPoll.current = performance.now() + 2000;
             try {
               await refreshStatus();
               statusRefreshError.current = null;
               // A complete poll after the SD operation: the values are live again.
-              if (!sdLogs.busy && !onboard.stale) pausedForSd.current = false;
+              if (!sdLogs.busy && !sd.busy && !onboard.stale) pausedForSd.current = null;
             } catch (e) {
               statusRefreshError.current = e instanceof Error ? e.message : String(e);
             }
@@ -97,7 +100,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
       clearInterval(timer);
       onboard.setEnabled(false);
     };
-  }, [onboard, onboardEnabled, sdLogs, refreshStatus]);
+  }, [onboard, onboardEnabled, sdLogs, sd, refreshStatus]);
 
   // Abort a running SD download on disconnect, tab leave or post-flash lock (sd cancel is sent while connected).
   useEffect(() => {
@@ -190,8 +193,10 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
     storageBlocked: storageBlock({ settingsPending: settingsStoragePending, sdCheckBusy: sd.busy, benchRecording: recorder.active }),
   });
   const strictCardShown = !!onboard.snapshot && !onboard.stale && !onboard.snapshot.unavailable;
-  const countersStale = sdLogs.busy || pausedForSd.current
+  const countersStale = sdLogs.busy || pausedForSd.current === 'download'
     ? 'Last read before download: status polling pauses while the SD card is read, so these values are not live until the next refresh.'
+    : pausedForSd.current === 'sd-check'
+    ? 'Last read before the SD card check: status polling pauses while the check runs, so these values are not live until the next refresh.'
     : statusRefreshError.current !== null || onboard.stale
     ? 'Refresh failed: these are the last values read and may be out of date.'
     : null;
@@ -429,7 +434,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             {countersStale && (
               <p role="status" data-testid="bb-fc-counters-stale">
                 <strong>{countersStale}</strong>
-                {statusRefreshError.current !== null && !sdLogs.busy && !pausedForSd.current && (
+                {statusRefreshError.current !== null && !sdLogs.busy && pausedForSd.current === null && (
                   <small> ({statusRefreshError.current})</small>
                 )}
               </p>

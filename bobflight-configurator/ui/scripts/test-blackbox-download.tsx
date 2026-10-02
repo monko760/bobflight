@@ -177,7 +177,7 @@ let passed = 0;
 async function test(name: string, fn: () => Promise<void>) { await fn(); passed++; console.log(`PASS ${name}`); }
 
 async function main() {
-  await test("lists 3 BFL*.BBL files with sizes from a sparse FAT32 card and downloads multi-cluster + fragmented files (fresh probe first, sd cancel last, one sd read in flight, progress + measured rate)", async () => {
+  await test("lists 3 BFL*.BBL files with sizes from a sparse FAT32 card and downloads multi-cluster + fragmented files (fresh probe first, sd cancel last, one sd read in flight, byte/sector progress, no transfer rate)", async () => {
     const r = await rig({ readDelayMs: 2 });
     let m = r.mark();
     await listCard(r);
@@ -647,6 +647,83 @@ async function main() {
       assert.equal(lr.fw.log.filter((l) => l.startsWith("sd read")).length, 0);
       await lr.client.disconnect();
     }
+  });
+
+  await test("lock re-read timeout (the FW never answers) for `blackbox status` and for `status`: visible timeout abort, never 'state unknown', zero sd reads, no recorder/arm note", async () => {
+    // Real client timeouts over the real CommandGate: `blackbox status` is framed (terminator missing -> link reset), `status` is not (empty-reply timeout, link kept).
+    for (const cmd of ["blackbox status", "status"] as const) {
+      const lr = await lowRig();
+      lr.fw.noReplyOnce.push(cmd);
+      assert.equal(await lr.ctl.list(), false, `${cmd}: list must abort`);
+      const msg = lr.ctl.message;
+      assert.equal(msg?.tone, "error", `${cmd}: error tone (rendered as an alert)`);
+      if (cmd === "blackbox status") {
+        assert.equal(msg?.text, "Listing the card timed out (no complete reply: Incomplete sensor response: terminator missing) and the USB link was reset. Reconnect, then list the card again. Nothing was saved. sd cancel was not sent (not connected).");
+      } else {
+        assert.equal(msg?.text, "Listing the card timed out (no complete reply: CLI command timed out with empty response). Try again: list the card again. Nothing was saved. Sent sd cancel.");
+      }
+      assert.equal(lr.ctl.recorderNote, null, `${cmd}: no 'Recorder state unknown'`);
+      assert.equal(lr.ctl.armNote, null, `${cmd}: no 'Arm state unknown'`);
+      assert.equal(lr.ctl.files, null, `${cmd}: no file list`);
+      assert.ok(lr.fw.log.includes(cmd), `${cmd} reached the FW`);
+      assert.equal(lr.fw.log.filter((l) => l.startsWith("sd read")).length, 0, `${cmd}: zero sd reads`);
+      await lr.client.disconnect();
+    }
+    // Page level: the `status` timeout is a visible alert and no unknown note is shown.
+    const r = await rig();
+    const host = r.ctx.host as { sendCommand(c: CliCommand): Promise<string> };
+    const send = host.sendCommand;
+    let armSilence = false;
+    host.sendCommand = (cmd: CliCommand) => { if (armSilence && cmd === "status" && r.fw.log.includes("blackbox status") && r.fw.log.lastIndexOf("sd status") > r.fw.log.lastIndexOf("sd probe")) { armSilence = false; r.fw.noReplyOnce.push("status"); } return send(cmd); };
+    click("Probe card and list logs");
+    armSilence = true;
+    await expectMessage(/^Listing the card timed out \(no complete reply: CLI command timed out with empty response\)\. Try again: list the card again\. Nothing was saved\. Sent sd cancel\.$/);
+    assert.equal(armSilence, false, "the silenced reply was the controller's pre-read `status`");
+    assert.equal(byTestId("bb-download-result")?.getAttribute("role"), "alert");
+    assert.equal(shown("bb-download-arm-note"), null);
+    assert.equal(shown("bb-download-recorder-note"), null);
+    assert.equal(fileRows().length, 0);
+    assert.ok(!r.fw.log.some((l) => l.startsWith("sd read")));
+    host.sendCommand = send;
+    await r.done();
+  });
+
+  await test("Cancel while a lock re-read waits on a busy gate: the cancel text (not the busy text), sd cancel still sent once the gate frees, zero sd reads", async () => {
+    const lr = await lowRig();
+    const lsend = lr.link.sendCommand; let once = true; let heldAt = 0;
+    lr.link.sendCommand = (cmd: CliCommand) => {
+      if (once && cmd === "blackbox status") { once = false; heldAt = Date.now(); void lr.hold(2000); setTimeout(() => lr.ctl.cancel("user"), 300); }
+      return lsend(cmd);
+    };
+    assert.equal(await lr.ctl.list(), false);
+    assert.ok(heldAt > 0, "gate held at the re-read");
+    assert.equal(lr.ctl.message?.text, "Listing cancelled. Partial data was discarded. Sent sd cancel.");
+    assert.equal(lr.ctl.message?.tone, "info");
+    assert.ok(!(lr.ctl.message?.text ?? "").includes("Another command"), "busy text not shown for a user Cancel");
+    assert.equal(lr.ctl.recorderNote, null);
+    assert.equal(lr.fw.log.filter((l) => l.startsWith("sd read")).length, 0);
+    assert.equal(lr.fw.sdCommands().at(-1), "sd cancel");
+    await lr.client.disconnect();
+  });
+
+  await test("SD check running: the 2 s `status` refresh pauses (no `status` on the wire, counters marked 'last read before the SD card check'), resumes and clears after the check", async () => {
+    const r = await rig({ probeMs: 5000 });
+    assert.ok(await waitFor(() => counterRows().length === 2));
+    click("Check SD card");
+    assert.ok(await waitFor(() => /Finish the SD card check/.test(shown("bb-download-blocked") ?? ""), 2000), "SD check running");
+    assert.ok(await waitFor(() => /^Last read before the SD card check/.test(shown("bb-fc-counters-stale") ?? ""), 2000), `stale marker during the SD check: ${shown("bb-fc-counters-stale")}`);
+    await sleep(300); // a refresh already in flight when the check started may still finish
+    const m = r.mark();
+    await sleep(3500);
+    assert.ok(/Finish the SD card check/.test(shown("bb-download-blocked") ?? ""), "still checking");
+    const during = r.fw.log.slice(m);
+    assert.ok(during.includes("sd status"), `SD check polled: ${during.join(", ")}`);
+    assert.ok(!during.includes("status"), `no status refresh while the SD check runs: ${during.join(", ")}`);
+    assert.ok(await waitFor(() => shown("bb-download-blocked") === null, 6000), "SD check done");
+    const after = r.mark();
+    assert.ok(await waitFor(() => r.fw.log.slice(after).includes("status"), 5000), "status refresh resumed");
+    assert.ok(await waitFor(() => shown("bb-fc-counters-stale") === null, 5000), "marker cleared by the next good refresh");
+    await r.done();
   });
 
   await test("real gate held 3 s between sector reads: plain mid-read text, raw detail, sd cancel sent (reads went out), nothing saved; a 1 s hold is ridden out", async () => {
