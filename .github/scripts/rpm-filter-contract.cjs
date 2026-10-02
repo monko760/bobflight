@@ -1,5 +1,5 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
- * Real firmware RPM filter CLI (Kakute host build, schema 9) -> Configurator
+ * Real firmware RPM filter CLI (Kakute host build, keys from schema 9; FW now at schema 10) -> Configurator
  * RPM parsers and Filters view model, plus mock/FW reply parity. Host build:
  * proves the wire contract, the FW refusal lines kept verbatim with the value
  * unchanged, bidir DShot never enabled by the filter, and the settings kept
@@ -8,7 +8,7 @@
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {spawnSync}=require('node:child_process');
-const {RPM_FILTER_KEYS,RPM_FILTER_REPORT_FIELDS,rpmFilterReportIsExact,parseRpmGetReply,parseRpmSetReply,parseRpmFilterReport,rpmFilterView,MockRpmFilter,parseStorage,STORAGE_SCOPE_V9}=require('../../bobflight-configurator/protocol/dist');
+const {RPM_FILTER_KEYS,RPM_FILTER_REPORT_FIELDS,rpmFilterReportIsExact,parseRpmGetReply,parseRpmSetReply,parseRpmFilterReport,rpmFilterView,MockRpmFilter,parseStorage,STORAGE_SCOPE_V10}=require('../../bobflight-configurator/protocol/dist');
 const binary=process.argv[2]?path.resolve(process.argv[2]):path.resolve(__dirname,'../../bobflight-firmware/build-contract/bobflight_host');
 const PAD=' '.repeat(64);
 function run(cmds,reinit=false){
@@ -23,7 +23,7 @@ const storage=o=>parseStorage(o.slice(o.lastIndexOf('storage_api: 1'),o.lastInde
 const values=o=>Object.fromEntries(RPM_FILTER_KEYS.map(k=>[k,get(o,k).at(-1)]));
 const norm=s=>s.replace(/\r/g,'');
 
-// 1. Defaults: 0/100/500/14, report off with the exact shape, schema 9 scope, bidir off.
+// 1. Defaults: 0/100/500/14, report off with the exact shape, schema 10 scope (RPM keys kept), bidir off.
 {
  const o=run([...RPM_FILTER_KEYS.map(k=>`get ${k}`),'rpm_filter','get dshot_bidir','storage']);
  assert.deepEqual(RPM_FILTER_KEYS.map(k=>get(o,k)),[[{kind:'value',value:'0'}],[{kind:'value',value:'100'}],[{kind:'value',value:'500'}],[{kind:'value',value:'14'}]]);
@@ -36,7 +36,7 @@ const norm=s=>s.replace(/\r/g,'');
  assert.deepEqual([v.supported,v.harmonics,v.minHz,v.q,v.motorPoles,v.reason,v.active,v.bidirOff],[true,'0','100','5','14','off','no',false]);
  assert.equal(norm(raw),norm(new MockRpmFilter('off').report()),'mock off report == FW (host has no eRPM, mock off reports unavailable too)');
  assert.match(o,/^dshot_bidir=off\r?$/m);
- const st=storage(o);assert.equal(st.schema,9);assert.equal(st.scope,STORAGE_SCOPE_V9);
+ const st=storage(o);assert.equal(st.schema,10);assert.equal(st.scope,STORAGE_SCOPE_V10);assert.ok(st.scope.includes(',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,'));
 }
 // 2. Refusals verbatim, value unchanged; the mock answers the same lines.
 {
@@ -78,6 +78,6 @@ const norm=s=>s.replace(/\r/g,'');
  const rep=parseRpmFilterReport(reports(after).at(-1));
  assert.deepEqual([rep.report.sampleHz,rep.report.reason],['1000','bidir-off']);
  const v=rpmFilterView(values(after),rep);assert.deepEqual([v.q,v.minHz,v.motorPoles,v.harmonicsActive],['2.5','80','16','0']);
- const st=storage(after);assert.equal(st.schema,9);assert.equal(st.dirty,false);
+ const st=storage(after);assert.equal(st.schema,10);assert.equal(st.dirty,false);
 }
-console.log('PASS firmware rpm_filter CLI -> Configurator RPM parsers/view: defaults 0/100/500/14, every report in the frozen shape ('+RPM_FILTER_REPORT_FIELDS.length+' fields, no rpm_filter_harmonics line), refusals verbatim (== mock) with values unchanged, accepted sets re-read, bidir-off/erpm-unavailable (== mock), bidir never enabled, save + reboot keeps the settings at 1 kHz, schema 9 scope. Host build.');
+console.log('PASS firmware rpm_filter CLI -> Configurator RPM parsers/view: defaults 0/100/500/14, every report in the frozen shape ('+RPM_FILTER_REPORT_FIELDS.length+' fields, no rpm_filter_harmonics line), refusals verbatim (== mock) with values unchanged, accepted sets re-read, bidir-off/erpm-unavailable (== mock), bidir never enabled, save + reboot keeps the settings at 1 kHz, schema 10 scope. Host build.');

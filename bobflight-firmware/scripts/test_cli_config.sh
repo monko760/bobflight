@@ -100,7 +100,7 @@ need "filters_end: 1"
 need "set gyro_notch1_cutoff_hz 150"
 need "set gyro_notch1_hz 200"
 need "set gyro_notch2_cutoff_hz 400"
-need "# schema: 9"
+need "# schema: 10"
 need "gyro_notch1_reason: off"
 
 # Schema 9 RPM notch filter (host has no ESC: bidir off, no motor tracked)
@@ -113,4 +113,4 @@ need "rpm_filter_reason: bidir-off"
 need "rpm_filter_m1_hz: unavailable"
 if printf '%s\n' "$OUT" | tr -d '\r' | grep -q '^rpm_filter_harmonics: '; then echo "FAIL: rpm_filter report must not carry rpm_filter_harmonics (frozen format)"; exit 1; fi
 
-echo "PASS: CLI get/set/save/defaults (schema9 RPM filter + schema8 gyro notches + schema7 loop_rate_hz + schema6 pid_yaw_d + LPF + rates/PID + dshot R0c M1-M4) + status loop_target/actual/overruns"
+echo "PASS: CLI get/set/save/defaults (schema10 motor_direction + schema9 RPM filter + schema8 gyro notches + schema7 loop_rate_hz + schema6 pid_yaw_d + LPF + rates/PID + dshot R0c M1-M4) + status loop_target/actual/overruns"

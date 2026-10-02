@@ -179,3 +179,13 @@ export {
 export type { RpmFilterKey, RpmFilterMotor, RpmGetResult, RpmSetResult, RpmFilterReport, RpmFilterReportResult, RpmFilterView } from "./rpm-filter";
 export { MockRpmFilter, RPM_FILTER_MOCK_SCENARIOS } from "./rpm-filter-mock";
 export type { RpmFilterMockScenario } from "./rpm-filter-mock";
+
+export {
+  MOTOR_DIRECTION_KEY, MOTOR_DIRECTION_OPTIONS, MOTOR_DIRECTION_ARMED_LINE, MOTOR_DIRECTION_MOTOR_TEST_LINE, MOTOR_DIRECTION_INVALID_LINE,
+  MOTOR_DIRECTION_UNKNOWN, MOTOR_DIRECTION_COPY, MOTOR_DIRECTION_BENCH_TEST, MOTOR_DIRECTION_CLI_COMMANDS,
+  isMotorDirectionOption, isMotorDirectionCliCommand, motorDirectionSetCommand,
+  parseMotorDirectionGetReply, parseMotorDirectionSetReply, parseMixerReport, motorDirectionView,
+} from "./motor-direction";
+export type { MotorDirectionOption, MotorDirectionCliCommand, MotorDirectionGetResult, MotorDirectionSetResult, MixerReport, MotorDirectionView } from "./motor-direction";
+export { MockMotorDirection, MOTOR_DIRECTION_MOCK_SCENARIOS, MOTOR_DIRECTION_MOCK_FUTURE_TOKEN } from "./motor-direction-mock";
+export type { MotorDirectionMockScenario } from "./motor-direction-mock";

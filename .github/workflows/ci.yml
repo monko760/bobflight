@@ -107,8 +107,12 @@ jobs:
         run: node ../.github/scripts/gyro-notch-contract.cjs
       - name: Arm gate fail-closed on real firmware status (failsafe ACTIVE / gyro_ok no)
         run: node ui/scripts/test-arm-gate-real-status.cjs ../bobflight-firmware/build-contract/bobflight_host ../bobflight-firmware/build-contract-tmotor/bobflight_host
-      - name: Firmware RPM filter CLI (schema 9) to Filters tab RPM contract
+      - name: Firmware RPM filter CLI (schema 9 keys, storage schema 10) to Filters tab RPM contract
         run: node ../.github/scripts/rpm-filter-contract.cjs
+      - name: Firmware motor_direction CLI (schema 10) to Motors tab contract (Kakute + T-Motor host builds)
+        run: |
+          node ../.github/scripts/motor-direction-contract.cjs
+          node ../.github/scripts/motor-direction-contract.cjs ../bobflight-firmware/build-contract-tmotor/bobflight_host
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes
@@ -133,6 +137,10 @@ jobs:
         run: npm --prefix protocol run test:rpm-filter
       - name: RPM filter render test (Filters section per mock, Save order, refused set verbatim, Motors tab motor_poles)
         run: npm --prefix ui run test:rpm-filter-page
+      - name: motor_direction parsers, mock scenarios and schema 10 export rules
+        run: npm --prefix protocol run test:motor-direction
+      - name: Motor direction render test (Motors tab per mock, set -> get -> mixer, refused set verbatim, storage lock, bench test copy)
+        run: npm --prefix ui run test:motor-direction
       - name: Zero-output PID diagnostic CLI and framing tests
         run: npm --prefix protocol run test:pid-diagnostics
       - name: Timing protocol tests
