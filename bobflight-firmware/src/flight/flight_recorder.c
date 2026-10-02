@@ -27,6 +27,21 @@ void recorder_reset(void){
  head=tail=count=period=last_time=last_iteration=0;next_due=0;have_time=false;
  memset(&stats,0,sizeof stats);stats.queue_capacity=FLIGHT_RECORDER_QUEUE_CAPACITY;
 }
+/* Is a loop at t (>= last_time, clock established) due for next_due? A loop is
+ * due at or after the deadline, or EARLY by less than half of this loop's
+ * interval (dt): it is then nearer the deadline than the next loop, expected
+ * about dt later. Without this, a log period equal to the loop period lost a
+ * slot whenever scheduler jitter put a loop a few us before the deadline (BB1
+ * QA F2: 1000/1 at 1000 Hz logged ~799 Hz with 3,703 "missed" slots). A tie
+ * (exactly dt/2 early) waits for the on-time loop. An accepted loop is never
+ * early by period/2 or more (by induction: dt is measured from a loop at or
+ * after the last accepted one, itself early by < period/2), each acceptance
+ * advances next_due by >= one period so a slot never takes two loops, and
+ * accepted samples keep their true timestamps (nothing is re-timed). */
+static bool due(uint32_t t){
+ if((uint64_t)t>=next_due)return true;
+ return (next_due-t)*2u<(uint64_t)(t-last_time);
+}
 static bool supported(uint32_t hz){return hz==125u||hz==250u||hz==500u||hz==1000u;}
 bool recorder_start(uint32_t hz){
  if(active||count||!supported(hz))return false;
@@ -52,19 +67,21 @@ bool recorder_capture(const flight_log_sample_t *s){
  if(have_time&&(s->time_us<last_time||s->iteration<last_iteration)){
   inc(&stats.total_regressed);inc(&stats.total_dropped);return false;
  }
+ const bool first=!have_time;
+ if(!first&&!due(s->time_us)){last_time=s->time_us;last_iteration=s->iteration;inc(&stats.total_skipped);return false;}
  last_time=s->time_us;last_iteration=s->iteration;
- if(!have_time){next_due=s->time_us;have_time=true;}
- if((uint64_t)s->time_us<next_due){inc(&stats.total_skipped);return false;}
+ if(first){next_due=s->time_us;have_time=true;}
  /* Use 64-bit deadline arithmetic and O(1) catch-up. A session ending near
-  * UINT32_MAX cannot wrap this deadline into an infinite catch-up loop. */
- uint64_t missed=((uint64_t)s->time_us-next_due)/period;
+  * UINT32_MAX cannot wrap this deadline into an infinite catch-up loop. An
+  * early (in-tolerance) sample fills next_due itself: nothing was missed. */
+ uint64_t missed=(uint64_t)s->time_us>next_due?((uint64_t)s->time_us-next_due)/period:0u;
  plus(&stats.total_missed,missed);next_due+=(missed+1u)*period;
  if(count==FLIGHT_RECORDER_QUEUE_CAPACITY){inc(&stats.total_dropped);return false;}
  queue[head]=*s;queue[head].dropped=stats.total_dropped;
  head=(head+1u)%FLIGHT_RECORDER_QUEUE_CAPACITY;++count;stats.queue_depth=count;inc(&stats.total_accepted);return true;
 }
 bool recorder_skip_if_not_due(uint32_t t,uint32_t it){
- if(!active||!have_time||t<last_time||it<last_iteration||(uint64_t)t>=next_due)return false;
+ if(!active||!have_time||t<last_time||it<last_iteration||due(t))return false;
  inc(&stats.total_attempted);last_time=t;last_iteration=it;inc(&stats.total_skipped);return true;
 }
 const flight_recorder_stats_t *recorder_stats(void){return &stats;}

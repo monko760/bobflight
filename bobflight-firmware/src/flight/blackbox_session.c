@@ -114,7 +114,7 @@ void bb_session_poll(bb_session_t *s,uint64_t now){
  if(s->phase==BBS_HEADER){
   /* The header is already queued ahead of any frame in the ring. */
   if(s->stop_requested)s->phase=BBS_DRAINING;
-  else if(bb_capture_begin(s->sample_hz,now)){s->phase=BBS_RECORDING;s->reason="recording";s->window_start_us=now;}
+  else if(bb_capture_begin(s->sample_hz,now)){s->phase=BBS_RECORDING;s->reason="recording";s->window_start_us=now;s->recording_started_us=now;}
   else {fail(s,"capture-start-refused");return;}
  }
  if(s->stop_requested&&s->phase==BBS_RECORDING)s->phase=BBS_DRAINING;

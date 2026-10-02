@@ -39,6 +39,7 @@ typedef struct {
  uint8_t sector[512],packet[BB_SESSION_PACKET_BYTES];
  size_t ring_head,ring_tail,ring_count,ring_peak;
  uint64_t window_start_us;uint32_t window_lost0,window_attempted0,settle_windows;
+ uint64_t recording_started_us; /* capture start (BBS_RECORDING), for blackbox_logged_hz */
 } bb_session_t;
 bool bb_session_start(bb_session_t *s,const fatlog_io_t *io,const blackbox_metadata_t *metadata,uint64_t now);
 void bb_session_poll(bb_session_t *s,uint64_t now);

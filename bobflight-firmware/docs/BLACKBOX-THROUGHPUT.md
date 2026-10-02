@@ -64,22 +64,48 @@ Log schema 3 (`docs/BLACKBOX-FIELDS.md`) grows the typical frame from about 70.7
 | 8000/2 (4 kHz PID) | 30 µs | 80 µs | 8 µs |
 | 8000/1 (8 kHz PID) | – | 80 µs | 8 µs |
 
-For each loop configuration, the realistic card (0.8 ms busy, 0.4 ms read, 80 ms stall every 128 writes, 20 s, 20,000 clusters already used) must give: effective rate = requested, reason `default`, `dropped == 0`, `drop_pct` exactly `0.0`, frames == recorder accepted, ring peak ≤ 32 KiB and gyro slot lateness ≤ 25 µs. The one exception is described below.
+For each loop configuration, the realistic card (0.8 ms busy, 0.4 ms read, 80 ms stall every 128 writes, 20 s, 20,000 clusters already used) must give: effective rate = requested, reason `default`, `dropped == 0`, `drop_pct` exactly `0.0`, `missed == 0`, measured frames/s within 0.5 % of the requested rate, frames == recorder accepted, ring peak ≤ 32 KiB and gyro slot lateness ≤ 25 µs. The one exception is described below.
 
 Results (virtual clock, deterministic):
 
-| Requested | Loop | Frames | Dropped | Rate | B/frame | Ring peak | Gyro late max |
-|---|---|---|---|---|---|---|---|
-| 500 Hz | 1000/1 | 9,841 | **0** (0.0 %) | 500/500 default | 81.0 | 3.8 KiB | 24 µs |
-| 500 Hz | 8000/2 | 9,697 | **0** (0.0 %) | 500/500 default | 81.7 | 4.4 KiB | 14 µs |
-| 500 Hz | 8000/1 | 9,331 | **0** (0.0 %) | 500/500 default | 81.0 | 5.6 KiB | 13 µs |
-| 1000 Hz | 1000/1 | 15,980 | **0** (0.0 %) | 1000/1000 default | 80.9 | 7.6 KiB | 23 µs |
-| 1000 Hz | 8000/2 | 19,393 | **0** (0.0 %) | 1000/1000 default | 81.7 | 8.9 KiB | 14 µs |
-| 1000 Hz | 8000/1 | 10,518 | **312 (2.9 %)** | **500**/1000 auto-lowered-card-slow | 81.5 | 64 KiB (ring full) | 13 µs |
+| Requested | Loop | Frames | Dropped | Missed | Measured rate | Rate | B/frame | Ring peak | Gyro late max |
+|---|---|---|---|---|---|---|---|---|---|
+| 500 Hz | 1000/1 | 9,842 | **0** (0.0 %) | 0 | 500.1 Hz | 500/500 default | 81.0 | 3.8 KiB | 24 µs |
+| 500 Hz | 8000/2 | 9,697 | **0** (0.0 %) | 0 | 500.0 Hz | 500/500 default | 81.7 | 4.4 KiB | 14 µs |
+| 500 Hz | 8000/1 | 9,331 | **0** (0.0 %) | 0 | 500.1 Hz | 500/500 default | 80.9 | 5.6 KiB | 14 µs |
+| 1000 Hz | 1000/1 | 19,683 | **0** (0.0 %) | 0 | 1000.1 Hz | 1000/1000 default | 81.0 | 7.7 KiB | 24 µs |
+| 1000 Hz | 8000/2 | 19,393 | **0** (0.0 %) | 0 | 1000.0 Hz | 1000/1000 default | 81.7 | 8.9 KiB | 14 µs |
+| 1000 Hz | 8000/1 | 10,519 | **312 (2.9 %)** | 0 | 563.7 Hz (mixed) | **500**/1000 auto-lowered-card-slow | 81.5 | 64 KiB (ring full) | 13 µs |
+
+"Measured rate" is frames ÷ recording time (first capture to `blackbox stop`) in the model; the firmware does not report it.
 
 **8 kHz PID with 1000 Hz logging cannot reach zero drops on the realistic card in this model.** Each 125 µs slot leaves only about 25 µs of background budget after the 80 µs PID slot and the 20 µs guard. That is not enough to carry about 80 KiB/s through 80 ms card stalls. The test asserts the honest behaviour instead: exactly one halving to 500 Hz, the drops reported in `blackbox status`, and the header patched to `log_rate_hz:500 requested_hz:1000 reason:auto-lowered-card-slow`. The firmware default stays 500 Hz.
 
-**Jitter-missed slots at 1000/1 with 1000 Hz logging.** When the log period equals the PID period, a PID loop that lands a few µs before its deadline is decimated, and the following deadline is counted as `missed`. The cause is the recorder's strict deadline. The behaviour predates schema 3: the decimate-first path counts exactly as `recorder_capture()` did. In the model, 3,703 of about 19,700 slots were missed (`blackbox_missed`). They are not `dropped` and they are reported. A small early-acceptance tolerance in the recorder would fix this, but it is a separate change.
+**Jitter-missed slots at 1000/1 with 1000 Hz logging (fixed, BB1 QA F2).** The recorder anchors its logging grid at the first sample (`next_due`) and used to accept a loop only at or after the deadline. The scheduler is phase-preserving, but each PID loop starts 0–25 µs late (background quantum), so loop times jitter around the grid. When the log period equals the PID period, a loop a few µs *before* `next_due` was decimated, and the next loop, about one period later, either counted the slot as `missed` or filled it ~1 ms late, so the grid kept sitting on the jitter boundary. The model logged 15,983 frames in 20 s (~799 Hz) with 3,700 missed (QA measured 15,980 / 3,703 at a85f492) while status read 1000/1000, `drop_pct 0.0`. At 8000/2 and below the next loop is only a fraction of a log period later, so jitter cost lateness, not slots.
+
+Fix (`flight_recorder.c`, `due()`): a loop is also due when it is early by **less than half of its own loop interval**, i.e. it is the loop nearest the deadline. An exact tie waits for the on-time loop. The tolerance is always below half the log period, so one slot never takes two loops. Accepted samples keep their true timestamps (nothing is re-timed or fabricated), and an early sample fills `next_due` itself, so it counts no miss. Late samples are counted exactly as before. `recorder_skip_if_not_due()` uses the same predicate, so decimate-first counters still match `recorder_capture()`.
+
+After the fix, `blackbox_missed` counts only logging slots that had no PID loop at all, which is a real scheduler stall. Test (f) runs each loop on a fast card with a 10.5 ms foreground stall about once a second. 1000/1 @ 1000 Hz: 9 stalls → `blackbox_missed` 81 (9 per stall, 0.83 % of slots), measured 991.8 Hz, dropped 0. 8000/2 @ 1000 Hz: 85 missed. At 500 Hz: 36 / 38 / 35 missed for 1000/1, 8000/2 and 8000/1. Without stalls every loop configuration shows missed 0 and a measured rate within 0.5 % of the requested rate. `blackbox_drop_pct` is unchanged: it is still `dropped / (frames + dropped)` (frozen api 2 value, pinned by the Configurator's `formatDropPct`). Missed slots never feed the auto-rate policy (a CPU stall is not a slow card): they cannot change `blackbox_rate_hz`, `blackbox_rate_requested_hz` or `blackbox_rate_reason`.
+
+### F2 status readouts (frozen by the Config Lead)
+
+`blackbox status` stays `blackbox_api: 2`. Three lines are added, in this order, just before `blackbox_end`:
+
+| Key | Value |
+|---|---|
+| `blackbox_missed_pct` | `missed / (frames + dropped + missed) × 100`, using `blackbox_frames`, `blackbox_dropped` and `blackbox_missed`. It has exactly the format and rounding of `blackbox_drop_pct`: tenths = (missed × 1000 + T/2) / T, printed `%u.%u`. A zero denominator prints `0.0`. The value is cumulative over the current recording session. The counters reset when a recording starts, so it reads `0.0` right after `blackbox start`. |
+| `blackbox_logged_hz` | The **session average** logged rate: `blackbox_frames` ÷ time since capture started, with one decimal (e.g. `1000.1`). It is `unavailable` before 1 s of logging and whenever the session is not recording (idle, initializing, draining, done, error). Because it is an average over the whole session, a late stall barely moves it. `blackbox_missed_pct` / `blackbox_missed_state` show the stall first. |
+| `blackbox_missed_state` | `high` when `blackbox_missed_pct` > 1.00, otherwise `ok`. The FC compares the same rounded tenths it prints (high ⇔ tenths > 10), so the state never contradicts the printed value: `1.0` (an exact 1.00–1.04 %) is `ok`, and `1.1` (an exact ≥ 1.05 %) is `high`. |
+
+`blackbox_drop_pct` is unchanged. The shipped Configurator parser (origin/main `onboard.ts`) ignores unknown `blackbox_*` lines and rejects any api other than 1 or 2. That is why the api number stays 2. `.github/scripts/blackbox-missed-contract.cjs` feeds real firmware replies to that parser in CI and checks the values against these formulas.
+
+Model results (test (g)):
+- 20 s 1000/1 on the realistic card with a 10.5 ms stall every ~0.5 s: at 1000 Hz, 351 missed, `missed_pct 1.8`, `high`, mid-session `logged_hz 981.9`. At 500 Hz, 156 missed, `1.6`, `high`, `492.0`. Rate, reason and requested rate are unchanged, and 0 dropped.
+- A single 300 ms stall (1000/1 and 8000/2): 299 missed at 1000 Hz (149 at 500 Hz), `missed_pct 3.1`–`3.2`, `high`. `blackbox_rate_hz` / `blackbox_rate_requested_hz` stay at the requested rate, with `blackbox_rate_reason: default` and 0 halvings.
+- The jitter case (20 s, no stalls): `missed_pct 0.0`, `ok`, mid-session `logged_hz` within 1 % of the requested rate. The once-a-second stall runs in (f) stay `ok` at 0.7–0.9 %.
+- Drops and missed slots in one session (threshold card + stalls): the `missed_pct` denominator includes `dropped`. Only the card halving changes the rate.
+- Status boundaries (test (h), exact counts through the real `blackbox status`): 0/0 → `0.0 ok`; 1.00 % → `1.0 ok`; 1.04 % → `1.0 ok`; 1.05 % → `1.1 high`; 100 % → `100.0 high`.
+- Unit tests: `tests/host_blackbox_health.c`.
 
 Threshold cards: per loop configuration, a card that is just too slow for the requested rate must halve **exactly once**, report its drops, and get the header patched in place (12 s runs):
 
@@ -88,9 +114,9 @@ Threshold cards: per loop configuration, a card that is just too slow for the re
 | 500 Hz | 1000/1 | 15 ms | 250 Hz, 1 lowering, 103 dropped (2.3 %) |
 | 500 Hz | 8000/2 | 12 ms | 250 Hz, 1 lowering, 81 dropped (1.8 %) |
 | 500 Hz | 8000/1 | 8 ms | 250 Hz, 1 lowering, 17 dropped (0.4 %) |
-| 1000 Hz | 1000/1 | 6 ms | 500 Hz, 1 lowering, 117 dropped (1.5 %) |
+| 1000 Hz | 1000/1 | 6 ms | 500 Hz, 1 lowering, 119 dropped (1.5 %) |
 | 1000 Hz | 8000/2 | 5 ms | 500 Hz, 1 lowering, 96 dropped (1.3 %) |
-| 1000 Hz | 8000/1 | 2 ms | 500 Hz, 1 lowering, 414 dropped (6.1 %) |
+| 1000 Hz | 8000/1 | 2 ms | 500 Hz, 1 lowering, 415 dropped (6.1 %) |
 
 Card-busy sweeps (12 s) give the largest per-block busy time that still records with zero drops:
 
