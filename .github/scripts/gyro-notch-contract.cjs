@@ -2,7 +2,9 @@
  * Real firmware gyro notch CLI (Kakute host build, schema 8) -> Configurator
  * notch parsers and Filters row model. Host build: proves the wire contract,
  * the FW refusal lines kept verbatim with the value unchanged, and a saved
- * 600 Hz notch reported above-nyquist after a 1 kHz loop change + reboot. The
+ * 600 Hz notch reported above-nyquist after a 1 kHz loop change + reboot
+ * (filters_sample_hz 8000 at the default 8000/2: since safety S1 the gyro
+ * filter runs on every gyro sample). The
  * host gyro path is passthrough, so this is not a DSP or hardware test. */
 const assert=require('node:assert/strict');
 const path=require('node:path');
@@ -23,7 +25,7 @@ const get=(o,k)=>{const all=[...o.matchAll(new RegExp(`^${k}=.*$`,'gm'))];return
  const o=run([...GYRO_NOTCH_KEYS.map(k=>`get ${k}`),'filters','storage']);
  for(const k of GYRO_NOTCH_KEYS)assert.deepEqual(get(o,k),[{kind:'value',value:'0'}],k);
  const [raw]=reports(o);
- assert.deepEqual(raw.trim().split(/\r?\n/),['filters_api: 1','filters_sample_hz: 4000','gyro_notch1_active: no','gyro_notch1_reason: off','gyro_notch2_active: no','gyro_notch2_reason: off','filters_end: 1']);
+ assert.deepEqual(raw.trim().split(/\r?\n/),['filters_api: 1','filters_sample_hz: 8000','gyro_notch1_active: no','gyro_notch1_reason: off','gyro_notch2_active: no','gyro_notch2_reason: off','filters_end: 1']);
  const rep=parseFiltersReport(raw);assert.equal(rep.kind,'report');
  const row=notchRowView(1,get(o,'gyro_notch1_hz')[0],get(o,'gyro_notch1_cutoff_hz')[0],rep);
  assert.deepEqual([row.supported,row.off,row.cutoffDisabled,row.active,row.reason],[true,true,true,'no','off']);
@@ -61,7 +63,7 @@ const get=(o,k)=>{const all=[...o.matchAll(new RegExp(`^${k}=.*$`,'gm'))];return
  const o=run(['set gyro_notch2_cutoff_hz 420','set gyro_notch2_hz 600','filters','set loop_rate_hz 1000','save','reboot',PAD,
   'filters','get gyro_notch2_hz','get gyro_notch2_cutoff_hz','set gyro_notch2_hz 500','get gyro_notch2_hz','storage'],true);
  const [r0,r1]=reports(o).map(parseFiltersReport);
- assert.deepEqual(r0.report,{sampleHz:'4000',notches:{1:{active:'no',reason:'off'},2:{active:'yes',reason:'ok'}}});
+ assert.deepEqual(r0.report,{sampleHz:'8000',notches:{1:{active:'no',reason:'off'},2:{active:'yes',reason:'ok'}}});
  assert.deepEqual(r1.report,{sampleHz:'1000',notches:{1:{active:'no',reason:'off'},2:{active:'no',reason:'above-nyquist'}}});
  const after=o.slice(o.indexOf('reboot'));
  const c=get(after,'gyro_notch2_hz'),f=get(after,'gyro_notch2_cutoff_hz');

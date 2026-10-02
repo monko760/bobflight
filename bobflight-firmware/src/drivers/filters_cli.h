@@ -19,7 +19,7 @@
  *
  * Read-only `filters` report (framed):
  *   filters_api: 1
- *   filters_sample_hz: <actual gyro-filter rate = PID cadence, integer Hz>
+ *   filters_sample_hz: <actual gyro-filter rate = gyro rate, integer Hz>
  *   gyro_notch1_active: yes|no
  *   gyro_notch1_reason: off|ok|above-nyquist|invalid
  *   gyro_notch2_active: yes|no
@@ -27,14 +27,14 @@
  *   filters_end: 1
  */
 
-/* Same filter dt the PID cascade sets every cycle (loop_filter():
- * pid_process_denom / gyro_hz of the running scheduler), so a report or a
- * `set` issued before the next cascade still sees the actual rate. */
+/* Same filter dt loop_filter() sets on every gyro sample (1 / gyro_hz of
+ * the running scheduler, safety S1), so a report or a `set` issued before
+ * the next sample still sees the actual rate. */
 static void filters_sync_dt(void)
 {
     const scheduler_stats_t *st = scheduler_stats();
-    if (st && st->gyro_hz > 0u && st->pid_process_denom > 0u)
-        gyro_filter_set_dt((float)st->pid_process_denom / (float)st->gyro_hz);
+    if (st && st->gyro_hz > 0u)
+        gyro_filter_set_dt(1.f / (float)st->gyro_hz);
 }
 
 /* 1 or 2 for a notch key, 0 otherwise; *center tells centre vs cutoff. */

@@ -60,7 +60,7 @@ y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
 | `gyro_lpf_hz` | `320` | `0` = off, else `10..1000` | Matches prior hardcoded α≈0.3345 at `dt=1/4000` (`α = dt/(τ+dt)`, `τ=1/(2π·fc)` → fc≈320 Hz) |
 | `dterm_lpf_hz` | `53` | `0` = off, else `10..1000` | Matches prior D-term τ=0.003 s (`fc=1/(2π·0.003)≈53 Hz) |
 
-Gyro LPF `dt` comes from the scheduler PID cadence (`pid_process_denom / gyro_hz`, default 2/8000 → 1/4000). D-term LPF uses the live `pid_set_dt` period (default `1/4000`).
+Gyro LPF `dt` is the gyro sample period (`1 / gyro_hz`, default 1/8000): since safety S1 `loop_filter` runs on every gyro sample, not only on PID cycles. D-term LPF uses the live `pid_set_dt` period (default `1/4000`); on 8 kHz-ODR gyros (Kakute at `loop_rate_hz` 4000/8000) it is two first-order stages, still -3 dB at `dterm_lpf_hz`. Mixer desaturation, I-term freeze and the upgrade note: `docs/SAFETY-NOISE.md`.
 
 Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 6, 188 bytes; 176–179 `gyro_lpf_hz`, 180–183 `dterm_lpf_hz`, 184–187 `pid_yaw_d`).
 

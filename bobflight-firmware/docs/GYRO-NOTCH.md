@@ -23,6 +23,9 @@ cutoff before the centre so a replayed export always passes the pair rule.
 * A nonzero centre must be below 0.45 × the **running** gyro-filter rate
   (`set failed: gyro_notchN_hz must be below 450 Hz at the running 1000 Hz loop rate`).
   The check uses the rate that is running now, not a pending `loop_rate_hz`.
+  Since safety S1 the gyro filter runs on every gyro sample, so this rate is
+  the gyro rate (8000 on the default Kakute 8000/2 profile, was 4000); see
+  `docs/SAFETY-NOISE.md`.
 * A refused `set` changes nothing. `set` is refused while armed.
 
 ### Runtime guard

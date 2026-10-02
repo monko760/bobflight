@@ -1,7 +1,8 @@
 /* Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
- * Real scheduler driving the real task bodies: the soft gyro LPF and PID use
- * the running loop rate (8000/2 -> 250 us), never a fixed 1 kHz constant.
+ * Real scheduler driving the real task bodies: the PID uses the running loop
+ * rate (8000/2 -> 250 us) and the soft gyro LPF runs on every gyro sample at
+ * the gyro period (8000/2 -> 125 us, safety S1), never a fixed constant.
  * Deterministic clock and mock outputs; not a hardware timing claim. */
 #include "sched/tasks.h"
 #include "sched/scheduler.h"
@@ -57,11 +58,13 @@ void gyro_filter_set_dt(float dt){filter_dt=dt;filter_sets++;}
 static bool near(float a,float b){return fabsf(a-b)<1e-9f;}
 static void run_until(uint64_t end){while(now<end){scheduler_run();if(now<end)now++;}}
 static int check_rate(uint32_t gyro_hz,uint32_t denom,float want_dt){
+ const float want_filter_dt=1.f/(float)gyro_hz;unsigned long runs0;
  arm=ARM_DISARMED;rc[3]=0;rc[4]=0;now=1000;scheduler_init(gyro_hz,denom);
  run_until(now+20000);                      /* disarmed: witness low arm input */
- arm=ARM_ARMED;rc[4]=1;rc[3]=0.4f;updates=sets=filter_sets=0;
+ arm=ARM_ARMED;rc[4]=1;rc[3]=0.4f;updates=sets=filter_sets=0;runs0=scheduler_stats()->gyro_runs;
  run_until(now+200000);
- CHECK(filter_sets>0&&near(filter_dt,want_dt));
+ /* S1: one filter update per gyro sample (not per PID cycle), at 1/gyro_hz. */
+ CHECK(filter_sets==scheduler_stats()->gyro_runs-runs0&&near(filter_dt,want_filter_dt));
  CHECK(updates>0&&sets==updates&&near(measured_dt,want_dt));
  return 0;
 }
@@ -73,7 +76,7 @@ int main(void){
  /* Runtime rate change: the next PID cycles follow the new period. */
  if(check_rate(8000,2,250e-6f))return 1;
  scheduler_set_rate(4000,2);updates=sets=0;run_until(now+100000);
- CHECK(near(filter_dt,500e-6f)&&updates>0&&near(measured_dt,500e-6f));
- puts("PASS loop dt: real tasks under real scheduler use 250 us (8000/2), 500 us (4000/2), 1 ms (1000/1) for gyro LPF and PID, and follow runtime rate changes");
+ CHECK(near(filter_dt,250e-6f)&&updates>0&&near(measured_dt,500e-6f));
+ puts("PASS loop dt: real tasks under real scheduler use PID dt 250 us (8000/2), 500 us (4000/2), 1 ms (1000/1); the gyro LPF runs on every gyro sample at 125/250/1000 us; both follow runtime rate changes");
  return 0;
 }

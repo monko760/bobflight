@@ -97,6 +97,8 @@ jobs:
           node ../.github/scripts/loop-status-contract.cjs
       - name: Firmware gyro notch CLI (schema 8) to Filters tab notch contract
         run: node ../.github/scripts/gyro-notch-contract.cjs
+      - name: Arm gate fail-closed on real firmware status (failsafe ACTIVE / gyro_ok no)
+        run: node ui/scripts/test-arm-gate-real-status.cjs ../bobflight-firmware/build-contract/bobflight_host ../bobflight-firmware/build-contract-tmotor/bobflight_host
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
       - name: Live receiver switch identification in Modes

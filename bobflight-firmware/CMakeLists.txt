@@ -234,6 +234,25 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mixer_idle_test src/flight/mixer.c src/flight/config.c tests/host_mixer_idle.c)
   target_link_libraries(bobflight_mixer_idle_test m)
   add_test(NAME mixer_idle COMMAND bobflight_mixer_idle_test)
+  # Safety S1 (docs/SAFETY-NOISE.md): PID anti-windup + D-term order unit test,
+  # and HF-noise rectification through the real scheduler/PID/mixer/filters.
+  add_executable(bobflight_pid_s1_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_pid_s1.c)
+  target_link_libraries(bobflight_pid_s1_test m)
+  add_test(NAME pid_s1_antiwindup_dterm COMMAND bobflight_pid_s1_test)
+  add_executable(bobflight_noise_saturation_test
+    tests/host_noise_saturation.c
+    src/sched/scheduler.c src/sched/tasks.c
+    src/drivers/rx.c src/drivers/crsf.c src/drivers/dshot.c
+    src/flight/arming.c src/flight/failsafe.c src/flight/attitude.c
+    src/flight/config.c src/flight/pid.c src/flight/filter.c src/flight/rates.c
+    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c)
+  target_compile_definitions(bobflight_noise_saturation_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_noise_saturation_test m)
+  add_test(NAME noise_saturation COMMAND bobflight_noise_saturation_test --table)
+  set_tests_properties(noise_saturation PROPERTIES TIMEOUT 120)
+  # Report contract: status/filters/loop_rate/receiver keys and order equal b77b845.
+  add_test(NAME report_keys_contract COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_report_keys_contract.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   add_executable(bobflight_legacy_p54_migration_test tests/host_legacy_p54_migration.c src/sched/loop_rate_setting.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
   target_link_libraries(bobflight_legacy_p54_migration_test m)
   add_test(NAME legacy_p54_migration COMMAND bobflight_legacy_p54_migration_test)
