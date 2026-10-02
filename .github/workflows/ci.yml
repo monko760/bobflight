@@ -90,6 +90,8 @@ jobs:
         run: node ../.github/scripts/pid-diagnostics-contract.cjs
       - name: Firmware to configurator Blackbox status api 2 (SD throughput model)
         run: node ../.github/scripts/blackbox-status-contract.cjs
+      - name: Firmware F2 missed-slot readouts with the shipped (origin/main) Configurator parser
+        run: node ../.github/scripts/blackbox-missed-contract.cjs
       - name: Firmware status loop keys and loop_rate_hz setting to Setup loop-rate contract
         run: |
           cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract-tmotor -DBOBFLIGHT_BOARD=tmotor_f7_v2

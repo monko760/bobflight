@@ -6,6 +6,7 @@
 #if defined(BOBFLIGHT_MCU)
 #include "flight/blackbox_session.h"
 #include "flight/blackbox_capture.h"
+#include "flight/blackbox_health.h"
 #include "sched/scheduler.h"
 #include "board/board.h"
 /* Configured/default logging rate. The effective rate may be lower after the
@@ -63,17 +64,27 @@ static void blackbox_cli_poll(void){
 static void bbl_status(void){
  const flight_recorder_stats_t *s=recorder_stats();char out[1024];
  /* api 2: all api-1 keys keep their names/order; new keys precede blackbox_end.
-  * blackbox_rate_hz is the effective rate (no longer a hardcoded 500). */
+  * blackbox_rate_hz is the effective rate (no longer a hardcoded 500).
+  * F2 (frozen): missed_pct, logged_hz and missed_state are appended just
+  * before blackbox_end; the shipped api 2 parser ignores unknown keys. */
  bool ran=bbl.phase!=BBS_IDLE&&bbl.sample_hz;
  uint32_t requested=ran&&bbl.requested_hz?bbl.requested_hz:BLACKBOX_RATE_DEFAULT_HZ;
  uint32_t effective=ran?bbl.sample_hz:requested;
  const char *rate_reason=ran&&bbl.rate_reason?bbl.rate_reason:BB_RATE_REASON_DEFAULT;
  uint64_t frames=bbl.frames,dropped=s->total_dropped,total=frames+dropped;
  unsigned long tenths=total?(unsigned long)((dropped*1000u+total/2u)/total):0ul;
- snprintf(out,sizeof out,"blackbox_api: 2\r\nblackbox_state: %s\r\nblackbox_reason: %s\r\nblackbox_file: %s\r\nblackbox_bytes: %llu\r\nblackbox_frames: %lu\r\nblackbox_rate_hz: %lu\r\nblackbox_dropped: %lu\r\nblackbox_missed: %lu\r\nblackbox_invalid: %lu\r\nblackbox_queue: %lu\r\nblackbox_active: %u\r\nblackbox_rate_requested_hz: %lu\r\nblackbox_rate_reason: %s\r\nblackbox_drop_pct: %lu.%lu\r\nblackbox_end: 1\r\n",
+ /* F2 readouts (frozen; additive, api stays 2): blackbox_health.h. Cumulative
+  * over the current session: the recorder counters and bbl reset at start. */
+ const uint32_t missed_tenths=bb_pct_tenths(s->total_missed,total+s->total_missed);
+ const bool recording=bbl.phase==BBS_RECORDING&&recorder_active();uint64_t now=hal_micros();
+ uint32_t hz_tenths=0;char logged_hz[16]="unavailable";
+ if(bb_logged_hz_tenths(recording,bbl.frames,recording&&now>bbl.recording_started_us?now-bbl.recording_started_us:0u,&hz_tenths))
+  snprintf(logged_hz,sizeof logged_hz,"%lu.%lu",(unsigned long)(hz_tenths/10u),(unsigned long)(hz_tenths%10u));
+ snprintf(out,sizeof out,"blackbox_api: 2\r\nblackbox_state: %s\r\nblackbox_reason: %s\r\nblackbox_file: %s\r\nblackbox_bytes: %llu\r\nblackbox_frames: %lu\r\nblackbox_rate_hz: %lu\r\nblackbox_dropped: %lu\r\nblackbox_missed: %lu\r\nblackbox_invalid: %lu\r\nblackbox_queue: %lu\r\nblackbox_active: %u\r\nblackbox_rate_requested_hz: %lu\r\nblackbox_rate_reason: %s\r\nblackbox_drop_pct: %lu.%lu\r\nblackbox_missed_pct: %lu.%lu\r\nblackbox_logged_hz: %s\r\nblackbox_missed_state: %s\r\nblackbox_end: 1\r\n",
  bbl_initializing?"initializing":bb_session_name(&bbl),bbl.reason?bbl.reason:"not-started",bbl.file.filename,
  (unsigned long long)bbl.file.bytes_written,(unsigned long)bbl.frames,(unsigned long)effective,(unsigned long)s->total_dropped,(unsigned long)s->total_missed,(unsigned long)s->total_invalid,(unsigned long)s->queue_depth,blackbox_cli_busy()?1:0,
- (unsigned long)requested,rate_reason,tenths/10ul,tenths%10ul);
+ (unsigned long)requested,rate_reason,tenths/10ul,tenths%10ul,
+ (unsigned long)(missed_tenths/10u),(unsigned long)(missed_tenths%10u),logged_hz,bb_missed_high(missed_tenths)?"high":"ok");
  cli_write_str(out);
 }
 static bool cmd_blackbox(const char *line){
