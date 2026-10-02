@@ -1,4 +1,18 @@
 /* SPDX-License-Identifier: Apache-2.0
+ * Schema 10 (S4, tentative number): schema9 bytes0..223, reserved zero
+ * 224..227, motor_direction u32 LE 228..231 (0 props-out, 1 props-in), reserved
+ * zero 232..255 (256 bytes: the commit block at HEADER+256 stays 32-byte
+ * aligned). Every older schema migrates to props-out (the yaw signs the mixer
+ * used before this setting) and stays dirty until Save. The migration is keyed
+ * on MOTOR_DIRECTION_SCHEMA and writes props-out explicitly, so it stays correct
+ * if G1 (gyro_rate_hz at 224..227, also numbered schema 10, same 256-byte shape
+ * with 228..255 reserved zero) lands first and this becomes schema 11: a G1
+ * schema 10 record then also migrates to props-out (docs/MOTOR-DIRECTION.md).
+ * Schema 9: schema8 bytes0..207 plus the RPM notch filter, LE floats holding
+ * whole numbers: rpm_filter_harmonics 208..211 (0..3), rpm_filter_min_hz
+ * 212..215 (50..200), rpm_filter_q_x100 216..219 (100..1000), motor_poles
+ * 220..223 (even 4..36) (224 bytes). Older schemas migrate to the defaults
+ * 0/100/500/14 (filter off) and stay dirty until Save.
  * Schema 8: schema7 bytes0..191 plus manual gyro notches, LE floats:
  * gyro_notch1_hz 192..195, gyro_notch1_cutoff_hz 196..199, gyro_notch2_hz
  * 200..203, gyro_notch2_cutoff_hz 204..207 (208 bytes). Older schemas migrate
@@ -39,7 +53,11 @@
 #include <float.h>
 
 #define BASE_BYTES 96u
-#define PAYLOAD_BYTES 208u
+#define PAYLOAD_BYTES 256u
+#define PERSIST_SCHEMA 10u
+/* First schema that stores motor_direction; 11 if G1 (gyro_rate_hz) lands first. */
+#define MOTOR_DIRECTION_SCHEMA 10u
+#define MOTOR_DIRECTION_OFFSET 228u
 _Static_assert(MODE_COUNT == 2 || MODE_COUNT == 4, "Update persistence schema for new mode model");
 _Static_assert(sizeof(float)==4 && FLT_RADIX==2 && FLT_MANT_DIG==24, "binary32 config required");
 static const char *keys[12]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo",
@@ -101,7 +119,18 @@ static bool flight_idle_valid(const uint8_t *p){
  if(!config_gyro_notch_pair_valid(getfloat(p+192),getfloat(p+196))||!config_gyro_notch_pair_valid(getfloat(p+200),getfloat(p+204)))return false;
  return true;
 }
-static bool extras_valid(const uint8_t *p){power_config_t c=power_decode(p);return power_config_valid(&c)&&(get32(p+156)==300||get32(p+156)==600)&&flight_idle_valid(p);}
+static bool rpm_valid(const uint8_t *p){
+ static const char *const rk[4]={"rpm_filter_harmonics","rpm_filter_min_hz","rpm_filter_q_x100","motor_poles"};
+ for(unsigned i=0;i<4;i++)if(!config_rpm_value_valid(rk[i],getfloat(p+208+i*4)))return false;
+ return true;
+}
+static bool motor_direction_valid(const uint8_t *p){
+ const uint32_t d=get32(p+MOTOR_DIRECTION_OFFSET);
+ if(d!=MOTOR_DIRECTION_PROPS_OUT&&d!=MOTOR_DIRECTION_PROPS_IN)return false;
+ for(unsigned i=224;i<PAYLOAD_BYTES;i++)if((i<MOTOR_DIRECTION_OFFSET||i>=MOTOR_DIRECTION_OFFSET+4u)&&p[i])return false; /* reserved */
+ return true;
+}
+static bool extras_valid(const uint8_t *p){power_config_t c=power_decode(p);return power_config_valid(&c)&&(get32(p+156)==300||get32(p+156)==600)&&flight_idle_valid(p)&&rpm_valid(p)&&motor_direction_valid(p);}
 static bool encode(uint8_t p[PAYLOAD_BYTES]){
  const board_t *b=board_get();if(!b)return false;memset(p,0,PAYLOAD_BYTES);
  for(unsigned i=0;i<12;i++){float v;uint32_t bits;if(!config_get_key(keys[i],&v))return false;memcpy(&bits,&v,4);put32(p+i*4,bits);}
@@ -126,6 +155,9 @@ static bool encode(uint8_t p[PAYLOAD_BYTES]){
  put32(p+188,loop_rate_setting_get());
  {static const char *const nk[4]={"gyro_notch1_hz","gyro_notch1_cutoff_hz","gyro_notch2_hz","gyro_notch2_cutoff_hz"};
   for(unsigned i=0;i<4;i++){float n;if(!config_get_key(nk[i],&n))return false;putfloat(p+192+i*4,n);}}
+ {static const char *const rk[4]={"rpm_filter_harmonics","rpm_filter_min_hz","rpm_filter_q_x100","motor_poles"};
+  for(unsigned i=0;i<4;i++){float r;if(!config_get_key(rk[i],&r))return false;putfloat(p+208+i*4,r);}}
+ put32(p+MOTOR_DIRECTION_OFFSET,(uint32_t)config_motor_direction());
  float values[12];mode_config_t modes[MODE_COUNT];return decode(p,values,modes)&&accel_decode_valid(p)&&extras_valid(p);
 }
 static const char *store_error(config_store_result_t r){switch(r){case CONFIG_STORE_EMPTY:return "empty";case CONFIG_STORE_UNSUPPORTED:return "unsupported";case CONFIG_STORE_INVALID:return "invalid_record";case CONFIG_STORE_IO_ERROR:return "storage_io";default:return "none";}}
@@ -138,7 +170,7 @@ static bool safe_to_change(void){
 void persist_init(void){config_init();loop_rate_setting_defaults();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;migration_pending=false;last_error="none";memset(saved,0,sizeof(saved));}
 bool persist_load(void){
  if(!safe_to_change())return false;
- uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v8(board_tag(),p,sizeof(p));
+ uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v10(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);load_error=r!=CONFIG_STORE_EMPTY&&r!=CONFIG_STORE_UNSUPPORTED;return false;}
  if(config_store_loaded_schema()<3){const power_config_t defaults={11.f,0.f,0.f,0,3.5f,3.3f,0};power_encode(p,&defaults,300);}
  if(config_store_loaded_schema()<4){putfloat(p+160,0.05f);p[164]=0;for(unsigned i=165;i<176;i++)p[i]=0;}
@@ -146,6 +178,9 @@ bool persist_load(void){
  if(config_store_loaded_schema()<6){putfloat(p+184,0.00005f);}
  if(config_store_loaded_schema()<7){put32(p+188,loop_rate_setting_default_hz());}
  if(config_store_loaded_schema()<8){for(unsigned i=192;i<208;i+=4)putfloat(p+i,0.f);}
+ if(config_store_loaded_schema()<9){putfloat(p+208,0.f);putfloat(p+212,100.f);putfloat(p+216,500.f);putfloat(p+220,14.f);}
+ /* S4: any older record keeps today's mixer yaw signs (props-out), written explicitly. */
+ if(config_store_loaded_schema()<MOTOR_DIRECTION_SCHEMA){put32(p+MOTOR_DIRECTION_OFFSET,MOTOR_DIRECTION_PROPS_OUT);}
  float values[12];mode_config_t modes[MODE_COUNT];if(!decode(p,values,modes)||!accel_decode_valid(p)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
  /* Reject unsupported control selection before mutating other settings */
  if(p[55]!=CONTROL_MODE_ANGLE&&p[55]!=CONTROL_MODE_ACRO&&p[55]!=CONTROL_MODE_HORIZON){last_error="invalid_settings";load_error=true;return false;}
@@ -163,6 +198,11 @@ bool persist_load(void){
  (void)loop_rate_setting_set(get32(p+188));
  (void)config_set_gyro_notch(1,getfloat(p+192),getfloat(p+196));
  (void)config_set_gyro_notch(2,getfloat(p+200),getfloat(p+204));
+ (void)config_set_key("rpm_filter_harmonics",getfloat(p+208));
+ (void)config_set_key("rpm_filter_min_hz",getfloat(p+212));
+ (void)config_set_key("rpm_filter_q_x100",getfloat(p+216));
+ (void)config_set_key("motor_poles",getfloat(p+220));
+ (void)config_set_motor_direction((motor_direction_t)get32(p+MOTOR_DIRECTION_OFFSET));
  (void)crsf_set_map(p[52]?"TAER":"AETR");
  for(unsigned i=0;i<MODE_COUNT;i++)(void)mode_range_set((mode_id_t)i,modes[i].enabled,modes[i].aux_channel,modes[i].min_us,modes[i].max_us);
  if(!control_mode_set((control_mode_t)p[55])){last_error="control_mode_failed";load_error=true;return false;}
@@ -178,7 +218,7 @@ bool persist_load(void){
  }
 #endif
  {float bias[3]={0},scale[3]={1,1,1};if(p[96])accel_values(p,bias,scale);gyro_restore_accel_calibration(bias,scale,p[96]!=0);}
- migration_pending=config_store_loaded_schema()!=8||legacy_aux_migrated;
+ migration_pending=config_store_loaded_schema()!=PERSIST_SCHEMA||legacy_aux_migrated;
  failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;
  if(legacy_aux_migrated){
   last_error="migrated_control_source_manual";
@@ -190,9 +230,9 @@ bool persist_load(void){
 bool persist_save(void){
  if(!safe_to_change())return false;
  uint8_t p[PAYLOAD_BYTES];if(!encode(p)){last_error="invalid_settings";return false;}
- config_store_result_t r=config_store_save_v8(board_tag(),p,sizeof(p));
+ config_store_result_t r=config_store_save_v10(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);return false;}
- uint8_t check[PAYLOAD_BYTES];r=config_store_load_v8(board_tag(),check,sizeof(check));
+ uint8_t check[PAYLOAD_BYTES];r=config_store_load_v10(board_tag(),check,sizeof(check));
  if(r!=CONFIG_STORE_OK||memcmp(p,check,sizeof(p))){last_error="verify_failed";return false;}
  memcpy(saved,p,sizeof(saved));have_saved=true;migration_pending=false;load_error=false;last_error="none";return true;
 }

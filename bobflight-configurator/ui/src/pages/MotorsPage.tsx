@@ -6,9 +6,14 @@ import { BenchController, benchBlockReason, MOTOR_POSITIONS, MAX_PULSE_PERCENT, 
 import { storageBlocked } from "../motors/motorsStorage";
 
 import { browserPoleStorage, readMotorPoles, storeMotorPoles, validMotorPoles } from "../motors/motorPoles";
+import { MotorPolesPanel } from "../motors/MotorPolesPanel";
+import { MotorDirectionPanel } from "../motors/MotorDirectionPanel";
+import { motorDirectionLockReason } from "../motors/motorDirectionLock";
 
 export function MotorsPage() {
-  const { host, postFlashGate } = useHost();
+  const { host, postFlashGate, connectionStatus, version } = useHost();
+  /** StoragePanel save / refresh / export pending (lifted out for the motor_direction lock; never fed back into StoragePanel `blocked`). */
+  const [storagePending, setStoragePending] = useState(false);
   const [poleCount, setPoleCount] = useState(() => readMotorPoles(browserPoleStorage()));
   const [poleDraft, setPoleDraft] = useState(() => String(poleCount));
   const [poleMessage, setPoleMessage] = useState("");
@@ -55,7 +60,7 @@ export function MotorsPage() {
   const readiness = state.status?.motor_output && / ready$/.test(state.status.motor_output) ? "Ready (driver reports)" : "Unavailable / unknown";
   const rate = state.rate ? `DShot${state.rate}` : "Unknown";
   return <section className="panel motor-bench" aria-labelledby="motor-title">
-    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={storageBlocked(state)}/>
+    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={storageBlocked(state)} onPending={setStoragePending}/>
     <div className="motor-heading">
       <div><p className="motor-eyebrow">PROPS-OFF WORKBENCH</p><h2 id="motor-title">Motor tests</h2><p className="muted">Verify wiring and rotation, one motor at a time. These controls do not arm the aircraft.</p></div>
       <button className="danger motor-stop" disabled={!state.connected} onClick={() => void controller.stop()}>{state.stopping ? "Stop requested…" : "Stop all motor tests"}</button>
@@ -94,7 +99,7 @@ export function MotorsPage() {
             : <button disabled={disabled || !capability?.individual} onClick={() => void controller.start(motor)}>Test M{motor} · fixed 8% · 1s</button>}
           <span className="muted">Changing the slider does not spin the motor.</span>
         </div>)}
-        <div className="motor-map-caption">Expected wiring layout—not detected motor positions. Observe CW / CCW yourself; no direction reversal command is provided.</div>
+        <div className="motor-map-caption">Expected wiring layout—not detected motor positions. Observe CW / CCW yourself; no ESC direction reversal command is provided (Motor direction only tells the mixer which way the props spin).</div>
       </div>
       <div className="motor-options">
         <section className="motor-option-panel"><h3>DShot bit rate</h3>
@@ -103,16 +108,28 @@ export function MotorsPage() {
           <p className="muted">Choose only a rate your ESC supports. Changes are read back from the controller then retained after reboot with Save to controller. Motors must be stationary before switching.</p>
           {capability && !capability.dshot && <p className="banner-warn">Rate selection is unavailable on this firmware. No rate is assumed.</p>}
         </section>
-        <section className="motor-option-panel"><h3>Motor pole count</h3>
-          <label htmlFor="motor-poles">Magnetic poles · all four motors</label>
-          <div className="row"><input id="motor-poles" type="number" min="2" max="60" step="2" value={poleDraft}
-            onChange={e => setPoleDraft(e.target.value)} aria-invalid={!validMotorPoles(Number(poleDraft))} />
-            <button disabled={!validMotorPoles(Number(poleDraft))} onClick={savePoles}>Save pole count</button></div>
-          <p>Current: <strong>{poleCount} poles · {poleCount / 2} pole pairs</strong></p>
-          {!validMotorPoles(Number(poleDraft)) && <p className="banner-warn">Enter an even whole number from 2 to 60.</p>}
-          <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
-          {poleMessage && <p role="status">{poleMessage}</p>}
-        </section>
+        <MotorPolesPanel host={host} blocked={storageBlocked(state) || postFlashGate} fallback={
+          <section className="motor-option-panel"><h3>Motor pole count</h3>
+            <label htmlFor="motor-poles">Magnetic poles · all four motors</label>
+            <div className="row"><input id="motor-poles" type="number" min="2" max="60" step="2" value={poleDraft}
+              onChange={e => setPoleDraft(e.target.value)} aria-invalid={!validMotorPoles(Number(poleDraft))} />
+              <button disabled={!validMotorPoles(Number(poleDraft))} onClick={savePoles}>Save pole count</button></div>
+            <p>Current: <strong>{poleCount} poles · {poleCount / 2} pole pairs</strong></p>
+            {!validMotorPoles(Number(poleDraft)) && <p className="banner-warn">Enter an even whole number from 2 to 60.</p>}
+            <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This firmware has no <code>motor_poles</code> setting, so the preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
+            {poleMessage && <p role="status">{poleMessage}</p>}
+          </section>
+        } />
+        <MotorDirectionPanel host={host}
+          ready={connectionStatus === "connected" && version !== null}
+          lock={motorDirectionLockReason({
+            connected: connectionStatus === "connected" && state.connected,
+            postFlashGate,
+            arm: state.status?.arm,
+            motorTestRunning: !!state.testLabel && now < state.estimatedUntil,
+            storageBlocked: storageBlocked(state),
+            storagePending,
+          })} />
         <section className="motor-option-panel"><h3>eRPM & bidirectional DShot</h3>
           <p><strong>M1–M4 eRPM telemetry (R0c).</strong> When bidirectional DShot is enabled on the controller and a motor's telem is OK, that cell shows live electrical RPM. Otherwise the cell stays unavailable (<code>erpm_mN=none</code>) — never an invented zero.</p>
           <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Poll <code>get erpm_m1</code>…<code>m4</code> and <code>get dshot_telem_mN</code> only.</p>

@@ -7,6 +7,7 @@
 #include "drivers/gyro.h"
 #include "board/board.h"
 #include "flight/arming.h"
+#include "flight/config.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -127,6 +128,37 @@ int main(void)
         return fail("gyro_init must clear inject");
     }
 
-    puts("PASS: gyro host inject dps");
+    /* BB1 QA M23: the Blackbox filter-flags snapshot (real gyro.c, no stub) says a notch runs only when its
+     * reason is "ok": a configured notch that is above Nyquist at the filter rate, or off, is not running. */
+    if (gyro_notch_active_snapshot(1u) || gyro_notch_active_snapshot(2u)) {
+        return fail("no notch running before any notch is set");
+    }
+    gyro_filter_set_dt(0.001f); /* 1 kHz filter rate: Nyquist margin 450 Hz */
+    if (!config_set_gyro_notch(1u, 200.f, 150.f) || !config_set_gyro_notch(2u, 900.f, 800.f)) {
+        return fail("notch settings rejected");
+    }
+    bool active = false;
+    const char *reason = NULL;
+    if (!gyro_notch_status(1u, &active, &reason) || !active || strcmp(reason, "ok") != 0 ||
+        !gyro_notch_active_snapshot(1u)) {
+        return fail("notch 1 (200 Hz) must run and the snapshot must say so");
+    }
+    if (!gyro_notch_status(2u, &active, &reason) || active || strcmp(reason, "above-nyquist") != 0 ||
+        gyro_notch_active_snapshot(2u)) {
+        return fail("notch 2 (900 Hz at 1 kHz) is configured but above Nyquist: snapshot must be false");
+    }
+    if (gyro_notch_active_snapshot(0u) || gyro_notch_active_snapshot(3u)) {
+        return fail("snapshot index out of range");
+    }
+    gyro_filter_set_dt(0.00025f); /* 4 kHz: 900 Hz is valid again */
+    if (!gyro_notch_status(2u, &active, &reason) || !active || !gyro_notch_active_snapshot(2u)) {
+        return fail("notch 2 must run at 4 kHz");
+    }
+    if (!config_set_gyro_notch(1u, 0.f, 0.f) || !gyro_notch_status(1u, &active, &reason) || active ||
+        strcmp(reason, "off") != 0 || gyro_notch_active_snapshot(1u)) {
+        return fail("notch 1 off: snapshot must be false");
+    }
+
+    puts("PASS: gyro host inject dps; Blackbox notch snapshot follows the notch reason (ok / above-nyquist / off)");
     return 0;
 }

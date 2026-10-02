@@ -22,6 +22,12 @@ import {
   isGyroNotchKey,
   isGyroNotchCliCommand,
   type GyroNotchMockScenario,
+  MockRpmFilter,
+  isRpmFilterKey,
+  isRpmFilterCliCommand,
+  type RpmFilterMockScenario,
+  MockMotorDirection,
+  type MotorDirectionMockScenario,
   type LoopRateMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
@@ -83,8 +89,19 @@ export class MockBobFlightHost implements BobFlightHost {
   /** Manual gyro notches (schema 8; same wire as protocol MockSerial). */
   private readonly gyroNotch: MockGyroNotch;
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; gyroHealthScenario?: GyroHealthMockScenario }) {
+  /** RPM notch filter (schema 9; same wire as protocol MockSerial). Its bidir state IS dshotBidir. */
+  private readonly rpmFilter: MockRpmFilter;
+  /** RPM scenario given by the test/demo (seeds dshotBidir on connect); undefined = loop-rate default. */
+  private rpmFilterScenario: RpmFilterMockScenario | undefined;
+
+  /** motor_direction + `mixer` (schema 10; same wire as protocol MockSerial). A running bench test refuses sets. */
+  private readonly motorDirection: MockMotorDirection;
+
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; gyroHealthScenario?: GyroHealthMockScenario }) {
+    this.motorDirection = new MockMotorDirection(opts?.motorDirectionScenario ?? "props-out");
     this.gyroNotch = new MockGyroNotch(opts?.gyroNotchScenario ?? "off");
+    this.rpmFilter = new MockRpmFilter(opts?.rpmFilterScenario ?? "off", () => this.dshotBidir);
+    this.rpmFilterScenario = opts?.rpmFilterScenario;
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
     this.gyroHealthy = opts?.gyroHealthy ?? false;
     this.loopRateScenario = opts?.loopRateScenario ?? "missing";
@@ -160,6 +177,7 @@ export class MockBobFlightHost implements BobFlightHost {
     this.lastError = null;
     this.armed = false;
     this.dshotBidir = mockLoopRateBidir(this.loopRateScenario); // RAM-only; bidir scenarios start on
+    if (this.rpmFilterScenario !== undefined) this.dshotBidir = MockRpmFilter.scenarioBidir(this.rpmFilterScenario);
     this.bench.reset();
     this.setStatus("connecting");
     await delay(this.connectDelayMs);
@@ -184,7 +202,7 @@ export class MockBobFlightHost implements BobFlightHost {
 
   async sendCommand(cmd: CliCommand): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100)|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd) && !/^(get erpm_m[1-4]|get dshot_telem_m[1-4]|get dshot_bidir|set dshot_bidir (?:on|off))$/.test(cmd) && !isGyroNotchCliCommand(cmd)) {
+    if (!isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !ALLOWED_CLI_COMMANDS.includes(cmd) && !/^(receiver|receiver_map (?:AETR|TAER)|receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100)|motor_seq|dshot(?: (?:300|600))?)$/.test(cmd) && !/^(get erpm_m[1-4]|get dshot_telem_m[1-4]|get dshot_bidir|set dshot_bidir (?:on|off))$/.test(cmd) && !isGyroNotchCliCommand(cmd) && !isRpmFilterCliCommand(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     if (this.status !== "connected") {
@@ -219,6 +237,12 @@ export class MockBobFlightHost implements BobFlightHost {
     if (!(SETTINGS_KEYS as readonly string[]).includes(key)) {
       throw new Error("unknown key");
     }
+    if (isRpmFilterKey(key)) {
+      const reply = this.rpmFilter.handle(`get ${key}`, this.armed)!.trim();
+      const idx = reply.indexOf("=");
+      if (idx <= 0) throw new Error(reply);
+      return { key, value: reply.slice(idx + 1) };
+    }
     if (isGyroNotchKey(key)) {
       const reply = this.gyroNotch.handle(`get ${key}`, this.armed)!.trim();
       const idx = reply.indexOf("=");
@@ -235,6 +259,13 @@ export class MockBobFlightHost implements BobFlightHost {
     this.requireConnected();
     if (!(SETTINGS_KEYS as readonly string[]).includes(key)) {
       throw new Error("unknown key");
+    }
+    if (isRpmFilterKey(key)) {
+      // FW-identical reply; refusals surface the FW line verbatim.
+      const reply = this.rpmFilter.handle(`set ${key} ${value}`, this.armed)!.trim();
+      const m = /^ok ([a-z0-9_]+)=(\S+)$/.exec(reply);
+      if (!m) throw new Error(reply);
+      return { key, value: m[2] };
     }
     if (isGyroNotchKey(key)) {
       // FW-identical reply; refusals surface the FW line verbatim.
@@ -264,6 +295,8 @@ export class MockBobFlightHost implements BobFlightHost {
     this.settings = cloneDefaultSettings();
     this.loopRateSetting.defaults();
     this.gyroNotch.defaults();
+    this.rpmFilter.defaults();
+    this.motorDirection.defaults();
     return this.getAllSettings();
   }
 
@@ -271,14 +304,17 @@ export class MockBobFlightHost implements BobFlightHost {
     this.requireConnected();
     const out = { ...this.settings } as Record<string, string>;
     // Notch keys come from the FC mock; an older FC omits them (shown unknown, never 0).
-    for (const k of Object.keys(out)) if (isGyroNotchKey(k)) delete out[k];
+    for (const k of Object.keys(out)) if (isGyroNotchKey(k) || isRpmFilterKey(k)) delete out[k];
     if (this.gyroNotch.supported) Object.assign(out, this.gyroNotch.snapshot());
+    if (this.rpmFilter.supported) Object.assign(out, this.rpmFilter.snapshot());
     return out as Record<SettingsKey, string>;
   }
 
   private modesPorts = new MockPortsModes();
   private receiver = new MockReceiver();
   private handle(cmd: CliCommand): string {
+    // RPM filter scenario "off-erpm-live" answers live eRPM itself (null otherwise).
+    if (/^get erpm_m[1-4]$/.test(cmd)) { const rf = this.rpmFilter.handle(cmd, this.armed); if (rf !== null) return rf; }
     // R0c: M1–M4 first-class (FW PR #52). Same wire as protocol MockSerial.
     {
       const erpm = /^get erpm_m([1-4])$/.exec(cmd);
@@ -316,6 +352,8 @@ export class MockBobFlightHost implements BobFlightHost {
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
     {const lr=this.loopRateSetting.handle(cmd,this.armed);if(lr!==null)return lr;}
     {const gn=this.gyroNotch.handle(cmd,this.armed);if(gn!==null)return gn;}
+    {const rf=this.rpmFilter.handle(cmd,this.armed);if(rf!==null)return rf;}
+    {const md=this.motorDirection.handle(cmd,this.armed,this.bench.active);if(md!==null)return md;}
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;
     if(cmd==="reboot") this.receiver.reset();
@@ -399,14 +437,22 @@ export class MockBobFlightHost implements BobFlightHost {
     failsafeActive?: boolean;
     loopRateScenario?: LoopRateMockScenario;
     gyroNotchScenario?: GyroNotchMockScenario;
+    rpmFilterScenario?: RpmFilterMockScenario;
+    motorDirectionScenario?: MotorDirectionMockScenario;
     gyroHealthScenario?: GyroHealthMockScenario;
   }): void {
     if (opts.gyroHealthScenario !== undefined) this.gyroHealthScenario = opts.gyroHealthScenario;
+    if (opts.motorDirectionScenario !== undefined) this.motorDirection.setScenario(opts.motorDirectionScenario);
     if (opts.loopRateScenario !== undefined) {
       this.loopRateScenario = opts.loopRateScenario;
       this.dshotBidir = mockLoopRateBidir(opts.loopRateScenario);
     }
     if (opts.gyroNotchScenario !== undefined) this.gyroNotch.setScenario(opts.gyroNotchScenario);
+    if (opts.rpmFilterScenario !== undefined) {
+      this.rpmFilterScenario = opts.rpmFilterScenario;
+      this.rpmFilter.setScenario(opts.rpmFilterScenario);
+      this.dshotBidir = MockRpmFilter.scenarioBidir(opts.rpmFilterScenario);
+    }
     if (opts.gyroHealthy !== undefined) this.gyroHealthy = opts.gyroHealthy;
     if (opts.failsafeActive !== undefined) {
       this.failsafeActive = opts.failsafeActive;

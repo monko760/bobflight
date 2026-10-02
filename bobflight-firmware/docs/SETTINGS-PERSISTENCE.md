@@ -1,6 +1,10 @@
 # Settings persistence (schema 6)
 
-> **Schema 8 (current):** schema 7 (`loop_rate_hz` at 188–191, 192 bytes) plus the manual gyro notch floats (LE) at **192–195** `gyro_notch1_hz`, **196–199** `gyro_notch1_cutoff_hz`, **200–203** `gyro_notch2_hz`, **204–207** `gyro_notch2_cutoff_hz`. Payload **208** bytes, `MAX_PAYLOAD` 208. Older records load with both notches off (0) and stay dirty until an explicit Save. Load checks the pair rule only; the loop-rate (Nyquist) limit is applied at runtime. See [GYRO-NOTCH.md](GYRO-NOTCH.md). The schema 6 text below is kept for history.
+> **Schema 10 (current, tentative number):** schema 9 bytes 0–223 unchanged, **224–227 reserved zero**, **228–231 `motor_direction`** (u32 LE, 0 = props-out, 1 = props-in), 232–255 reserved zero. Payload **256** bytes, `MAX_PAYLOAD` 256. Older records load with `props-out` (today's mixer yaw signs) and stay dirty until an explicit Save. See [MOTOR-DIRECTION.md](MOTOR-DIRECTION.md), including the renumbering to schema 11 if G1 lands first.
+>
+> **Schema 9:** schema 8 plus the RPM filter floats (LE, integer-valued) at **208–211** `rpm_filter_harmonics`, **212–215** `rpm_filter_min_hz`, **216–219** `rpm_filter_q_x100`, **220–223** `motor_poles`. Payload **224** bytes, `MAX_PAYLOAD` 224. Older records load with 0 / 100 / 500 / 14 and stay dirty until an explicit Save. A record with an out-of-domain value is refused as a whole. See [RPM-FILTER.md](RPM-FILTER.md).
+
+> **Schema 8:** schema 7 (`loop_rate_hz` at 188–191, 192 bytes) plus the manual gyro notch floats (LE) at **192–195** `gyro_notch1_hz`, **196–199** `gyro_notch1_cutoff_hz`, **200–203** `gyro_notch2_hz`, **204–207** `gyro_notch2_cutoff_hz`. Payload **208** bytes, `MAX_PAYLOAD` 208. Older records load with both notches off (0) and stay dirty until an explicit Save. Load checks the pair rule only; the loop-rate (Nyquist) limit is applied at runtime. See [GYRO-NOTCH.md](GYRO-NOTCH.md). The schema 6 text below is kept for history.
 
 Schema 6 extends schema 5 with `pid_yaw_d` (float LE, default **0.00005**, clamp **0..10** finite like other `pid_*` D gains). Schema 5 (and older) records load with this default and mark dirty until an explicit Save.
 

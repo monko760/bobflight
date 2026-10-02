@@ -61,6 +61,7 @@ export {
   SCHEMA5_FLOAT_KEYS,
   SCHEMA6_FLOAT_KEYS,
   SCHEMA8_FLOAT_KEYS,
+  SCHEMA9_INT_KEYS,
   isOptionalSettingsKey,
   DEFAULT_SETTINGS,
   DEFAULT_SETTING_VALUES,
@@ -80,6 +81,7 @@ export type {
   Schema5FloatKey,
   Schema6FloatKey,
   Schema8FloatKey,
+  Schema9IntKey,
   ParsedGetReply,
   ParsedSetReply,
 } from "./settings";
@@ -160,3 +162,21 @@ export { MockGyroNotch, GYRO_NOTCH_MOCK_SCENARIOS } from "./gyro-notch-mock";
 export type { GyroNotchMockScenario } from "./gyro-notch-mock";
 
 export * from "./gyro-health";
+export {
+  RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, RPM_FILTER_REASONS,
+  isRpmFilterKey, isRpmFilterCliCommand, rpmValueProblem, qFromX100, qToX100,
+  parseRpmGetReply, parseRpmSetReply, parseRpmFilterReport, rpmFilterView, RPM_FILTER_REPORT_FIELDS, rpmFilterReportIsExact,
+} from "./rpm-filter";
+export type { RpmFilterKey, RpmFilterMotor, RpmGetResult, RpmSetResult, RpmFilterReport, RpmFilterReportResult, RpmFilterView } from "./rpm-filter";
+export { MockRpmFilter, RPM_FILTER_MOCK_SCENARIOS } from "./rpm-filter-mock";
+export type { RpmFilterMockScenario } from "./rpm-filter-mock";
+
+export {
+  MOTOR_DIRECTION_KEY, MOTOR_DIRECTION_OPTIONS, MOTOR_DIRECTION_ARMED_LINE, MOTOR_DIRECTION_MOTOR_TEST_LINE, MOTOR_DIRECTION_INVALID_LINE,
+  MOTOR_DIRECTION_UNKNOWN, MOTOR_DIRECTION_COPY, MOTOR_DIRECTION_BENCH_TEST, MOTOR_DIRECTION_CLI_COMMANDS,
+  isMotorDirectionOption, isMotorDirectionCliCommand, motorDirectionSetCommand,
+  parseMotorDirectionGetReply, parseMotorDirectionSetReply, parseMixerReport, motorDirectionView,
+} from "./motor-direction";
+export type { MotorDirectionOption, MotorDirectionCliCommand, MotorDirectionGetResult, MotorDirectionSetResult, MixerReport, MotorDirectionView } from "./motor-direction";
+export { MockMotorDirection, MOTOR_DIRECTION_MOCK_SCENARIOS, MOTOR_DIRECTION_MOCK_FUTURE_TOKEN } from "./motor-direction-mock";
+export type { MotorDirectionMockScenario } from "./motor-direction-mock";

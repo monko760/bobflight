@@ -187,6 +187,11 @@ export class MockTransportFactory implements TransportFactory {
       ...(path === "mock://bobflight-notch-nyquist" ? { gyroNotchScenario: "above-nyquist" as const } : {}),
       ...(path === "mock://bobflight-notch-invalid" ? { gyroNotchScenario: "invalid" as const } : {}),
       ...(path === "mock://bobflight-notch-old" ? { gyroNotchScenario: "old-fc" as const } : {}),
+      ...(path === "mock://bobflight-rpm-ok" ? { rpmFilterScenario: "ok" as const } : {}),
+      ...(path === "mock://bobflight-rpm-bidir-off" ? { rpmFilterScenario: "bidir-off" as const } : {}),
+      ...(path === "mock://bobflight-rpm-no-erpm" ? { rpmFilterScenario: "erpm-unavailable" as const } : {}),
+      ...(path === "mock://bobflight-rpm-1k" ? { rpmFilterScenario: "trimmed-1k" as const } : {}),
+      ...(path === "mock://bobflight-rpm-old" ? { rpmFilterScenario: "old-fc" as const } : {}),
       ...this.mockOpts,
     });
     await mock.open();

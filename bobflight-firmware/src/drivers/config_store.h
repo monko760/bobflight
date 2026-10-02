@@ -28,8 +28,17 @@ config_store_result_t config_store_save_v6(uint32_t board_id,const void *payload
 /* v7 is 192 bytes; accepts schema1..6 with zero extension. Adds loop_rate_hz. */
 config_store_result_t config_store_load_v7(uint32_t board_id,void *payload,size_t bytes);
 config_store_result_t config_store_save_v7(uint32_t board_id,const void *payload,size_t bytes);
-/* v8 is 208 bytes (MAX_PAYLOAD); accepts schema1..7 with zero extension. Adds the two manual gyro notches. */
+/* v8 is 208 bytes; accepts schema1..7 with zero extension. Adds the two manual gyro notches. */
 config_store_result_t config_store_load_v8(uint32_t board_id,void *payload,size_t bytes);
 config_store_result_t config_store_save_v8(uint32_t board_id,const void *payload,size_t bytes);
+/* v9 is 224 bytes; accepts schema1..8 with zero extension. Adds the RPM notch filter. */
+config_store_result_t config_store_load_v9(uint32_t board_id,void *payload,size_t bytes);
+config_store_result_t config_store_save_v9(uint32_t board_id,const void *payload,size_t bytes);
+/* v10 is 256 bytes (MAX_PAYLOAD); accepts schema1..9 with zero extension. Adds
+ * motor_direction (S4) at 228..231; 224..227 and 232..255 are reserved zero so the
+ * commit block stays 32-byte aligned (HEADER+256), the same record shape as G1's
+ * schema 10 (gyro_rate_hz at 224..227), so either order of landing keeps one layout. */
+config_store_result_t config_store_load_v10(uint32_t board_id,void *payload,size_t bytes);
+config_store_result_t config_store_save_v10(uint32_t board_id,const void *payload,size_t bytes);
 uint32_t config_store_loaded_schema(void);
 #endif

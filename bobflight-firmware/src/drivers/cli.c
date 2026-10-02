@@ -50,6 +50,8 @@ static void cli_write_str(const char *s)
 #include "drivers/sd_cli.h"
 #include "drivers/blackbox_cli.h"
 #include "drivers/filters_cli.h"
+#include "drivers/rpm_filter_cli.h"
+#include "drivers/motor_direction_cli.h"
 
 static void cmd_control_mode(void)
 {
@@ -99,6 +101,8 @@ static void cmd_help(void)
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
         "  loop_rate - loop-rate policy: setting, pending reboot, active gyro/denom and fallback reason\r\n"
         "  filters  - gyro notch runtime state (active, reason) at the actual filter rate\r\n"
+        "  rpm_filter - RPM notch state: reason, harmonics active, per-motor Hz from bidir eRPM\r\n"
+        "  mixer - motor_direction the mixer applies and its yaw sign per motor\r\n"
         "  bl / BL  - ST ROM bootloader; bl discard explicitly loses unsaved RAM changes\r\n"
         "  reboot   - soft reset (host: exit loop flag)\r\n");
 }
@@ -286,6 +290,9 @@ static void cmd_get(const char *key)
         cli_write_str(dshot_bidir_enabled() ? "dshot_bidir=on\r\n" : "dshot_bidir=off\r\n");
         return;
     }
+    if (cmd_get_motor_direction(key)) {
+        return;
+    }
     if (strcmp(key, "loop_rate_hz") == 0) {
         snprintf(buf, sizeof(buf), "loop_rate_hz=%lu\r\n", (unsigned long)loop_rate_setting_get());
         cli_write_str(buf);
@@ -307,6 +314,10 @@ static void cmd_set(const char *key, const char *valstr)
     if(arming_state()==ARM_ARMED){cli_write_str("set failed: armed\r\n");return;}
     if (!key) {
         cli_write_str("unknown key\r\n");
+        return;
+    }
+    /* motor_direction (schema 10): motor-test refusal and token check. */
+    if (cmd_set_motor_direction(key, valstr)) {
         return;
     }
     if (!valstr || !*valstr) {
@@ -352,6 +363,10 @@ static void cmd_set(const char *key, const char *valstr)
     }
     /* Manual gyro notches: pair rule + actual-loop-rate Nyquist limit. */
     if (cmd_set_notch(key, valstr)) {
+        return;
+    }
+    /* RPM filter (schema 9): whole numbers with named ranges. */
+    if (cmd_set_rpm(key, valstr)) {
         return;
     }
     v = strtof(valstr, &end);
@@ -420,6 +435,10 @@ static void handle_line(char *line)
         cmd_loop_rate();
     } else if (strcmp(line, "filters") == 0) {
         cmd_filters();
+    } else if (strcmp(line, "rpm_filter") == 0) {
+        cmd_rpm_filter();
+    } else if (strcmp(line, "mixer") == 0) {
+        cmd_mixer();
     } else if (strncmp(line, "control_source ", 15) == 0) {
         const char *arg=line+15;
         bool valid=strcmp(arg,"manual")==0 || strcmp(arg,"aux")==0;

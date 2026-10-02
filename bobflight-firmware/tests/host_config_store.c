@@ -145,6 +145,71 @@ int main(void){
   puts("PASS schema7 -> schema8 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
  }
 
+ /* Schema8 -> schema9 (RPM notch filter, full 224-byte MAX_PAYLOAD). */
+ {
+  uint8_t old9[224],new9[224],out9[224];memset(old9,17,208);memset(old9+208,0,16);memset(new9,85,sizeof(new9));
+  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
+  assert(config_store_save_v8(19,old9,208)==CONFIG_STORE_OK);
+  assert(config_store_load_v9(19,out9,224)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==8);
+  for(unsigned j=208;j<224;j++)assert(out9[j]==0);
+  memcpy(baseline,flash,sizeof(flash));
+  for(int cut=0;cut<=292;cut++){
+   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
+   config_store_result_t r=config_store_save_v9(19,new9,224);write_budget=-1;
+   assert(config_store_load_v9(19,out9,224)==CONFIG_STORE_OK);
+   if(r==CONFIG_STORE_OK)assert(!memcmp(out9,new9,224)&&config_store_loaded_schema()==9);
+   else assert((!memcmp(out9,old9,208)&&config_store_loaded_schema()==8)||(!memcmp(out9,new9,224)&&config_store_loaded_schema()==9));
+  }
+  assert(config_store_save_v8(19,old9,208)==CONFIG_STORE_INVALID);
+  /* Older schema8 firmware ignores the schema9 record and falls back to the retained schema8 slot. */
+  assert(config_store_load_v8(19,out9,208)==CONFIG_STORE_OK&&config_store_loaded_schema()==8&&!memcmp(out9,old9,208));
+  assert(config_store_load_v9(19,out9,223)==CONFIG_STORE_INVALID);
+  assert(config_store_save_v9(19,new9,208)==CONFIG_STORE_INVALID);
+  unsigned saved_erases=erases;assert(config_store_save_v9(19,new9,224)==CONFIG_STORE_OK&&erases==saved_erases);
+  /* Schema9 still loads a schema7 record with zero extension. */
+  memset(flash,255,sizeof(flash));assert(config_store_save_v7(19,old9,192)==CONFIG_STORE_OK);
+  assert(config_store_load_v9(19,out9,224)==CONFIG_STORE_OK&&config_store_loaded_schema()==7);
+  for(unsigned j=192;j<224;j++)assert(out9[j]==0);
+  puts("PASS schema8 -> schema9 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
+ }
+
+ /* Schema9 -> schema10 (S4 motor_direction + reserved, full 256-byte MAX_PAYLOAD). */
+ {
+  uint8_t old10[256],new10[256],out10[256];memset(old10,17,224);memset(old10+224,0,32);memset(new10,85,sizeof(new10));
+  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
+  assert(config_store_save_v9(19,old10,224)==CONFIG_STORE_OK);
+  assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==9);
+  for(unsigned j=224;j<256;j++)assert(out10[j]==0);
+  memcpy(baseline,flash,sizeof(flash));
+  for(int cut=0;cut<=324;cut++){
+   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
+   config_store_result_t r=config_store_save_v10(19,new10,256);write_budget=-1;
+   assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK);
+   if(r==CONFIG_STORE_OK)assert(!memcmp(out10,new10,256)&&config_store_loaded_schema()==10);
+   else assert((!memcmp(out10,old10,224)&&config_store_loaded_schema()==9)||(!memcmp(out10,new10,256)&&config_store_loaded_schema()==10));
+  }
+  assert(config_store_save_v9(19,old10,224)==CONFIG_STORE_INVALID);
+  /* Older schema9 firmware ignores the schema10 record and falls back to the retained schema9 slot. */
+  assert(config_store_load_v9(19,out10,224)==CONFIG_STORE_OK&&config_store_loaded_schema()==9&&!memcmp(out10,old10,224));
+  assert(config_store_load_v10(19,out10,255)==CONFIG_STORE_INVALID);
+  assert(config_store_save_v10(19,new10,224)==CONFIG_STORE_INVALID);
+  unsigned saved_erases=erases;assert(config_store_save_v10(19,new10,256)==CONFIG_STORE_OK&&erases==saved_erases);
+  /* Schema10 still loads a schema8 record with zero extension. */
+  memset(flash,255,sizeof(flash));assert(config_store_save_v8(19,old10,208)==CONFIG_STORE_OK);
+  assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK&&config_store_loaded_schema()==8);
+  for(unsigned j=208;j<256;j++)assert(out10[j]==0);
+  /* 1..32-byte program granules: header+payload (288) and the commit block are whole granules. */
+  strict_granules=true;
+  for(unsigned unit=1;unit<=32;unit*=2){
+   layout=(hal_flash_geometry_t){{4096,65536},{16384,32768},unit};memset(flash,255,sizeof(flash));
+   assert(config_store_save_v10(19,old10,256)==CONFIG_STORE_OK);
+   assert(config_store_save_v10(19,new10,256)==CONFIG_STORE_OK);
+   assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK&&!memcmp(out10,new10,256));
+  }
+  strict_granules=false;layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
+  puts("PASS schema9 -> schema10 migration, write-cut cases, zero extension, no-wear save, downgrade protection, 1..32-byte granules");
+ }
+
 
 
 

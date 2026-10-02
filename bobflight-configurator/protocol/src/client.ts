@@ -36,6 +36,7 @@ import {
   type SettingsKey,
 } from "./settings";
 import { isGyroNotchCliCommand } from "./gyro-notch";
+import { isRpmFilterCliCommand } from "./rpm-filter";
 
 /** R0b patterned CLI: get erpm_m1..4 / dshot_telem_m1..4 / get|set dshot_bidir on|off. */
 export function isR0bDshotCliCommand(cmd: string): boolean {
@@ -71,6 +72,7 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "dshot 300",
   "dshot 600",
   "get loop_rate_hz", "set loop_rate_hz 1000", "set loop_rate_hz 4000", "set loop_rate_hz 8000", "loop_rate",
+  "get motor_direction", "set motor_direction props-out", "set motor_direction props-in", "mixer",
 ] as const;
 
 /**
@@ -282,7 +284,7 @@ export class BobFlightCliClient {
     opts?: SendCommandOptions
   ): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd) && !isGyroNotchCliCommand(cmd)) {
+    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd) && !isGyroNotchCliCommand(cmd) && !isRpmFilterCliCommand(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);
@@ -313,11 +315,11 @@ export class BobFlightCliClient {
           this.collector = null;
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
-          if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "storage" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
+          if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "storage" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
           reject(err);
         },
         { idleMs, timeoutMs,
-          endMarker: line.startsWith("sd read") ? "sd_data_end: 1" : line.startsWith("blackbox ") ? "blackbox_end: 1" : line.startsWith("sd ") ? "sd_end: 1" : (line === "pid_diag" || line.startsWith("pid_diag ")) ? "pid_diag_end: 1" : line === "storage" ? "storage_end: 1" : (line === "diff all" || line === "dump all") ? "# config_end: 1" : line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "loop_rate" ? "loop_rate_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
+          endMarker: line.startsWith("sd read") ? "sd_data_end: 1" : line.startsWith("blackbox ") ? "blackbox_end: 1" : line.startsWith("sd ") ? "sd_end: 1" : (line === "pid_diag" || line.startsWith("pid_diag ")) ? "pid_diag_end: 1" : line === "storage" ? "storage_end: 1" : (line === "diff all" || line === "dump all") ? "# config_end: 1" : line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "loop_rate" ? "loop_rate_end: 1" : line === "mixer" ? "mixer_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
 
@@ -423,7 +425,7 @@ export class BobFlightCliClient {
     const out = {} as Record<SettingsKey, string>;
     for (const key of SETTINGS_KEYS) {
       if (isOptionalSettingsKey(key)) {
-        // Schema 8 notch keys: an older FC answers "unknown key" -> omitted (unknown), never defaulted.
+        // Schema 8 notch / schema 9 RPM keys: an older FC answers "unknown key" -> omitted (unknown), never defaulted.
         const raw = await this.sendRaw(`get ${key}`, opts);
         const parsed = parseGetReply(raw);
         if (parsed.unknown) continue;

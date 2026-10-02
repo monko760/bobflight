@@ -13,7 +13,7 @@
 static board_t board={.board_id="kakute_f7_hdv",.rx_uart=6};
 static bool armed,bench,calibrating,supported=true,exists,write_failure,read_failure;
 static unsigned saves,rx_resets,freshness_resets,generation;
-static uint8_t image[208];static size_t image_len;static uint32_t image_board;
+static uint8_t image[256];static bool ext_md_garbage; /* older record: 228..231 nonzero after extension */static size_t image_len;static uint32_t image_board;
 const board_t *board_get(void){return &board;}
 bool board_select_rx_uart(unsigned u){if(!(u==1||u==2||u==3||u==4||u==6||u==7))return false;board.rx_uart=u;return true;}
 arm_state_t arming_state(void){return armed?ARM_ARMED:ARM_DISARMED;}
@@ -46,7 +46,7 @@ void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
 uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
 bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding){return binding==gyro_accel_calibration_binding()&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
-uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:8;}
+uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:image_len==208?8:image_len==224?9:10;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
  if(image_len==96&&n==128&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,96);return CONFIG_STORE_OK;}
  return config_store_load(id,p,n);
@@ -90,6 +90,16 @@ config_store_result_t config_store_load_v8(uint32_t id,void*p,size_t n){
  return config_store_load(id,p,n);
 }
 config_store_result_t config_store_save_v8(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
+config_store_result_t config_store_load_v9(uint32_t id,void*p,size_t n){
+ if((image_len==96||image_len==128||image_len==160||image_len==176||image_len==184||image_len==188||image_len==192||image_len==208)&&n==224&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,image_len);return CONFIG_STORE_OK;}
+ return config_store_load(id,p,n);
+}
+config_store_result_t config_store_save_v9(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
+config_store_result_t config_store_load_v10(uint32_t id,void*p,size_t n){
+ if((image_len==96||image_len==128||image_len==160||image_len==176||image_len==184||image_len==188||image_len==192||image_len==208||image_len==224)&&n==256&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,image_len);if(ext_md_garbage)((uint8_t*)p)[228]=1;return CONFIG_STORE_OK;}
+ return config_store_load(id,p,n);
+}
+config_store_result_t config_store_save_v10(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
 
 /* Include the codec to validate the on-wire byte format, not just happy-path APIs. */
 #include "../src/drivers/persist.c"
@@ -248,7 +258,7 @@ int main(void){
   assert(persist_load());assert(persist_dirty());assert(config_store_loaded_schema()==7);
   static const char *const nk[4]={"gyro_notch1_hz","gyro_notch1_cutoff_hz","gyro_notch2_hz","gyro_notch2_cutoff_hz"};
   for(unsigned i=0;i<4;i++){assert(config_get_key(nk[i],&n)&&n==0.f);}
-  assert(persist_save());assert(image_len==208&&!persist_dirty());
+  assert(persist_save());assert(image_len==PAYLOAD_BYTES&&!persist_dirty());
   for(unsigned i=192;i<208;i+=4)assert(getfloat(image+i)==0.f);
   assert(!config_set_key("gyro_notch2_hz",300.f)); /* centre before cutoff refused */
   assert(config_set_key("gyro_notch1_cutoff_hz",150.f)&&config_set_key("gyro_notch1_hz",200.f));
@@ -273,6 +283,86 @@ int main(void){
   for(unsigned i=0;i<4;i++){assert(config_get_key(nk[i],&n)&&n==0.f);}
   memcpy(image,keep8,208);persist_init();assert(persist_load());
   puts("PASS schema7 -> schema8 notch migration (off/off, dirty), round-trip, static-rule refusal, Nyquist never alters a load");
+ }
+
+ /* Schema8 -> schema9: the RPM filter migrates to its defaults 0/100/500/14
+  * (off), dirty until Save; schema9 round-trips the four whole numbers; a
+  * stored value outside the static domain is refused atomically. */
+ {
+  static const char *const rk[4]={"rpm_filter_harmonics","rpm_filter_min_hz","rpm_filter_q_x100","motor_poles"};
+  static const float rdef[4]={0.f,100.f,500.f,14.f},rset[4]={3.f,150.f,800.f,12.f};
+  assert(persist_save());
+  uint8_t schema8[208];memcpy(schema8,image,208);image_len=208;
+  assert(config_set_key("rpm_filter_harmonics",3.f)&&config_set_key("motor_poles",12.f));
+  persist_init();float n=-1;assert(config_get_key("rpm_filter_harmonics",&n)&&n==0.f);
+  assert(persist_load());assert(persist_dirty());assert(config_store_loaded_schema()==8);
+  for(unsigned i=0;i<4;i++){assert(config_get_key(rk[i],&n)&&n==rdef[i]);}
+  assert(persist_save());assert(image_len==PAYLOAD_BYTES&&!persist_dirty());assert(config_store_loaded_schema()==10);
+  assert(!memcmp(image,schema8,208)); /* schema8 bytes unchanged */
+  for(unsigned i=0;i<4;i++)assert(getfloat(image+208+i*4)==rdef[i]);
+  for(unsigned i=0;i<4;i++)assert(config_set_key(rk[i],rset[i]));
+  assert(persist_dirty());assert(persist_save());
+  for(unsigned i=0;i<4;i++)assert(getfloat(image+208+i*4)==rset[i]);
+  persist_init();assert(config_get_key("motor_poles",&n)&&n==14.f);assert(persist_load());assert(!persist_dirty());
+  for(unsigned i=0;i<4;i++){assert(config_get_key(rk[i],&n)&&n==rset[i]);}
+  uint8_t keep9[256];memcpy(keep9,image,256);
+  const struct {unsigned off;float v;} bad[]={{208,4.f},{208,2.5f},{208,-1.f},{212,49.f},{212,201.f},{212,120.5f},
+   {216,99.f},{216,1001.f},{220,13.f},{220,2.f},{220,38.f}};
+  for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);i++){
+   memcpy(image,keep9,256);putfloat(image+bad[i].off,bad[i].v);
+   assert(config_set_key("rpm_filter_harmonics",1.f)&&config_set_key("rate_max_roll",444.f));
+   assert(!persist_load());assert(!strcmp(persist_last_error(),"invalid_settings"));
+   assert(config_get_key("rpm_filter_harmonics",&n)&&n==1.f&&config_get_key("rate_max_roll",&n)&&n==444.f); /* atomic */
+  }
+  memcpy(image,keep9,256);{uint32_t nan=0x7fc00000u;put32(image+216,nan);}assert(!persist_load());
+  memcpy(image,keep9,256);assert(persist_load());assert(!persist_dirty());
+  for(unsigned i=0;i<4;i++){assert(config_get_key(rk[i],&n)&&n==rset[i]);}
+  puts("PASS schema8 -> schema9 RPM filter migration (defaults, dirty), round-trip, out-of-domain refusal is atomic");
+ }
+
+ /* Schema9 -> schema10 (S4): motor_direction migrates to props-out (today's
+  * mixer yaw signs) from every older schema, written explicitly (not by zero
+  * extension), dirty until Save; schema10 round-trips props-in; values other
+  * than 0/1 and nonzero reserved bytes are refused atomically. */
+ {
+  float n=-1;
+  persist_init();assert(config_motor_direction()==MOTOR_DIRECTION_PROPS_OUT);assert(persist_save());
+  assert(image_len==256&&get32(image+228)==0u);for(unsigned i=224;i<256;i++)assert(image[i]==0);
+  uint8_t schema9[224];memcpy(schema9,image,224);
+  const unsigned older[]={224,208,192,188,184,176,160,128};
+  for(unsigned k=0;k<sizeof older/sizeof older[0];k++){
+   for(unsigned g=0;g<2;g++){
+    memcpy(image,schema9,224);image_len=older[k];ext_md_garbage=g!=0;
+    persist_init();assert(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN));
+    persist_init();assert(config_motor_direction()==MOTOR_DIRECTION_PROPS_OUT); /* persist_init resets to the default */
+    assert(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN));
+    assert(persist_load());ext_md_garbage=false;
+    assert(config_motor_direction()==MOTOR_DIRECTION_PROPS_OUT&&persist_dirty());
+    assert(config_store_loaded_schema()<MOTOR_DIRECTION_SCHEMA);
+   }
+  }
+  memcpy(image,schema9,224);image_len=224;persist_init();assert(persist_load()&&persist_dirty());
+  assert(persist_save()&&image_len==PAYLOAD_BYTES&&config_store_loaded_schema()==10&&!persist_dirty());
+  assert(!memcmp(image,schema9,224)&&get32(image+228)==0u); /* schema9 bytes unchanged */
+  assert(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN)&&persist_dirty()&&persist_save());
+  assert(get32(image+228)==1u);for(unsigned i=224;i<256;i++)if(i<228||i>231)assert(image[i]==0);
+  persist_init();assert(config_motor_direction()==MOTOR_DIRECTION_PROPS_OUT);
+  assert(persist_load()&&!persist_dirty()&&config_motor_direction()==MOTOR_DIRECTION_PROPS_IN);
+  uint8_t keep10[256];memcpy(keep10,image,256);
+  const uint32_t badd[]={2u,3u,0x100u,0xffffffffu};
+  for(unsigned i=0;i<sizeof badd/sizeof badd[0];i++){
+   memcpy(image,keep10,256);put32(image+228,badd[i]);
+   assert(config_set_motor_direction(MOTOR_DIRECTION_PROPS_OUT)&&config_set_key("rate_max_roll",444.f));
+   assert(!persist_load()&&!strcmp(persist_last_error(),"invalid_settings"));
+   assert(config_motor_direction()==MOTOR_DIRECTION_PROPS_OUT&&config_get_key("rate_max_roll",&n)&&n==444.f); /* atomic */
+  }
+  for(unsigned o=224;o<256;o++){ /* reserved bytes must stay zero */
+   if(o>=228&&o<232)continue;
+   memcpy(image,keep10,256);image[o]=1;assert(!persist_load()&&!strcmp(persist_last_error(),"invalid_settings"));
+  }
+  memcpy(image,keep10,256);assert(persist_load()&&config_motor_direction()==MOTOR_DIRECTION_PROPS_IN);
+  assert(config_set_motor_direction(MOTOR_DIRECTION_PROPS_OUT)&&persist_save());
+  puts("PASS schema9 -> schema10 motor_direction migration (every older schema -> props-out, explicit, dirty), props-in round-trip, invalid/reserved refusal is atomic");
  }
 
 

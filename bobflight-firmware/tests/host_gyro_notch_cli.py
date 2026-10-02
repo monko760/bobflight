@@ -8,7 +8,7 @@ refused sets leave the value unchanged, the read-only `filters` report, and
 import os,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
 FAST=board=='kakute_f7_hdv'
-RATE='4000' if FAST else '1000'
+RATE='8000' if FAST else '1000'   # S1: the gyro filter runs on every gyro sample (8000/2 -> 8000 Hz)
 def run(cmds,reinit=False):
     env=dict(os.environ)
     if reinit: env['BOBFLIGHT_HOST_REBOOT_REINIT']='1'
@@ -65,7 +65,7 @@ assert sets==['set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5',
               'set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5','set gyro_notch2_cutoff_hz 0','set gyro_notch2_hz 0'],sets
 assert 'ok gyro_notch1_hz=200.5' in lines
 assert [l for l in lines if l.startswith('gyro_notch') and '=' in l][-4:]==[f'{k}=0' for k in KEYS],lines
-assert values(lines,'schema')==['8'],lines
+assert values(lines,'schema')==['10'],lines  # schema 9 adds the RPM filter, schema 10 motor_direction
 
 # Save + reboot keeps the pair; on the 8 kHz board a 1 kHz loop change makes the
 # stored 600 Hz notch above-nyquist: disabled at runtime, reported, not altered.
