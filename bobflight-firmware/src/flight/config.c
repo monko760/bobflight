@@ -20,8 +20,19 @@
 #define DEF_RPM_MIN_HZ 100.f
 #define DEF_RPM_Q_X100 500.f
 #define DEF_MOTOR_POLES 14.f
+/* Schema 10 motor_direction: props-out (default) keeps the mixer yaw signs. */
+static motor_direction_t g_motor_direction=MOTOR_DIRECTION_PROPS_OUT;
 static bf_config_t g_cfg={.rate_max_roll=DEF_RATE_MAX,.rate_max_pitch=DEF_RATE_MAX,.rate_max_yaw=DEF_RATE_MAX,.rate_expo=DEF_EXPO,.pid_roll_p=DEF_KP,.pid_roll_i=DEF_KI,.pid_roll_d=DEF_KD,.pid_pitch_p=DEF_KP,.pid_pitch_i=DEF_KI,.pid_pitch_d=DEF_KD,.pid_yaw_p=DEF_KP,.pid_yaw_i=DEF_KI,.pid_yaw_d=DEF_KD,.min_throttle=DEF_MIN_THR,.airmode=DEF_AIRMODE,.gyro_lpf_hz=DEF_GYRO_LPF,.dterm_lpf_hz=DEF_DTERM_LPF,.gyro_notch1_hz=DEF_GYRO_NOTCH,.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,.gyro_notch2_hz=DEF_GYRO_NOTCH,.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,.rpm_filter_harmonics=DEF_RPM_HARMONICS,.rpm_filter_min_hz=DEF_RPM_MIN_HZ,.rpm_filter_q_x100=DEF_RPM_Q_X100,.motor_poles=DEF_MOTOR_POLES};
-void config_defaults(void){g_cfg.rate_max_roll=DEF_RATE_MAX;g_cfg.rate_max_pitch=DEF_RATE_MAX;g_cfg.rate_max_yaw=DEF_RATE_MAX;g_cfg.rate_expo=DEF_EXPO;g_cfg.pid_roll_p=DEF_KP;g_cfg.pid_roll_i=DEF_KI;g_cfg.pid_roll_d=DEF_KD;g_cfg.pid_pitch_p=DEF_KP;g_cfg.pid_pitch_i=DEF_KI;g_cfg.pid_pitch_d=DEF_KD;g_cfg.pid_yaw_p=DEF_KP;g_cfg.pid_yaw_i=DEF_KI;g_cfg.pid_yaw_d=DEF_KD;g_cfg.min_throttle=DEF_MIN_THR;g_cfg.airmode=DEF_AIRMODE;g_cfg.gyro_lpf_hz=DEF_GYRO_LPF;g_cfg.dterm_lpf_hz=DEF_DTERM_LPF;g_cfg.gyro_notch1_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;g_cfg.gyro_notch2_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;g_cfg.rpm_filter_harmonics=DEF_RPM_HARMONICS;g_cfg.rpm_filter_min_hz=DEF_RPM_MIN_HZ;g_cfg.rpm_filter_q_x100=DEF_RPM_Q_X100;g_cfg.motor_poles=DEF_MOTOR_POLES;}
+void config_defaults(void){g_cfg.rate_max_roll=DEF_RATE_MAX;g_cfg.rate_max_pitch=DEF_RATE_MAX;g_cfg.rate_max_yaw=DEF_RATE_MAX;g_cfg.rate_expo=DEF_EXPO;g_cfg.pid_roll_p=DEF_KP;g_cfg.pid_roll_i=DEF_KI;g_cfg.pid_roll_d=DEF_KD;g_cfg.pid_pitch_p=DEF_KP;g_cfg.pid_pitch_i=DEF_KI;g_cfg.pid_pitch_d=DEF_KD;g_cfg.pid_yaw_p=DEF_KP;g_cfg.pid_yaw_i=DEF_KI;g_cfg.pid_yaw_d=DEF_KD;g_cfg.min_throttle=DEF_MIN_THR;g_cfg.airmode=DEF_AIRMODE;g_cfg.gyro_lpf_hz=DEF_GYRO_LPF;g_cfg.dterm_lpf_hz=DEF_DTERM_LPF;g_cfg.gyro_notch1_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;g_cfg.gyro_notch2_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;g_cfg.rpm_filter_harmonics=DEF_RPM_HARMONICS;g_cfg.rpm_filter_min_hz=DEF_RPM_MIN_HZ;g_cfg.rpm_filter_q_x100=DEF_RPM_Q_X100;g_cfg.motor_poles=DEF_MOTOR_POLES;g_motor_direction=MOTOR_DIRECTION_PROPS_OUT;}
+motor_direction_t config_motor_direction(void){return g_motor_direction;}
+bool config_set_motor_direction(motor_direction_t d){if(d!=MOTOR_DIRECTION_PROPS_OUT&&d!=MOTOR_DIRECTION_PROPS_IN)return false;g_motor_direction=d;return true;}
+const char *config_motor_direction_name(motor_direction_t d){return d==MOTOR_DIRECTION_PROPS_OUT?"props-out":d==MOTOR_DIRECTION_PROPS_IN?"props-in":NULL;}
+bool config_motor_direction_parse(const char *t,motor_direction_t *out){
+ if(!t||!out)return false;
+ if(!strcmp(t,"props-out")){*out=MOTOR_DIRECTION_PROPS_OUT;return true;}
+ if(!strcmp(t,"props-in")){*out=MOTOR_DIRECTION_PROPS_IN;return true;}
+ return false;
+}
 void config_init(void){config_defaults();}
 const bf_config_t *config_get(void){return &g_cfg;}
 const bf_config_t *config_blob(void){return &g_cfg;}

@@ -3,7 +3,8 @@ import {useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
 import {parseStorage,parseConfigurationExport,canSaveStorage,type StorageSnapshot} from '../protocol';
 import {requestRefresh,storageDirty,browserConfirm} from './storageRefresh';
-export function StoragePanel({revision=0,blocked=false,requiredScope}:{revision?:number;blocked?:boolean;requiredScope?:string}){
+/** onPending: told whenever a save / refresh / export starts or settles (and false on unmount), so a page can lock its own setters; it never feeds `blocked`. */
+export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:{revision?:number;blocked?:boolean;requiredScope?:string;onPending?:(pending:boolean)=>void}){
  const {host,connectionStatus,postFlashGate}=useHost();
  const connected=connectionStatus==='connected'&&!postFlashGate;
  const [state,setState]=useState<StorageSnapshot|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
@@ -31,6 +32,8 @@ export function StoragePanel({revision=0,blocked=false,requiredScope}:{revision?
   }catch(e){if(live(id)){setState(null);setError(String(e));}}
   finally{if(id===epoch.current){busy.current=false;setPending(false);}}
  }
+ useEffect(()=>{onPending?.(pending);},[pending,onPending]);
+ useEffect(()=>()=>{onPending?.(false);},[onPending]);
  useEffect(()=>{++epoch.current;busy.current=false;setState(null);setError('');setMessage('');setPending(false);if(connected&&!blocked)void run('refresh');return()=>{++epoch.current;};},[host,connected,revision,blocked]);
  const supported=!requiredScope||!!state?.scope.split(",").includes(requiredScope);
  const canSave=supported&&canSaveStorage(state,connected,pending||blocked);

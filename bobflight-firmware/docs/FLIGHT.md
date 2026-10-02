@@ -8,7 +8,7 @@ Owned Path B modules under `src/flight/`. Apache-2.0. No Betaflight / INAV / Emu
 |--------|------|
 | `rates` | RC sticks → rate setpoints (°/s) |
 | `pid` | Rate PID roll/pitch/yaw |
-| `mixer` | QUADX → 4 motor commands `[0,1]` |
+| `mixer` | QUADX → 4 motor commands `[0,1]`; yaw sign per `motor_direction` (docs/MOTOR-DIRECTION.md) |
 | `arming` | Arm / disarm gates |
 | `failsafe` | RX loss → disarm |
 | `filter` | Soft 1st-order LPF (gyro + D-term) |

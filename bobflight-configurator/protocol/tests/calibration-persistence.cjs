@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 const assert=require('node:assert/strict');
 const path=require('node:path');
-const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3,STORAGE_SCOPE_V4,STORAGE_SCOPE_V5,STORAGE_SCOPE_V6,STORAGE_SCOPE_V7,STORAGE_SCOPE_V8,STORAGE_PAYLOAD_BYTES_V8,STORAGE_SCOPE_V9,STORAGE_PAYLOAD_BYTES_V9,CONFIG_EXPORT_MAX_BYTES}=require('../dist');
+const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3,STORAGE_SCOPE_V4,STORAGE_SCOPE_V5,STORAGE_SCOPE_V6,STORAGE_SCOPE_V7,STORAGE_SCOPE_V8,STORAGE_PAYLOAD_BYTES_V8,STORAGE_SCOPE_V9,STORAGE_SCOPE_V10,STORAGE_PAYLOAD_BYTES_V9,STORAGE_PAYLOAD_BYTES_V10,CONFIG_EXPORT_MAX_BYTES}=require('../dist');
 const {mockSensorReply}=require('../dist/sensor-mock');
 const {loadUiTs}=require('./load-ui-ts.cjs');
 const {parseKeyValueSnapshot}=loadUiTs(path.resolve(__dirname,'../../ui/src/sensors/telemetry.ts'));
@@ -59,12 +59,18 @@ for(const bad of [v9.replace('set rpm_filter_harmonics 3','set rpm_filter_harmon
  const fits=v9.replace(pad,'set rate_max_roll 800\n'.repeat(Math.floor((1990-v9.length)/22))+pad);assert(fits.length>1800&&fits.length<=CONFIG_EXPORT_MAX_BYTES);assert.equal(parseConfigurationExport(fits,'dump').modeCount,4);}
 assert.equal(parseStorage(storage(9,STORAGE_SCOPE_V9)).schema,9);assert.throws(()=>parseStorage(storage(9,STORAGE_SCOPE_V8)));assert.throws(()=>parseStorage(storage(8,STORAGE_SCOPE_V9)));assert.throws(()=>parseStorage(storage(10,STORAGE_SCOPE_V9)));
 console.log('PASS schema9 capability (RPM filter harmonics/min_hz/q_x100/motor_poles @ 208..223 / 224-byte payload; export limit 2048)');
+const v10=v9.replace('# schema: 9','# schema: 10').replace(STORAGE_SCOPE_V9,STORAGE_SCOPE_V10).replace('# config_end: 1','set motor_direction props-in\n# config_end: 1');
+assert.equal(parseConfigurationExport(v10,'dump').modeCount,4);assert.equal(STORAGE_PAYLOAD_BYTES_V10,256);assert.equal(STORAGE_SCOPE_V10,STORAGE_SCOPE_V9+',motor_direction');
+assert.equal(parseConfigurationExport(v10.replace('props-in','props-out'),'dump').modeCount,4);
+for(const bad of [v10.replace('set motor_direction props-in','set motor_direction props-mixed'),v10.replace('set motor_direction props-in','set motor_direction 1'),v10.replace('set motor_direction props-in','set motor_direction Props-In'),v9.replace('# config_end: 1','set motor_direction props-out\n# config_end: 1')])assert.throws(()=>parseConfigurationExport(bad,'dump'));
+assert.equal(parseStorage(storage(10,STORAGE_SCOPE_V10)).schema,10);assert.throws(()=>parseStorage(storage(10,STORAGE_SCOPE_V9)));assert.throws(()=>parseStorage(storage(9,STORAGE_SCOPE_V10)));assert.throws(()=>parseStorage(storage(11,STORAGE_SCOPE_V10)));
+console.log('PASS schema10 capability (motor_direction props-out|props-in u32 @ 228..231 / 256-byte payload; unknown tokens refused in exports)');
 
 // Render the actual save panel with old/new advertised capabilities.
 function nodes(t){return Array.isArray(t)?t.flatMap(nodes):t&&typeof t==='object'?[t,...nodes(t.props?.children)]:[];}
 function txt(t){return Array.isArray(t)?t.map(txt).join(''):t&&typeof t==='object'?txt(t.props?.children):String(t??'');}
 (async()=>{
- for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true],[4,STORAGE_SCOPE_V4,true],[5,STORAGE_SCOPE_V5,true],[6,STORAGE_SCOPE_V6,true],[7,STORAGE_SCOPE_V7,true],[8,STORAGE_SCOPE_V8,true],[9,STORAGE_SCOPE_V9,true]]){
+ for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true],[4,STORAGE_SCOPE_V4,true],[5,STORAGE_SCOPE_V5,true],[6,STORAGE_SCOPE_V6,true],[7,STORAGE_SCOPE_V7,true],[8,STORAGE_SCOPE_V8,true],[9,STORAGE_SCOPE_V9,true],[10,STORAGE_SCOPE_V10,true]]){
   let saves=0;
   const state=parseStorage(storage(schema,scope));
   const host={getConnectionStatus:()=> 'connected',sendCommand:async()=>storage(schema,scope),saveSettings:async()=>{saves++;}};
