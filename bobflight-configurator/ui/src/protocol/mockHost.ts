@@ -1,5 +1,5 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
-import { MockPortsModes, isModeRangeCommand, isControlSourceCommand } from "@bobflight/protocol";
+import { MockPortsModes, isModeRangeCommand, isControlSourceCommand, mockGyroHealthLines, mockGyroHealthForcesUnhealthy, type GyroHealthMockScenario } from "@bobflight/protocol";
 /**
  * Browser-safe mock host matching BobFlightCliClient surface.
  * Same FW CLI contract as Protocol MockSerial (banner, status keys,
@@ -82,6 +82,8 @@ export class MockBobFlightHost implements BobFlightHost {
 
   /** `status` loop-rate keys; default "missing" (older FC). */
   private loopRateScenario: LoopRateMockScenario;
+  /** `status` gyro_health / gyro_sat_count; default "missing" (older FC). Non-ok health forces gyro_ok: no. */
+  private gyroHealthScenario: GyroHealthMockScenario;
   /** `get/set loop_rate_hz` + `loop_rate` (same wire as protocol MockSerial). */
   private readonly loopRateSetting = new MockLoopRateSetting(() => this.loopRateScenario);
 
@@ -96,7 +98,7 @@ export class MockBobFlightHost implements BobFlightHost {
   /** motor_direction + `mixer` (schema 10; same wire as protocol MockSerial). A running bench test refuses sets. */
   private readonly motorDirection: MockMotorDirection;
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario }) {
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario; gyroHealthScenario?: GyroHealthMockScenario }) {
     /* An explicit receiver link scenario also sets the status failsafe line it implies (FW: every loss reason runs the failsafe). */
     if (opts?.receiverLinkScenario) { this.receiver.setScenario(opts.receiverLinkScenario); this.failsafeActive = this.receiver.failsafeActive(); }
     this.motorDirection = new MockMotorDirection(opts?.motorDirectionScenario ?? "props-out");
@@ -106,6 +108,7 @@ export class MockBobFlightHost implements BobFlightHost {
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
     this.gyroHealthy = opts?.gyroHealthy ?? false;
     this.loopRateScenario = opts?.loopRateScenario ?? "missing";
+    this.gyroHealthScenario = opts?.gyroHealthScenario ?? "missing";
   }
 
   getLastError(): string | null {
@@ -376,7 +379,7 @@ export class MockBobFlightHost implements BobFlightHost {
       case "version":
         return "BobFlight 0.1.0-skeleton";
       case "status": {
-        const gyroOk = this.gyroHealthy ? "yes" : "no";
+        const gyroOk = this.gyroOk() ? "yes" : "no";
         const arm = this.armed ? "armed" : "disarmed";
         const failsafe = this.failsafeActive ? "ACTIVE" : "ok";
         return [
@@ -384,6 +387,7 @@ export class MockBobFlightHost implements BobFlightHost {
           "ir: dummy",
           "mcu: mock hse_mhz=8",
           `gyro_ok: ${gyroOk}`,
+          ...mockGyroHealthLines(this.gyroHealthScenario),
           "gyro_bind: mock",
           "dshot_bound: 0/4",
           "motor_output: unavailable",
@@ -395,7 +399,7 @@ export class MockBobFlightHost implements BobFlightHost {
         ].join("\r\n");
       }
       case "arm":
-        if (this.gyroHealthy && !this.failsafeActive) {
+        if (this.gyroOk() && !this.failsafeActive) {
           this.armed = true;
           return "armed";
         }
@@ -412,6 +416,11 @@ export class MockBobFlightHost implements BobFlightHost {
       default:
         return "unknown — try help";
     }
+  }
+
+  /** FW contract: any non-ok gyro_health also makes gyro_ok no (and refuses arm). */
+  private gyroOk(): boolean {
+    return this.gyroHealthy && !mockGyroHealthForcesUnhealthy(this.gyroHealthScenario);
   }
 
   /** Match protocol MockSerial default fixtures when bidir on. */
@@ -434,7 +443,9 @@ export class MockBobFlightHost implements BobFlightHost {
     rpmFilterScenario?: RpmFilterMockScenario;
     motorDirectionScenario?: MotorDirectionMockScenario;
     receiverLinkScenario?: ReceiverLinkMockScenario;
+    gyroHealthScenario?: GyroHealthMockScenario;
   }): void {
+    if (opts.gyroHealthScenario !== undefined) this.gyroHealthScenario = opts.gyroHealthScenario;
     if (opts.receiverLinkScenario !== undefined) {
       this.receiver.setScenario(opts.receiverLinkScenario);
       if (opts.failsafeActive === undefined) this.failsafeActive = this.receiver.failsafeActive();

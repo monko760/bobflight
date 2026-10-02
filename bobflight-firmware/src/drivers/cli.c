@@ -118,8 +118,10 @@ static void cmd_status(void)
 {
     const board_t *b = board_get();
     const scheduler_stats_t *st = scheduler_stats();
-    char buf[1200], loop_lines[128];
+    char buf[1200], loop_lines[128], gyro_lines[96];
     if (loop_status_lines(loop_lines, sizeof loop_lines, hal_micros()) < 0) loop_lines[0] = '\0';
+    /* gyro_ok, gyro_health, gyro_sat_count: gyro_ok is "no" whenever health is not ok. */
+    if (gyro_status_lines(gyro_lines, sizeof gyro_lines) < 0) snprintf(gyro_lines, sizeof gyro_lines, "gyro_ok: no\r\n");
     const float *rates=gyro_latest_dps(),*acc=gyro_accel_g(),*angles=attitude_degrees(),*rc=rx_channels();
     const char *flight="bench-only";
 #if defined(BOBFLIGHT_FLIGHT_ENABLE) && BOBFLIGHT_FLIGHT_ENABLE
@@ -138,7 +140,7 @@ static void cmd_status(void)
              "ir: %s\r\n"
              "mcu: %s hse_mhz=%lu\r\n"
              "usb_clk: %s\r\n"
-             "gyro_ok: %s\r\n"
+             "%s"
              "gyro_bind: %s\r\n"
              "dshot_bound: %u/4\r\n"
              "rx: %s %s\r\n"
@@ -162,7 +164,7 @@ static void cmd_status(void)
              b ? b->mcu_family : "?",
              (unsigned long)(b ? b->hse_mhz : 0),
              hal_clock_usb_src(),
-             gyro_is_healthy() ? "yes" : "no",
+             gyro_lines,
              gyro_bind_state(),
              dshot_bound_count(),
              rx_protocol_name(),
@@ -561,6 +563,10 @@ void cli_poll(void)
     power_poll();
     sd_cli_poll();
     blackbox_cli_poll();
+    /* Background only (bg_cli_poll): bounded gyro chip-ID / config readback, one
+     * register at most every GYRO_HEALTH_PERIOD_MS, inside the time left before
+     * the next gyro slot. */
+    gyro_health_poll(scheduler_bg_budget_us(hal_micros()));
     uint8_t buf[32];
     size_t n = hal_usb_cdc_read(buf, sizeof(buf));
     for (size_t i = 0; i < n; i++) {

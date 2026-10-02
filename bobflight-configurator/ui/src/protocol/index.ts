@@ -44,6 +44,8 @@ export { LOOP_RATE_SETTING_KEY, LOOP_RATE_OPTIONS, LOOP_RATE_OPTION_LABELS, LOOP
 export type { LoopRateOption, LoopRateGetResult, LoopRateSetResult, LoopRateReport, LoopRateSettingView, LoopRateReasonView } from "@bobflight/protocol";
 export { GYRO_NOTCH_KEYS, GYRO_NOTCH_INDEXES, GYRO_NOTCH_UNKNOWN, notchCenterKey, notchCutoffKey, isGyroNotchKey, notchPairProblem, notchWritePlan, parseNotchGetReply, parseFiltersReport, notchRowView, GYRO_NOTCH_MOCK_SCENARIOS } from "@bobflight/protocol";
 export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, FiltersReportResult, NotchRowView, GyroNotchMockScenario } from "@bobflight/protocol";
+export { gyroHealthView, GYRO_HEALTH_KEYS, GYRO_HEALTH_UNKNOWN, GYRO_HEALTH_TOKENS, GYRO_HEALTH_MOCK_SCENARIOS, GYRO_HEALTH_MOCK_BIG_SAT, GYRO_HEALTH_MOCK_FUTURE_TOKEN, mockGyroHealthLines, mockGyroHealthForcesUnhealthy } from "@bobflight/protocol";
+export type { GyroHealthKey, GyroHealthView, GyroHealthMockScenario } from "@bobflight/protocol";
 export { RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, isRpmFilterKey, rpmValueProblem, qFromX100, qToX100, parseRpmFilterReport, rpmFilterView, RPM_FILTER_MOCK_SCENARIOS } from "@bobflight/protocol";
 export type { RpmFilterKey, RpmFilterMotor, RpmGetResult, RpmFilterReportResult, RpmFilterView, RpmFilterMockScenario } from "@bobflight/protocol";
 export {

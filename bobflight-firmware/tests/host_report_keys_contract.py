@@ -66,6 +66,21 @@ def capture(exe):
         res[r] = keys
     return res
 
+# S3 (fix/gyro-sanity, frozen spec): `status` gains exactly two keys,
+# gyro_health then gyro_sat_count, immediately after gyro_ok. The b77b845
+# golden is NOT re-captured: the expected key list is the golden with exactly
+# these two keys inserted at exactly that place, so any other status key/order
+# change still fails.
+S3_GYRO_STATUS_KEYS = ['gyro_health', 'gyro_sat_count']
+
+def s3_expected_status(golden):
+    keys = golden['status']
+    assert keys.count('gyro_ok') == 1, keys
+    assert not set(S3_GYRO_STATUS_KEYS) & set(keys), 'golden already has S3 keys'
+    i = keys.index('gyro_ok') + 1
+    print('NOTE status: expected = b77b845 keys + S3 gyro_health, gyro_sat_count right after gyro_ok')
+    return dict(golden, status=keys[:i] + S3_GYRO_STATUS_KEYS + keys[i:])
+
 def main():
     if sys.argv[1] == '--capture':
         exe, board = sys.argv[2], sys.argv[3]
@@ -75,6 +90,7 @@ def main():
     golden = json.load(open(GOLDEN))[board]
     golden = s2_expected_receiver(golden)
     got = capture(exe)
+    golden = s3_expected_status(golden)
     notes = []
     for r in REPORTS:
         if golden[r] is None:
