@@ -178,7 +178,18 @@ export interface MockSdFirmwareOptions {
   statusLines?: string[];
   /** `blackbox status` raw reply. */
   blackboxStatus?: string;
+  /** `sd_filesystem_hint` once the probe is done (FW: FAT32 or exFAT). */
+  filesystemHint?: string;
+  /** Probe/status refusal lines (tests vary the tails: UI logic may only depend on the prefix). */
+  recorderRefusalLine?: string;
+  guardRefusalLine?: string;
+  hostSimRefusalLine?: string;
 }
+
+/** FW refusal lines as merged in #42 (defaults for the mock; never matched on their tails by the UI). */
+export const MOCK_SD_RECORDER_REFUSAL = "sd unavailable: Blackbox recording owns the card; stop and wait for done";
+export const MOCK_SD_GUARD_REFUSAL = "sd refused: disarm, stop motor tests/calibration, connect USB, and wait or cancel the current probe";
+export const MOCK_SD_HOST_SIM_REFUSAL = "sd unavailable: no hardware backend in host simulation";
 
 const STATES = ["idle", "initializing", "reading-mbr", "reading-boot-sector", "done", "error", "cancelled"] as const;
 type Phase = (typeof STATES)[number];
@@ -199,6 +210,10 @@ export class MockSdCliFirmware {
   omitSectors: boolean;
   statusLines: string[];
   blackboxStatus: string;
+  filesystemHint: string;
+  recorderRefusalLine: string;
+  guardRefusalLine: string;
+  hostSimRefusalLine: string;
   phase: Phase;
   cardReady: boolean;
   /** Every command line received, in order. */
@@ -226,6 +241,10 @@ export class MockSdCliFirmware {
     this.omitSectors = !!o.omitSectors;
     this.statusLines = o.statusLines ?? ["board: kakute_f7_hdv", "arm: disarmed", "failsafe: ok", "loop_target_hz: 4000", "loop_actual_hz: 3998", "loop_overruns: 12"];
     this.blackboxStatus = o.blackboxStatus ?? MOCK_BLACKBOX_IDLE_STATUS;
+    this.filesystemHint = o.filesystemHint ?? "FAT32";
+    this.recorderRefusalLine = o.recorderRefusalLine ?? MOCK_SD_RECORDER_REFUSAL;
+    this.guardRefusalLine = o.guardRefusalLine ?? MOCK_SD_GUARD_REFUSAL;
+    this.hostSimRefusalLine = o.hostSimRefusalLine ?? MOCK_SD_HOST_SIM_REFUSAL;
     this.phase = o.initialPhase ?? "idle";
     this.cardReady = this.phase === "done" && !!this.card;
   }
@@ -248,7 +267,7 @@ export class MockSdCliFirmware {
     const sectors = ready ? this.card!.cardSectors : 0;
     return `sd_api: 1\r\nsd_state: ${this.phase}\r\nsd_detail: ${this.phase === "done" ? "geometry-recognized-not-mounted" : this.phase === "idle" ? "not-probed" : this.phase}\r\n` +
       `sd_capacity_bytes: ${sectors * 512}\r\n${this.omitSectors ? "" : `sd_sectors: ${sectors}\r\n`}sd_partition_lba: ${ready ? this.card!.partitionOffset : 0}\r\n` +
-      `sd_filesystem_hint: ${ready ? "FAT32" : "unknown"}\r\nsd_cluster_bytes: ${ready ? this.card!.secPerClus * 512 : 0}\r\nsd_volume_flags: 0\r\nsd_io_error: ${this.sdIoError}\r\n` +
+      `sd_filesystem_hint: ${ready ? this.filesystemHint : "unknown"}\r\nsd_cluster_bytes: ${ready ? this.card!.secPerClus * 512 : 0}\r\nsd_volume_flags: 0\r\nsd_io_error: ${this.sdIoError}\r\n` +
       "sd_write_enabled: no\r\nsd_filesystem_validated: no\r\nsd_end: 1\r\n";
   }
 
@@ -266,11 +285,11 @@ export class MockSdCliFirmware {
     const isRead = line.startsWith("sd read") && (line.length === 7 || line[7] === " ");
     if (line !== "sd probe" && line !== "sd status" && line !== "sd cancel" && !isRead) { emit("unknown — try help\r\n"); return; }
     if (this.hostSimulation) {
-      emit(isRead ? "sd_data_error: no hardware backend in host simulation\r\nsd_data_end: 1\r\n" : "sd unavailable: no hardware backend in host simulation\r\nsd_write_enabled: no\r\nsd_end: 1\r\n");
+      emit(isRead ? "sd_data_error: no hardware backend in host simulation\r\nsd_data_end: 1\r\n" : `${this.hostSimRefusalLine}\r\nsd_write_enabled: no\r\nsd_end: 1\r\n`);
       return;
     }
     if (this.recorderOwnsCard) {
-      emit(isRead ? "sd_data_error: blackbox busy\r\nsd_data_end: 1\r\n" : "sd unavailable: Blackbox recording owns the card; stop and wait for done\r\nsd_end: 1\r\n");
+      emit(isRead ? "sd_data_error: blackbox busy\r\nsd_data_end: 1\r\n" : `${this.recorderRefusalLine}\r\nsd_end: 1\r\n`);
       return;
     }
     if (this.readActive) {
@@ -287,7 +306,7 @@ export class MockSdCliFirmware {
     if (isRead) { this.beginRead(line, emit); return; }
     if (line === "sd probe") {
       if (!this.guard() || this.probeBusy()) {
-        emit("sd refused: disarm, stop motor tests/calibration, connect USB, and wait or cancel the current probe\r\nsd_end: 1\r\n");
+        emit(`${this.guardRefusalLine}\r\nsd_end: 1\r\n`);
         return;
       }
       this.phase = "initializing";

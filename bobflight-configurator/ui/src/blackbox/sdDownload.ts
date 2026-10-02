@@ -2,15 +2,20 @@
 /**
  * Integrated onboard SD log download (BB2a). Frozen FW sequence (#42) on every
  * list and every download: fresh `sd probe` -> `sd status` until done (15 s
- * cap; sd_sectors present, sd_io_error 0) -> one `sd read <N>` at a time
- * (protocol SdSectorReader through the shared CommandGate) -> `sd cancel`.
+ * cap; sd_sectors present, sd_io_error 0) -> `blackbox status` re-read (refuse
+ * while recording; an unreadable/older reply is allowed and shown as
+ * "Recorder state unknown") -> one `sd read <N>` at a time (protocol
+ * SdSectorReader through the shared CommandGate) -> `sd cancel`.
  *
  * Never saves a corrupted file: a CRC mismatch is retried once for that sector,
  * then the download aborts naming the sector. The Blob is created only after
  * every sector of the file verified and the length equals the directory entry.
  * FW error/refusal lines are kept verbatim for display. Cancel, tab leave and
  * disconnect abort cleanly: partial data is dropped and `sd cancel` is sent
- * whenever the link is still connected.
+ * whenever the link is still connected. A timeout resets the USB link (client
+ * policy for an unterminated framed reply): the user is told to reconnect.
+ * FW refusals are recognised by their `sd refused:` / `sd unavailable:` prefix
+ * only (protocol parser) and shown as the full line.
  */
 import {
   Fat32RootReader,
@@ -22,12 +27,15 @@ import {
   type SdReadResult,
   type SdStatusResult,
 } from '@bobflight/protocol';
+import { ONBOARD_ACTIVE_STATES, parseOnboardReply } from './onboard';
 
-export type SdDownloadCommand = 'sd probe' | 'sd status' | 'sd cancel';
+export type SdDownloadCommand = 'sd probe' | 'sd status' | 'sd cancel' | 'blackbox status';
 export interface SdDownloadLink {
   getConnectionStatus(): string;
   sendCommand(cmd: SdDownloadCommand): Promise<string>;
   readSdSector?(sector: number): Promise<SdReadResult>;
+  /** Host-wide settings storage action in flight (save, defaults, storage refresh). */
+  storageActionPending?(): boolean;
 }
 export type SdDownloadPhase = 'idle' | 'probing' | 'scanning' | 'downloading' | 'cancelling';
 export type SdCancelReason = 'user' | 'left-tab' | 'disconnected' | 'blocked';
@@ -57,23 +65,76 @@ export interface SdDownloadOptions {
   onChange?: () => void;
 }
 
+/**
+ * What holds the storage lock on the Blackbox tab: a settings storage action
+ * in flight on any page (save, defaults, StoragePanel refresh), the SD card
+ * check, or the USB bench recorder.
+ */
+export type SdStorageBlock = false | 'settings' | 'sd-check' | 'bench-recorder';
+
+export const STORAGE_BLOCK_TEXT: Record<Exclude<SdStorageBlock, false>, string> = {
+  settings: 'A settings storage action (save, defaults or storage refresh) is in progress: wait for it to finish before downloading.',
+  'sd-check': 'Finish the SD card check before downloading.',
+  'bench-recorder': 'Stop the USB bench recording before downloading.',
+};
+
+/** The page's storage lock, first holder wins. */
+export function storageBlock(s: { settingsPending: boolean; sdCheckBusy: boolean; benchRecording: boolean }): SdStorageBlock {
+  if (s.settingsPending) return 'settings';
+  if (s.sdCheckBusy) return 'sd-check';
+  if (s.benchRecording) return 'bench-recorder';
+  return false;
+}
+
 /** Why Download / List are disabled, or null. FW still enforces its own locks. */
-export function downloadBlockedReason(s: { connected: boolean; postFlashGate: boolean; recording: boolean; armed: boolean; storageBlocked: boolean; supported: boolean }): string | null {
+export function downloadBlockedReason(s: { connected: boolean; postFlashGate: boolean; recording: boolean; armed: boolean; storageBlocked: SdStorageBlock; supported: boolean }): string | null {
   if (!s.connected) return 'Connect to the controller to download logs from its SD card.';
   if (s.postFlashGate) return 'Complete the post-flash connection checks before downloading logs.';
   if (!s.supported) return 'This connection cannot read SD sectors.';
   if (s.recording) return 'Onboard recording owns the SD card: stop recording and wait for done before downloading.';
   if (s.armed) return 'Disarm before downloading logs from the SD card.';
-  if (s.storageBlocked) return 'Finish the SD card check or USB bench recording before downloading.';
+  if (s.storageBlocked) return STORAGE_BLOCK_TEXT[s.storageBlocked];
   return null;
+}
+
+/** Shown (visible) when the pre-download `blackbox status` gave no usable recorder state. */
+export const RECORDER_STATE_UNKNOWN =
+  "Recorder state unknown: the controller's blackbox status reply could not be read (older firmware?). The download relies on the controller's own SD card lock.";
+
+export type RecorderVerdict = { kind: 'idle' } | { kind: 'recording'; line: string } | { kind: 'unknown' };
+
+/**
+ * Recorder state from a `blackbox status` reply. A strict reply decides; an
+ * unreadable one still refuses on any sign of an active session
+ * (`blackbox_active: 1` or an active state); otherwise the state is unknown.
+ */
+export function recorderVerdict(raw: string | null): RecorderVerdict {
+  if (raw === null) return { kind: 'unknown' };
+  const lines = raw.split(/\r\n|\n|\r/).map((l) => l.trim());
+  const stateLine = lines.find((l) => /^blackbox_state:/.test(l)) ?? null;
+  const activeLine = lines.find((l) => /^blackbox_active:/.test(l)) ?? null;
+  const recording = (): RecorderVerdict => ({ kind: 'recording', line: stateLine ?? activeLine ?? 'blackbox_active: 1' });
+  try {
+    const snap = parseOnboardReply(raw);
+    if (!snap.unavailable) return snap.active ? recording() : { kind: 'idle' };
+  } catch { /* fall through: fail safe below */ }
+  const state = stateLine?.replace(/^blackbox_state:\s*/, '') ?? '';
+  const active = activeLine?.replace(/^blackbox_active:\s*/, '') ?? '';
+  if (active === '1' || (ONBOARD_ACTIVE_STATES as readonly string[]).includes(state)) return recording();
+  return { kind: 'unknown' };
 }
 
 class Abort extends Error {
   constructor(readonly text: string, readonly fwLine: string | null = null, readonly tone: 'error' | 'info' = 'error') { super(text); }
 }
+/** A command timed out; the text depends on whether the client reset the USB link. */
+class TimeoutAbort extends Abort {
+  constructor(readonly what: string, readonly detail: string) { super(`${what} timed out (${detail}).`); }
+}
 
 const NOTHING_SAVED = 'Nothing was saved.';
 const isGateBusy = (e: unknown) => /request not queued/.test(e instanceof Error ? e.message : String(e));
+const isTimeoutError = (e: unknown) => /terminator missing|timed out/.test(e instanceof Error ? e.message : String(e));
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
 export class SdDownloadController {
@@ -81,6 +142,8 @@ export class SdDownloadController {
   files: Fat32BblEntry[] | null = null;
   progress: SdDownloadProgress | null = null;
   message: SdDownloadMessage | null = null;
+  /** RECORDER_STATE_UNKNOWN when the last pre-read `blackbox status` gave no usable state, else null. */
+  recorderNote: string | null = null;
   /** Sector reads sent in the current/last operation (tests and diagnostics). */
   sectorReads = 0;
   private cancelReason: SdCancelReason | null = null;
@@ -136,6 +199,7 @@ export class SdDownloadController {
     for (;;) {
       try { return await work(); } catch (e) {
         if (isGateBusy(e) && this.now() < deadline && !this.cancelReason) { await this.sleep(40); continue; }
+        if (isTimeoutError(e)) throw new TimeoutAbort(what, `no complete reply: ${errText(e)}`);
         if (!this.connected()) throw new Abort(this.cancelText('disconnected', what), null, 'info');
         throw e;
       }
@@ -176,15 +240,35 @@ export class SdDownloadController {
       const cap = sdReadyCapacity(st);
       if (!cap.ok) throw new Abort(`The card is not ready for reading: ${cap.reason}. ${NOTHING_SAVED}`);
       if (st.filesystem !== null && st.filesystem !== 'FAT32') {
-        throw new Abort(`The card reports sd_filesystem_hint: ${st.filesystem}. Only FAT32 cards can be read here; use an SD card reader. ${NOTHING_SAVED}`);
+        throw new Abort(
+          `This card is not FAT32 (sd_filesystem_hint: ${st.filesystem}). Only FAT32 cards can be read over USB here; take the card out and copy the logs with an SD card reader. ${NOTHING_SAVED}`,
+          `sd_filesystem_hint: ${st.filesystem}`,
+        );
       }
       sectors = cap.sectors;
       break;
     }
+    await this.checkRecorder(what);
     this.phase = 'scanning'; this.changed();
     const fs = new Fat32RootReader((lba) => this.readVerified(lba, what), sectors);
     await this.fat(() => fs.mount());
     return fs;
+  }
+
+  /** Re-read `blackbox status` before any sd read: refuse while recording; unknown is allowed (FW lock) and shown. */
+  private async checkRecorder(what: string): Promise<void> {
+    let raw: string | null = null;
+    try { raw = await this.withGate(what, () => this.link.sendCommand('blackbox status')); } catch (e) {
+      if (e instanceof Abort) throw e;
+      raw = null; // reply missing: treat as unknown (older FW)
+    }
+    this.check(what);
+    const v = recorderVerdict(raw);
+    if (v.kind === 'recording') {
+      throw new Abort(`Onboard recording is active, so the recorder owns the SD card: stop recording and wait for done, then try again. No sd read was sent. ${NOTHING_SAVED}`, v.line);
+    }
+    this.recorderNote = v.kind === 'unknown' ? RECORDER_STATE_UNKNOWN : null;
+    this.changed();
   }
 
   private async fat<T>(work: () => Promise<T>): Promise<T> {
@@ -219,7 +303,7 @@ export class SdDownloadController {
           throw new Abort(`CRC mismatch on sector ${lba} (FC sent ${r.sentCrc}, data computes to ${r.actualCrc}) after one retry. Download aborted. ${NOTHING_SAVED}`);
         case 'error': throw new Abort(`The flight controller stopped the read of sector ${lba}. ${NOTHING_SAVED}`, r.line);
         case 'refused': throw new Abort(`The flight controller refused sd read ${lba}. ${NOTHING_SAVED}`, r.line);
-        case 'timeout': throw new Abort(`No reply to sd read ${lba} within ${r.timeoutMs / 1000} s. ${NOTHING_SAVED}`);
+        case 'timeout': throw new TimeoutAbort(what, `no reply to sd read ${lba} within ${r.timeoutMs / 1000} s`);
         case 'malformed': throw new Abort(`Invalid reply to sd read ${lba}: ${r.reason}. ${NOTHING_SAVED}`);
       }
     }
@@ -243,14 +327,32 @@ export class SdDownloadController {
     this.message = null;
     this.progress = null;
     this.sectorReads = 0;
+    this.recorderNote = null;
+    if (this.link.storageActionPending?.()) {
+      this.message = { tone: 'error', text: `${STORAGE_BLOCK_TEXT.settings} Nothing was sent.`, fwLine: null };
+      this.changed();
+      return false;
+    }
     return true;
+  }
+
+  /** The client drops the link after an unterminated framed reply; wait briefly for that before wording the message. */
+  private async timeoutText(t: TimeoutAbort): Promise<string> {
+    const end = this.now() + 1000;
+    while (this.connected() && this.now() < end) await this.sleep(20);
+    const subject = t.what === 'Download' ? 'The download' : 'Listing the card';
+    const again = t.what === 'Download' ? 'download again' : 'list the card again';
+    return this.connected()
+      ? `${subject} timed out (${t.detail}). Try again: ${again}. ${NOTHING_SAVED}`
+      : `${subject} timed out (${t.detail}) and the USB link was reset. Reconnect, then ${again}. ${NOTHING_SAVED}`;
   }
 
   private async fail(e: unknown): Promise<void> {
     const abort = e instanceof Abort ? e : new Abort(`Download failed: ${errText(e)}. ${NOTHING_SAVED}`);
     this.progress = null; // partial data is discarded with the operation's buffers
+    const text = abort instanceof TimeoutAbort ? await this.timeoutText(abort) : abort.text;
     const cancelNote = await this.endSession();
-    this.message = { tone: abort.tone, text: abort.text + (abort.tone === 'info' ? ` Partial data was discarded.${cancelNote}` : cancelNote), fwLine: abort.fwLine };
+    this.message = { tone: abort.tone, text: text + (abort.tone === 'info' ? ` Partial data was discarded.${cancelNote}` : cancelNote), fwLine: abort.fwLine };
   }
 
   private finish(): void {

@@ -14,17 +14,18 @@ import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { savedFiles } from "./fixtures/saveBlobStub";
 import { BlackboxPage } from "../src/pages/BlackboxPage";
 import { CommandGate } from "../src/protocol/commandGate";
-import { SdDownloadController } from "../src/blackbox/sdDownload";
+import { SdDownloadController, RECORDER_STATE_UNKNOWN } from "../src/blackbox/sdDownload";
+import { StorageActivity, isStorageCommand } from "../src/protocol/storageActivity";
+import { readFileSync } from "node:fs";
 import {
   BobFlightCliClient,
   SdSectorReader,
   parseStatus,
   SD_DATA_ERROR_TEXTS,
-  SD_PROBE_REFUSALS,
   SD_PROBE_TIMEOUT_MS,
   type CliCommand,
 } from "@bobflight/protocol";
-import { SparseFat32Card, MockSdCliFirmware, SdSimTransportFactory, type MockSdFirmwareOptions } from "../../protocol/src/sd-read-mock";
+import { SparseFat32Card, MockSdCliFirmware, SdSimTransportFactory, MOCK_BLACKBOX_IDLE_STATUS, type MockSdFirmwareOptions } from "../../protocol/src/sd-read-mock";
 
 const { container } = installFakeDom();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -83,6 +84,7 @@ interface Rig {
   fw: MockSdCliFirmware; card: SparseFat32Card; factory: SdSimTransportFactory; client: BobFlightCliClient;
   ctx: Record<string, unknown>; root: Root; rerender(): void; setVisible(v: boolean): void;
   hostReads: { current: number; max: number }; wireReads: { current: number; max: number };
+  storage: StorageActivity; saveSettings(): Promise<void>;
   mark(): number; sdSince(mark: number): string[]; done(): Promise<void>;
 }
 const FILES = [
@@ -90,6 +92,7 @@ const FILES = [
   { name: "BFL00002.BBL", size: 700, clusters: [6] },
   { name: "BFL00003.BBL", size: 20000, clusters: [10, 7] },
 ];
+const MOCK_IDLE = MOCK_BLACKBOX_IDLE_STATUS;
 const RECORDING_STATUS = "blackbox_api: 2\r\nblackbox_state: recording\r\nblackbox_reason: recording\r\nblackbox_file: BFL00004.BBL\r\nblackbox_bytes: 1024\r\nblackbox_frames: 10\r\nblackbox_rate_hz: 500\r\nblackbox_dropped: 0\r\nblackbox_missed: 0\r\nblackbox_invalid: 0\r\nblackbox_queue: 0\r\nblackbox_active: 1\r\nblackbox_rate_requested_hz: 500\r\nblackbox_rate_reason: default\r\nblackbox_drop_pct: 0.0\r\nblackbox_end: 1\r\n";
 
 async function rig(fwOpts: MockSdFirmwareOptions = {}, readTimeoutMs = 4000): Promise<Rig> {
@@ -108,14 +111,25 @@ async function rig(fwOpts: MockSdFirmwareOptions = {}, readTimeoutMs = 4000): Pr
     wireReads.max = Math.max(wireReads.max, ++wireReads.current);
     try { return await client.sendCommand(cmd, opts); } finally { wireReads.current--; }
   }, readTimeoutMs);
+  // Same storage-activity wiring as createHost: storage/save/defaults lines and saveSettings are tracked host-wide.
+  const storage = new StorageActivity(120);
+  let pendingSave: Promise<void> = Promise.resolve();
   const host = {
     getConnectionStatus: () => client.getConnectionStatus(),
-    sendCommand: (cmd: CliCommand) => gate.run(() => client.sendCommand(cmd)),
+    sendCommand: (cmd: CliCommand) => {
+      const run = () => gate.run(() => client.sendCommand(cmd));
+      return isStorageCommand(cmd) ? storage.track(run) : run();
+    },
+    storageActionPending: () => storage.pending,
+    onStorageActivity: (cb: () => void) => storage.subscribe(cb),
+    /** A save the test controls: pending until the test resolves `pendingSave`'s gate. */
+    saveSettings: () => storage.track(() => pendingSave),
     readSdSector: async (sector: number) => {
       hostReads.max = Math.max(hostReads.max, ++hostReads.current);
       try { return await reader.read(sector); } finally { hostReads.current--; }
     },
   };
+  (globalThis as Record<string, unknown>).__setPendingSave = (p: Promise<void>) => { pendingSave = p; };
   let visible = true;
   let root: Root | null = null;
   const rerender = () => { if (root) flushSync(() => root!.render(<BlackboxPage visible={visible} />)); };
@@ -132,7 +146,8 @@ async function rig(fwOpts: MockSdFirmwareOptions = {}, readTimeoutMs = 4000): Pr
   assert.ok(await waitFor(() => fw.log.includes("blackbox status") && fw.log.includes("status") && !!ctx.status, 4000), `initial polls: ${fw.log.join(", ")}`);
   await sleep(20);
   return {
-    fw, card, factory, client, ctx, root, rerender, hostReads, wireReads,
+    fw, card, factory, client, ctx, root, rerender, hostReads, wireReads, storage,
+    saveSettings: () => host.saveSettings(),
     setVisible(v: boolean) { visible = v; rerender(); },
     mark: () => fw.log.length,
     sdSince: (m: number) => fw.log.slice(m).filter((l) => l.startsWith("sd ")),
@@ -279,19 +294,24 @@ async function main() {
     await r.done();
   });
 
-  await test("probe refusals verbatim: recording owns the card, armed, host simulation; no sd read is sent", async () => {
-    const cases: Array<[MockSdFirmwareOptions, string]> = [
-      [{ recorderOwnsCard: true }, SD_PROBE_REFUSALS[0]],
-      [{ armed: true }, SD_PROBE_REFUSALS[1]],
-      [{ hostSimulation: true }, "sd unavailable: no hardware backend in host simulation"],
+  await test("probe refusals matched on the `sd refused:` / `sd unavailable:` prefix, full line verbatim (default and varied tails): recording owns the card, armed, host simulation; no sd read is sent", async () => {
+    const cases: Array<[MockSdFirmwareOptions, (fw: MockSdCliFirmware) => string]> = [
+      [{ recorderOwnsCard: true }, (fw) => fw.recorderRefusalLine],
+      [{ armed: true }, (fw) => fw.guardRefusalLine],
+      [{ hostSimulation: true }, (fw) => fw.hostSimRefusalLine],
+      // Future FW wording: only the prefix is contract; the tail must still be shown as sent.
+      [{ recorderOwnsCard: true, recorderRefusalLine: "sd unavailable: recorder is closing BFL00009.BBL (FW 2.x wording)" }, (fw) => fw.recorderRefusalLine],
+      [{ armed: true, guardRefusalLine: "sd refused: motor test 3 running; try again later" }, (fw) => fw.guardRefusalLine],
     ];
-    for (const [opts, line] of cases) {
+    for (const [opts, emitted] of cases) {
       const r = await rig(opts); // FC still reports idle + disarmed: only the FW lock refuses (race)
+      const line = emitted(r.fw);
       click("Probe card and list logs");
       await expectMessage(/^The flight controller refused sd probe\. Nothing was saved\./);
       assert.equal(shown("bb-download-fw-line"), line, "refusal shown verbatim");
-      assert.ok(pageText().includes(line));
+      assert.ok(pageText().includes(`Controller reply: ${line}`));
       assert.ok(!r.fw.log.some((l) => l.startsWith("sd read")), "no sd read after a refused probe");
+      assert.equal(r.sdSince(0).at(-1), "sd cancel", "stopped with sd cancel");
       assert.equal(fileRows().length, 0);
       await r.done();
     }
@@ -323,19 +343,37 @@ async function main() {
     await r.done();
   });
 
-  await test("timeout: no reply to a sector aborts naming it; nothing saved; no further reads", async () => {
+  await test("timeout on the final sector (all other sectors verified): plain 'timed out, USB link reset, reconnect' text, visible as an alert; no file is ever written", async () => {
     const r = await rig({}, 300);
     await listCard(r);
-    const lba = dataLba(r, "BFL00001.BBL", 5);
+    const lba = dataLba(r, "BFL00001.BBL", 78); // last of 79: everything else is already in the buffer
     r.fw.addFault(lba, { type: "silent" });
     const m = r.mark();
     click("Download BFL00001.BBL");
-    await expectMessage(new RegExp(`^No reply to sd read ${lba} within 0\\.3 s\\. Nothing was saved\\.`));
-    assert.equal(savedFiles().length, 0);
-    assert.equal(r.fw.log.slice(m).filter((l) => l.startsWith("sd read")).at(-1), `sd read ${lba}`);
+    const text = `The download timed out (no reply to sd read ${lba} within 0.3 s) and the USB link was reset. Reconnect, then download again. Nothing was saved. sd cancel was not sent (not connected).`;
+    assert.ok(await waitFor(() => shown("bb-download-message") === text, 8000), `visible timeout text; got "${shown("bb-download-message")}"`);
+    assert.ok(pageText().includes("timed out") && pageText().includes("the USB link was reset. Reconnect"), "rendered as visible page text");
+    assert.equal(byTestId("bb-download-result")?.getAttribute("role"), "alert");
+    assert.equal(savedFiles().length, 0, "a timeout never writes a file");
+    const expected = Array.from({ length: 79 }, (_, i) => `sd read ${dataLba(r, "BFL00001.BBL", i)}`);
+    assert.deepEqual(r.fw.log.slice(m).filter((l) => l.startsWith("sd read")).slice(-79), expected, "all 79 data sectors were requested (78 verified)");
+    assert.equal(r.fw.log.slice(m).filter((l) => l.startsWith("sd read")).at(-1), `sd read ${lba}`, "no read after the timed-out sector");
     // Existing client policy: a framed reply that never terminates drops the link (late bytes are never misattributed).
     assert.equal(r.client.getConnectionStatus(), "disconnected");
-    assert.match(shown("bb-download-message") ?? "", /sd cancel was not sent \(not connected\)\./);
+    await sleep(100);
+    assert.equal(savedFiles().length, 0, "still nothing written after the link reset");
+    await r.done();
+  });
+
+  await test("timeout while listing: same plain reset text (list again), nothing saved, no file rows", async () => {
+    const r = await rig({}, 300);
+    const boot = 0; // the first sd read of a list (MBR / boot sector)
+    r.fw.addFault(boot, { type: "silent" });
+    click("Probe card and list logs");
+    await expectMessage(new RegExp(`^Listing the card timed out \\(no reply to sd read ${boot} within 0\\.3 s\\) and the USB link was reset\\. Reconnect, then list the card again\\. Nothing was saved\\.`));
+    assert.equal(byTestId("bb-download-result")?.getAttribute("role"), "alert");
+    assert.equal(fileRows().length, 0);
+    assert.equal(savedFiles().length, 0);
     await r.done();
   });
 
@@ -421,6 +459,105 @@ async function main() {
     await r.done();
   });
 
+  await test("pre-read `blackbox status`: recording refuses with no sd read (list and download), verbatim state line, sd cancel sent", async () => {
+    const r = await rig();
+    // Listing: recording starts between the page's last poll and the click (the FW lock is not hit in this race).
+    let m = r.mark();
+    click("Probe card and list logs");
+    r.fw.blackboxStatus = RECORDING_STATUS;
+    await expectMessage(/^Onboard recording is active, so the recorder owns the SD card: stop recording and wait for done, then try again\. No sd read was sent\. Nothing was saved\. Sent sd cancel\.$/);
+    assert.equal(shown("bb-download-fw-line"), "blackbox_state: recording");
+    let log = r.fw.log.slice(m);
+    assert.ok(log.indexOf("blackbox status") > log.indexOf("sd probe"), `blackbox status re-read after the fresh probe: ${log.join(", ")}`);
+    assert.ok(!log.some((l) => l.startsWith("sd read")), "no sd read while recording");
+    assert.equal(log.filter((l) => l.startsWith("sd ")).at(-1), "sd cancel");
+    assert.equal(fileRows().length, 0);
+    // Download: listed while idle, then recording starts before the click is handled.
+    r.fw.blackboxStatus = MOCK_IDLE;
+    assert.ok(await waitFor(() => shown("bb-download-blocked") === null, 5000));
+    await listCard(r);
+    m = r.mark();
+    click("Download BFL00002.BBL");
+    r.fw.blackboxStatus = RECORDING_STATUS;
+    await expectMessage(/^Onboard recording is active/);
+    log = r.fw.log.slice(m);
+    assert.ok(log.includes("blackbox status") && !log.some((l) => l.startsWith("sd read")), `download refused before any sd read: ${log.join(", ")}`);
+    assert.equal(savedFiles().length, 0);
+    // An unreadable reply that still says a session is active also refuses (fail safe).
+    r.fw.blackboxStatus = MOCK_IDLE;
+    assert.ok(await waitFor(() => shown("bb-download-blocked") === null, 5000));
+    m = r.mark();
+    click("Download BFL00002.BBL");
+    r.fw.blackboxStatus = "blackbox_state: draining\r\nblackbox_active: 1\r\nblackbox_end: 1\r\n"; // strict parser rejects it (fields missing)
+    await expectMessage(/^Onboard recording is active/);
+    assert.equal(shown("bb-download-fw-line"), "blackbox_state: draining");
+    assert.ok(!r.fw.log.slice(m).some((l) => l.startsWith("sd read")));
+    assert.equal(savedFiles().length, 0);
+    await r.done();
+  });
+
+  await test("pre-read `blackbox status` unknown (older FW `unknown — try help`): list and download proceed and 'Recorder state unknown' is visible", async () => {
+    const r = await rig({ blackboxStatus: "unknown — try help\r\n" });
+    let m = r.mark();
+    await listCard(r);
+    assert.ok(r.fw.log.slice(m).includes("blackbox status"));
+    assert.equal(shown("bb-download-recorder-note"), RECORDER_STATE_UNKNOWN);
+    assert.ok(pageText().includes("Recorder state unknown"), "visible");
+    m = r.mark();
+    click("Download BFL00002.BBL");
+    await expectMessage(/^Saved BFL00002\.BBL: 700 bytes, 2 sectors CRC-verified\. Sent sd cancel\.$/);
+    const log = r.fw.log.slice(m);
+    const bb = log.indexOf("blackbox status");
+    assert.ok(bb > log.indexOf("sd probe") && bb < log.findIndex((l) => l.startsWith("sd read")), `order: probe, blackbox status, reads: ${log.join(", ")}`);
+    assert.ok(pageText().includes("Recorder state unknown"), "still visible after the download");
+    assert.deepEqual(Buffer.from(await savedBytes()), Buffer.from(r.card.payload("BFL00002.BBL")));
+    // A readable idle reply clears the note.
+    r.fw.blackboxStatus = MOCK_IDLE;
+    await listCard(r);
+    assert.equal(shown("bb-download-recorder-note"), null);
+    await r.done();
+  });
+
+  await test("non-FAT32 card (sd_filesystem_hint: exFAT): refused before any sd read, hint shown verbatim, card-reader fallback named", async () => {
+    const r = await rig({ filesystemHint: "exFAT" });
+    click("Probe card and list logs");
+    await expectMessage(/^This card is not FAT32 \(sd_filesystem_hint: exFAT\)\. Only FAT32 cards can be read over USB here; take the card out and copy the logs with an SD card reader\. Nothing was saved\. Sent sd cancel\.$/);
+    assert.equal(shown("bb-download-fw-line"), "sd_filesystem_hint: exFAT");
+    assert.ok(pageText().includes("SD card reader"));
+    assert.ok(!r.fw.log.some((l) => l.startsWith("sd read")));
+    assert.equal(fileRows().length, 0);
+    await r.done();
+  });
+
+  await test("storage lock: a pending settings save (or storage refresh) disables List and Download with its reason; enabled again when it settles", async () => {
+    const r = await rig();
+    await listCard(r);
+    let release!: () => void;
+    (globalThis as Record<string, (p: Promise<void>) => void>).__setPendingSave(new Promise<void>((res) => { release = res; }));
+    const save = r.saveSettings();
+    assert.ok(await waitFor(() => /settings storage action \(save, defaults or storage refresh\) is in progress/.test(shown("bb-download-blocked") ?? ""), 2000), `save lock: ${shown("bb-download-blocked")}`);
+    assert.ok(isDisabled(button("Probe card and list logs")) && isDisabled(button("Download BFL00001.BBL")) && isDisabled(button("Download BFL00002.BBL")));
+    await sleep(300);
+    assert.ok(isDisabled(button("Download BFL00001.BBL")), "stays disabled while the save is pending");
+    const m = r.mark();
+    release();
+    await save;
+    assert.ok(await waitFor(() => shown("bb-download-blocked") === null, 2000), "unlocked after the save settles");
+    assert.ok(!isDisabled(button("Download BFL00001.BBL")));
+    assert.ok(!r.fw.log.slice(m).some((l) => l.startsWith("sd ")), "nothing SD was sent by the lock");
+    // A StoragePanel refresh (`storage` through the host) holds the same lock.
+    void (r.ctx.host as { sendCommand(c: CliCommand): Promise<string> }).sendCommand("storage");
+    assert.ok(await waitFor(() => /settings storage action/.test(shown("bb-download-blocked") ?? ""), 1000), "storage refresh locks Download");
+    assert.ok(await waitFor(() => shown("bb-download-blocked") === null, 3000));
+    // createHost wires the same tracking for every page's save/defaults/storage.
+    const src = readFileSync(new URL("../src/protocol/createHost.ts", import.meta.url), "utf8");
+    assert.match(src, /isStorageCommand\(cmd\) \? this\.storage\.track\(run\) : run\(\)/);
+    assert.match(src, /this\.storage\.track\(\(\) => this\.commands\.run\(\(\) => this\.client\.saveSettings\(\)\)\)/);
+    assert.match(src, /this\.storage\.track\(\(\) => this\.commands\.run\(\(\) => this\.client\.restoreDefaults\(\)\)\)/);
+    assert.ok(isStorageCommand("storage") && isStorageCommand("save") && isStorageCommand("defaults") && !isStorageCommand("status"));
+    await r.done();
+  });
+
   await test("controller: 15 s probe cap by default; a probe that never completes aborts with sd cancel", async () => {
     const fw = new MockSdCliFirmware({ card: new SparseFat32Card(), probeMs: Infinity });
     const client = new BobFlightCliClient(new SdSimTransportFactory(fw));
@@ -441,6 +578,12 @@ async function main() {
     assert.equal(fw.sdCommands().at(-1), "sd cancel");
     assert.ok(!fw.log.some((l) => l.startsWith("sd read")));
     assert.equal(saved.length, 0);
+    // A settings storage action in flight: refused before anything is sent.
+    const before = fw.log.length;
+    const locked = new SdDownloadController({ ...link, storageActionPending: () => true }, { save: (n) => saved.push(n) });
+    assert.equal(await locked.list(), false);
+    assert.match(locked.message?.text ?? "", /settings storage action .* Nothing was sent\.$/);
+    assert.equal(fw.log.length, before, "nothing sent while storage is busy");
     await client.disconnect();
   });
 

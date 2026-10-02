@@ -93,6 +93,14 @@ export interface BobFlightHost {
    * pipelined. Optional: hosts without it cannot download from the SD card.
    */
   readSdSector?(sector: number): Promise<SdReadResult>;
+  /**
+   * True while a settings storage action (flash save, `defaults`, `storage`
+   * read such as the StoragePanel refresh) is in flight on any page.
+   * Optional: hosts without it report no storage activity.
+   */
+  storageActionPending?(): boolean;
+  /** Called when `storageActionPending()` may have changed; returns an unsubscribe. */
+  onStorageActivity?(cb: () => void): () => void;
 
   /**
    * Chrome/Edge Web Serial picker (user gesture). Registers port and returns

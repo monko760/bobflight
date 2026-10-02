@@ -101,6 +101,9 @@ export function describeOnboardDrops(s: Pick<OnboardSnapshot, 'dropped' | 'dropP
   return `${s.dropped.toLocaleString('en-US')} dropped (${formatOnboardDropPct(s.dropPct)})`;
 }
 
+/** States in which the FW reports an active session (`blackbox_active: 1`): the recorder owns the SD card. */
+export const ONBOARD_ACTIVE_STATES = ['initializing', 'preparing', 'writing-header', 'recording', 'draining', 'closing'] as const;
+
 export function parseOnboardReply(raw: string): OnboardSnapshot {
   if (raw.length > 8192) {
     throw new Error('Blackbox reply exceeds size limit.');
@@ -202,7 +205,7 @@ export function parseOnboardReply(raw: string): OnboardSnapshot {
     return hz;
   };
 
-  const expectedActive=['initializing','preparing','writing-header','recording','draining','closing'].includes(fields.blackbox_state);
+  const expectedActive=(ONBOARD_ACTIVE_STATES as readonly string[]).includes(fields.blackbox_state);
   const rateHz = optionalRate('blackbox_rate_hz');
   // api 1 firmware only ever logged at a fixed 500 Hz; anything else is malformed.
   if(expectedActive !== (fields.blackbox_active==='1') || (api === 1 && rateHz !== null && rateHz !== 500) || uint('blackbox_queue')>ONBOARD_QUEUE_CAPACITY || !/^(BFL\d{5}\.BBL)?$/.test(fields.blackbox_file))throw new Error('Inconsistent Blackbox state or metadata.');

@@ -85,8 +85,15 @@ async function probeDone(r) {
   });
 
   await test('SD status parser: refusals verbatim, done needs sd_sectors and sd_io_error 0', () => {
-    for (const line of [...P.SD_PROBE_REFUSALS, 'sd unavailable: no hardware backend in host simulation', 'sd refused: read in progress']) {
-      assert.deepEqual(P.parseSdStatusReply(`${line}\r\nsd_end: 1\r\n`).line, line);
+    // Matched on the `sd refused:` / `sd unavailable:` prefix only: any tail (today's or a future FW's) is kept verbatim.
+    for (const line of [...P.SD_PROBE_REFUSALS, 'sd unavailable: no hardware backend in host simulation', 'sd refused: read in progress',
+      'sd refused: a future FW 9 reason (code 41)', 'sd unavailable: card removed while idle', 'sd unavailable:']) {
+      const r = P.parseSdStatusReply(`${line}\r\nsd_end: 1\r\n`);
+      assert.equal(r.kind, 'refused', line);
+      assert.equal(r.line, line);
+      const rr = P.parseSdReadReply(`${line}\r\nsd_end: 1\r\n`, 7);
+      assert.equal(rr.kind, 'refused', `sd read: ${line}`);
+      assert.equal(rr.line, line);
     }
     const st = (over = '') => `sd_api: 1\r\nsd_state: done\r\nsd_detail: geometry-recognized-not-mounted\r\nsd_sectors: 62333952\r\nsd_io_error: 0\r\n${over}sd_end: 1\r\n`;
     const s = P.parseSdStatusReply(st());

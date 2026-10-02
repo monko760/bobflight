@@ -25,6 +25,7 @@ import {
 } from "@bobflight/protocol";
 import type { BobFlightHost } from "./types";
 import { CommandGate } from "./commandGate";
+import { StorageActivity, isStorageCommand } from "./storageActivity";
 
 export type ProtocolMode = "mock" | "serial";
 
@@ -79,6 +80,8 @@ class ProtocolHostAdapter implements BobFlightHost {
   private commands = new CommandGate(() => this.sessionGeneration);
   /** `sd read` helper holding the same CommandGate as every other UI command. */
   private sdReader = new SdSectorReader(this.commands, (cmd, opts) => this.client.sendCommand(cmd, opts));
+  /** Settings storage actions in flight (save, defaults, `storage` reads), host-wide. */
+  private storage = new StorageActivity();
   readonly mode: ProtocolMode;
 
   constructor(mode: ProtocolMode) {
@@ -204,11 +207,20 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async sendCommand(cmd: CliCommand): Promise<string> {
     try {
-      return await this.commands.run(() => this.client.sendCommand(cmd), cmd === "motor_test 0");
+      const run = () => this.commands.run(() => this.client.sendCommand(cmd), cmd === "motor_test 0");
+      return await (isStorageCommand(cmd) ? this.storage.track(run) : run());
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
     }
+  }
+
+  storageActionPending(): boolean {
+    return this.storage.pending;
+  }
+
+  onStorageActivity(cb: () => void): () => void {
+    return this.storage.subscribe(cb);
   }
 
   async readSdSector(sector: number): Promise<SdReadResult> {
@@ -263,7 +275,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async saveSettings(): Promise<void> {
     try {
-      await this.commands.run(() => this.client.saveSettings());
+      await this.storage.track(() => this.commands.run(() => this.client.saveSettings()));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -272,7 +284,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async restoreDefaults(): Promise<Record<SettingsKey, string>> {
     try {
-      return await this.commands.run(() => this.client.restoreDefaults());
+      return await this.storage.track(() => this.commands.run(() => this.client.restoreDefaults()));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;

@@ -15,7 +15,7 @@ import {
   onboardEffectiveHz,
   type OnboardCommand,
 } from '../blackbox/onboard';
-import { SdDownloadController, downloadBlockedReason, formatRate } from '../blackbox/sdDownload';
+import { SdDownloadController, downloadBlockedReason, formatRate, storageBlock } from '../blackbox/sdDownload';
 import { saveBlobFile } from '../blackbox/saveBlob';
 import { BLACKBOX_COUNTER_KEYS, STATUS_COUNTER_KEYS, verbatimCounters } from '../blackbox/fcCounters';
 
@@ -36,6 +36,10 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
     () => new SdDownloadController(host, { save: saveBlobFile, onChange: () => render((n) => n + 1) }),
     [host]
   );
+
+  // Host-wide settings storage actions (save, defaults, StoragePanel refresh) lock Download.
+  useEffect(() => host.onStorageActivity?.(update), [host]);
+  const settingsStoragePending = host.storageActionPending?.() ?? false;
 
   // USB Bench Recorder effect
   useEffect(() => {
@@ -170,8 +174,8 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
     supported: sdLogs.supported,
     recording: onboard.active,
     armed: isArmed,
-    // Page-level storage lock: the SD diagnostic probe or USB bench recorder is using the link.
-    storageBlocked: sd.busy || recorder.active,
+    // Storage lock: a settings storage action in flight, the SD diagnostic probe, or the USB bench recorder.
+    storageBlocked: storageBlock({ settingsPending: settingsStoragePending, sdCheckBusy: sd.busy, benchRecording: recorder.active }),
   });
   const strictCardShown = !!onboard.snapshot && !onboard.stale && !onboard.snapshot.unavailable;
   // Fill gaps only: recorder counters already in the card above are not repeated; loop_overruns always.
@@ -428,7 +432,8 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
           sector at a time, checking each sector&apos;s CRC-32. Read-only: nothing is written to
           the card. Every list and download starts with a fresh SD probe and ends with{' '}
           <code>sd cancel</code>. A file is saved only after every sector verified and its size
-          matches the directory entry. Disarm first; recording must be stopped and done.
+          matches the directory entry. Disarm first; recording must be stopped and done (the
+          recorder state is re-read with <code>blackbox status</code> before any sector is read).
         </p>
         <p>
           <button disabled={!!downloadBlocked || sdLogs.busy} onClick={() => void sdLogs.list()}>
@@ -470,6 +475,11 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             <p data-testid="bb-download-message">{sdLogs.message.text}</p>
           </div>
         )}
+        {sdLogs.recorderNote && (
+          <p role="status" data-testid="bb-download-recorder-note">
+            {sdLogs.recorderNote}
+          </p>
+        )}
         {sdLogs.files && sdLogs.files.length > 0 && (
           <table data-testid="bb-download-files">
             <thead>
@@ -503,7 +513,8 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
           <strong>Fallback:</strong> disconnect the configurator and run{' '}
           <code>tools/download_blackbox.py</code> on your PC to copy a named log over USB (see{' '}
           <code>USB-LOG-EXPORT.md</code>), or, after state is <code>done</code>, power off and use
-          an SD card reader. USB mass-storage mode is not offered.
+          an SD card reader (also the way to read a card that is not FAT32). USB mass-storage mode
+          is not offered.
         </p>
       </section>
 
