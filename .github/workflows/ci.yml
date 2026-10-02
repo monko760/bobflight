@@ -107,6 +107,10 @@ jobs:
           node ../.github/scripts/motor-direction-contract.cjs ../bobflight-firmware/build-contract-tmotor/bobflight_host
       - name: Receiver protocol and UI parser tests
         run: npm --prefix ui run test:receiver
+      - name: Firmware receiver report (CRSF link statistics lines) to Receiver parser contract
+        run: node ui/scripts/test-receiver.cjs ../bobflight-firmware/build-contract/bobflight_host waiting
+      - name: Receiver CRSF link statistics readout (mocks, verbatim tokens, ReceiverPage render) tests
+        run: npm --prefix ui run test:receiver-link
       - name: Live receiver switch identification in Modes
         run: node ui/scripts/test-mode-receiver.cjs
       - name: Receiver switch bench CLI guards

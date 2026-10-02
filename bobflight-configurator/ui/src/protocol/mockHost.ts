@@ -29,6 +29,7 @@ import {
   MockMotorDirection,
   type MotorDirectionMockScenario,
   type LoopRateMockScenario,
+  type ReceiverLinkMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
 import type {
@@ -95,7 +96,9 @@ export class MockBobFlightHost implements BobFlightHost {
   /** motor_direction + `mixer` (schema 10; same wire as protocol MockSerial). A running bench test refuses sets. */
   private readonly motorDirection: MockMotorDirection;
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario }) {
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario }) {
+    /* An explicit receiver link scenario also sets the status failsafe line it implies (FW: every loss reason runs the failsafe). */
+    if (opts?.receiverLinkScenario) { this.receiver.setScenario(opts.receiverLinkScenario); this.failsafeActive = this.receiver.failsafeActive(); }
     this.motorDirection = new MockMotorDirection(opts?.motorDirectionScenario ?? "props-out");
     this.gyroNotch = new MockGyroNotch(opts?.gyroNotchScenario ?? "off");
     this.rpmFilter = new MockRpmFilter(opts?.rpmFilterScenario ?? "off", () => this.dshotBidir);
@@ -430,7 +433,12 @@ export class MockBobFlightHost implements BobFlightHost {
     gyroNotchScenario?: GyroNotchMockScenario;
     rpmFilterScenario?: RpmFilterMockScenario;
     motorDirectionScenario?: MotorDirectionMockScenario;
+    receiverLinkScenario?: ReceiverLinkMockScenario;
   }): void {
+    if (opts.receiverLinkScenario !== undefined) {
+      this.receiver.setScenario(opts.receiverLinkScenario);
+      if (opts.failsafeActive === undefined) this.failsafeActive = this.receiver.failsafeActive();
+    }
     if (opts.motorDirectionScenario !== undefined) this.motorDirection.setScenario(opts.motorDirectionScenario);
     if (opts.loopRateScenario !== undefined) {
       this.loopRateScenario = opts.loopRateScenario;

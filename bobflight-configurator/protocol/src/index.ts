@@ -139,7 +139,7 @@ export { assertMcuGate, normalizeFirmware } from "./flasher/mcu-gate";
 export { MockMotorBench } from "./bench-mock";
 
 export { mockSensorReply } from "./sensor-mock";
-export { MockReceiver } from "./receiver-mock";
+export { MockReceiver, RECEIVER_LINK_SCENARIOS, type ReceiverLinkMockScenario } from "./receiver-mock";
 
 export * from "./parse-ports";
 export * from "./parse-modes";

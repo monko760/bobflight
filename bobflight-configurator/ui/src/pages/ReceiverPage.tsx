@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
 import type { CliCommand } from "../protocol";
 import { parseReceiver, type ReceiverReading, type ReceiverMap } from "../protocol/receiver";
+import { ReceiverLinkReadout } from "../components/ReceiverLinkReadout";
 
 const ports=[1,2,3,4,6,7] as const;
 const names=["Roll","Pitch","Yaw","Throttle",...Array.from({length:12},(_,i)=>`AUX${i+1}`)];
@@ -80,6 +81,9 @@ export function ReceiverPage() {
       <span>Valid frames: {responding?reading!.frames:"—"}</span>
       <span>Failsafe: {responding?(reading!.failsafe?"Active":"Inactive"):"Unknown"}</span>
     </div>
+    <h3>CRSF link statistics</h3>
+    <ReceiverLinkReadout reading={responding?reading:null}/>
+    <p className="muted">Once the receiver has sent link statistics, the firmware treats LQ 0, or no statistics for more than 1 second, as receiver loss: the existing failsafe cuts the motors about 250 ms later and the board does not re-arm by itself. “absent” means none were seen since boot, so loss detection uses channel frames only.</p>
     <h3>Receiver connection</h3>
     <label>Receiver TX wire connects to board pad <select value={uart??6} disabled={!editable} onChange={e=>setUart(Number(e.target.value))}>
       {ports.map(n=><option key={n} value={n}>R{n} / UART{n}</option>)}
@@ -103,7 +107,7 @@ export function ReceiverPage() {
     <details><summary>Connection troubleshooting</summary>
       <p>CRC errors: {responding?reading!.crc_errors:"—"} · Stream resets: {responding?reading!.stream_resets:"—"}</p>
       <p>Waiting: check receiver power, transmitter binding, CRSF output and the selected RX pad. Increasing CRC errors: check wiring, common ground and the receiver’s baud setting. A frame is stale after 250 ms without valid channel data.</p>
-      <p>Frame count and counters restart after a UART or mapping change. RSSI/link-quality telemetry is not implemented in this version.</p>
+      <p>Frame count and counters restart after a UART or mapping change. RSSI telemetry is not implemented in this version; uplink link quality comes from CRSF link statistics when the receiver sends them.</p>
     </details>
   </div>;
 }

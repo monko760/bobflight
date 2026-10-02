@@ -186,19 +186,24 @@ static void cmd_receiver(void)
     const board_t *b=board_get();
     const float *ch=rx_channels();
     uint32_t age=rx_frame_age_ms();
-    char buf[768];
+    char buf[896], lq[16];
+    const int link_lq=rx_link_lq();
+    if(link_lq>=0)snprintf(lq,sizeof lq,"%d",link_lq); else snprintf(lq,sizeof lq,"unavailable");
     const char *link=!rx_uart_bound()?"unbound":age==UINT32_MAX?"waiting":rx_frame_fresh()?"live":"lost";
     snprintf(buf,sizeof(buf),
         "receiver_api: 1\r\nprotocol: CRSF\r\nuart: %u\r\nmap: %s\r\nlink: %s\r\n"
         "age_ms: %ld\r\nframes: %lu\r\ncrc_errors: %lu\r\nstream_resets: %lu\r\n"
         "armed: %u\r\nbench_active: %u\r\nfailsafe: %u\r\n"
         "channels: %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\r\n"
-        "persistence: %s\r\nreceiver_end: 1\r\n",
+        "persistence: %s\r\n"
+        "rx_link_stats: %s\r\nrx_link_lq: %s\r\nrx_loss_reason: %s\r\n"
+        "receiver_end: 1\r\n",
         b?b->rx_uart:0,crsf_map(),link,age==UINT32_MAX?-1L:(long)(age>2147483647u?2147483647u:age),
         (unsigned long)rx_frame_count(),(unsigned long)crsf_crc_errors(),(unsigned long)crsf_stream_resets(),
         arming_state()==ARM_ARMED,bench_motor_active(),failsafe_active(),
         (double)ch[0],(double)ch[1],(double)ch[2],(double)ch[3],(double)ch[4],(double)ch[5],(double)ch[6],(double)ch[7],
-        (double)ch[8],(double)ch[9],(double)ch[10],(double)ch[11],(double)ch[12],(double)ch[13],(double)ch[14],(double)ch[15],persist_backend());
+        (double)ch[8],(double)ch[9],(double)ch[10],(double)ch[11],(double)ch[12],(double)ch[13],(double)ch[14],(double)ch[15],persist_backend(),
+        rx_link_stats_present()?"present":"absent",lq,rx_loss_reason_name(rx_loss_reason()));
     cli_write_str(buf);
 }
 

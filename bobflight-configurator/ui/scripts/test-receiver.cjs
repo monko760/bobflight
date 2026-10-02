@@ -11,6 +11,9 @@ async function main(){
   const reply=mock.handle('receiver',false,false);
   const parsed=parseReceiver(reply);
   assert.equal(parsed.link,'unbound');assert.equal(parsed.channels.length,16);
+  assert.deepEqual([parsed.rx_link_stats,parsed.rx_link_lq,parsed.rx_loss_reason],['absent','unavailable','no-frames']);
+  const old=parseReceiver(new MockReceiver('old-fc').handle('receiver',false,false));
+  assert.deepEqual([old.rx_link_stats,old.rx_link_lq,old.rx_loss_reason],[undefined,undefined,undefined]);
   assert.throws(()=>parseReceiver('unknown — try help'));
   assert.throws(()=>parseReceiver(reply.replace('receiver_end: 1','')));
   assert.throws(()=>parseReceiver(reply.replace('armed: 0','armed: 7')));
@@ -31,7 +34,12 @@ async function main(){
     assert.equal(run.status,0,run.stderr);
     const replies=run.stdout.match(/receiver_api: 1[\s\S]*?receiver_end: 1/g);
     assert.equal(replies.length,3);
-    for(const raw of replies){const r=parseReceiver(raw);assert.equal(r.map,'TAER');assert.equal(r.link,'unbound');assert.equal(r.frames,0);}
+    /* Optional argv[3]: the link state this host board reports with no frames (dummy: unbound; a board with a bound receiver UART: waiting). */
+    const idleLink=process.argv[3]||'unbound';
+    for(const raw of replies){const r=parseReceiver(raw);assert.equal(r.map,'TAER');assert.equal(r.link,idleLink);assert.equal(r.frames,0);
+      /* FW S2: the three link-statistics lines sit before the end marker. */
+      assert.deepEqual([r.rx_link_stats,r.rx_link_lq,r.rx_loss_reason],['absent','unavailable','no-frames']);
+      assert.match(raw,/persistence: \S+\r\nrx_link_stats: absent\r\nrx_link_lq: unavailable\r\nrx_loss_reason: no-frames\r\nreceiver_end: 1$/);}
     assert.match(run.stdout,/receiver map refused/);
   }
   console.log('PASS receiver parser, stale/invalid/incomplete rejection, settings guards, client allowlist and optional firmware readback');
