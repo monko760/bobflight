@@ -22,7 +22,13 @@ const {loadUiTs}=require('../../protocol/tests/load-ui-ts.cjs');
 const ui=loadUiTs(path.resolve(__dirname,'../src/protocol/parseStatus.ts'),{'@bobflight/protocol':require('../../protocol/dist')});
 const fwRoot=path.resolve(__dirname,'../../../bobflight-firmware');
 const cli=fs.readFileSync(path.join(fwRoot,'src/drivers/cli.c'),'utf8');
-assert.ok(cli.includes('"gyro_ok: %s\\r\\n"')&&cli.includes('gyro_is_healthy() ? "yes" : "no"'),'FW gyro_ok tokens yes|no');
+/* S3 (fix/gyro-sanity): the gyro_ok line moved into gyro.c gyro_status_lines(),
+ * which prints gyro_ok, gyro_health, gyro_sat_count together; gyro_ok is yes
+ * only for a valid gyro AND health ok, so every S3 fault reaches this gate as
+ * gyro_ok: no. cli.c's status must print those lines (the fallback is "no"). */
+const gyroC=fs.readFileSync(path.join(fwRoot,'src/drivers/gyro.c'),'utf8');
+assert.ok(cli.includes('gyro_status_lines(gyro_lines, sizeof gyro_lines)')&&cli.includes('snprintf(gyro_lines, sizeof gyro_lines, "gyro_ok: no\\r\\n")'),'FW status prints gyro_status_lines (fallback gyro_ok: no)');
+assert.ok(gyroC.includes('"gyro_ok: %s\\r\\ngyro_health: %s\\r\\ngyro_sat_count: %s\\r\\n"')&&gyroC.includes('ok ? "yes" : "no"')&&gyroC.includes('const bool ok = g_healthy && g_health == GYRO_HEALTH_OK;'),'FW gyro_ok tokens yes|no; yes needs a valid gyro and gyro_health ok');
 assert.ok(cli.includes('"failsafe: %s\\r\\n"')&&cli.includes('failsafe_active() ? "ACTIVE" : "ok"'),'FW failsafe tokens ACTIVE|ok');
 function swapLine(raw,key,from,to){
  const re=new RegExp(`^${key}: ${from}\\r$`,'m');assert.equal((raw.match(new RegExp(`^${key}: `,'gm'))||[]).length,1,`${key} once`);

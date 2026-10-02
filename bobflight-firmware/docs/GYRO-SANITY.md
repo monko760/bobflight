@@ -121,3 +121,30 @@ that latches mid-session shows within about a second without pressing Refresh.
   malformed values, the real SetupPage in the fake DOM: card order, live re-read of a
   mid-session fault, older FC, disconnected) and `.github/scripts/gyro-status-contract.cjs`
   (real Kakute and tmotor host `status` -> Setup view model, key order, token list).
+
+## On main after S1 / #60 / S4 (forward merge of 7583319)
+
+- **8 kHz gyro chain (S1).** S1 runs the gyro LPF, notches and RPM filter on every
+  gyro sample; `gyro_sample()` (where the stuck check and saturation counter live)
+  still runs once per gyro slot, and on the MPU6000 only for a fresh DATA_RDY sample.
+  The stuck window is **time on the millisecond clock**, not a sample count, so it
+  means the same at 1 kHz and 8 kHz: > 50 ms, i.e. > 400 identical fresh samples at
+  8 kHz (Kakute, `loop_rate_hz` 4000/8000) or > 50 at 1 kHz. The `gyro_health` test
+  locks this at the 8 kHz cadence (8 fresh samples per ms on the Kakute 8 kHz ODR
+  path): 400 identical samples over 50 ms stay ok, the first sample in ms 51 latches
+  `stuck` and disarms; 40 ms runs of identical samples (320 samples) separated by a
+  one-LSB change never trip. A sample-count threshold sized for 1 kHz fails that test.
+- **Report contracts (S1).** `report_bytes_contract` and `report_keys_contract`
+  keep the b77b845 golden as the reference; it is not re-captured. They now expect
+  exactly the two S3 lines right after `gyro_ok` (bytes: `gyro_health: ok\r\n` and
+  `gyro_sat_count: 0\r\n`, the only values a host build can print; keys:
+  `gyro_health`, `gyro_sat_count`). Any other change to `status` still fails.
+- **Arm gate (S1).** `ui/scripts/test-arm-gate-real-status.cjs` now reads the
+  `gyro_ok` tokens from `gyro_status_lines()` in `gyro.c` (where S3 moved the line)
+  and asserts `gyro_ok: yes` needs a valid gyro **and** `gyro_health` ok, so every S3
+  fault reaches the Configurator's Arm gate as `gyro_ok: no`.
+- **Not verified on hardware:** how often the background pass actually has the
+  60 µs budget at 8000/2 on the F7 (S1 adds the per-sample filter to every gyro
+  slot). If a slot rarely leaves 80 µs (60 µs + the 20 µs guard), the chip-ID /
+  config readback runs less often than every 100 ms; it never runs inside the
+  cascade. The stuck check and saturation counter are unaffected (per sample).

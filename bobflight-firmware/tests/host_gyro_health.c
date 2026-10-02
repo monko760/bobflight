@@ -107,6 +107,20 @@ int main(void){
   CHECK(gyro_health()==GYRO_HEALTH_CONFIG_LOST&&!gyro_is_healthy()&&arming_state()==ARM_DISARMED);
   CHECK(!strcmp(status(),"gyro_ok: no\r\ngyro_health: config-lost\r\ngyro_sat_count: 0\r\n"));
  }
+ /* 8 kHz gyro (Kakute; S1 runs the chain on every gyro sample): the stuck window is TIME on the
+  * ms clock, not a sample count. 8 fresh samples per ms: 50 ms = 400 identical samples stays ok,
+  * the first sample in ms 51 latches stuck and takes the invalid-gyro disarm. */
+ fresh("kakute_f7_hdv");CHECK(gyro_diagnostics()->odr_hz==8000&&arm());
+ {float d[3];now++;CHECK(gyro_sample(d));const uint32_t t8=now;unsigned n8=0;
+  for(unsigned ms=0;ms<50;ms++){now++;for(unsigned k=0;k<8;k++){CHECK(gyro_sample(d));n8++;}}
+  CHECK(now-t8==50&&n8==400&&gyro_health()==GYRO_HEALTH_OK&&arming_state()==ARM_ARMED);
+  now++;CHECK(!gyro_sample(d)&&gyro_health()==GYRO_HEALTH_STUCK&&now-t8==51&&arming_state()==ARM_DISARMED);}
+ /* At 8 kHz, 40 ms runs of identical samples (320 samples, far more than 50) separated by a
+  * one-LSB change never trip: a sample-count threshold sized for 1 kHz would. */
+ fresh("kakute_f7_hdv");CHECK(arm());
+ {float d[3];for(unsigned ms=0;ms<400;ms++){now++;raw(10,-20,30+(int)((ms/40u)&1u));for(unsigned k=0;k<8;k++)CHECK(gyro_sample(d));}
+  CHECK(gyro_health()==GYRO_HEALTH_OK&&gyro_is_healthy()&&arming_state()==ARM_ARMED);}
+ arming_disarm();
  /* 8 kHz board: config/ID reads drop to the 1 MHz register clock and sample reads return to the fast clock. */
  fresh("kakute_f7_hdv");CHECK(gyro_diagnostics()->odr_hz==8000&&regs[0x1A]==0&&spi_fast);
  fast_config_reads=0;spi_set_calls=0;polls(12);CHECK(gyro_health()==GYRO_HEALTH_OK);
