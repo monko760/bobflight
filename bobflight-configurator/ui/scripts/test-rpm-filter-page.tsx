@@ -496,15 +496,17 @@ async function main() {
    * Filters page's last notch read, so only the RPM reads meet the busy gate); held until
    * `grab.release()` (or `ms`). */
   async function gatedHost(scenario: RpmFilterMockScenario, o: RigOpts & { latencyMs?: number; grabAfterSet?: number; grabAfterGet?: number;
-    grabAfter?: { op: string; ms?: number } } = {}) {
+    grabAfter?: { op: string; ms?: number }; getAllError?: string } = {}) {
     const h = await mockHost(scenario, o);
     const gate = new CommandGate(() => 1);
     const refused: string[] = [];
+    /** Labels in the order they took the gate (what actually held it). */
+    const started: string[] = [];
     const inner = h.host;
     const grab: { release: () => void; done: Promise<unknown> } = { release: () => {}, done: Promise.resolve() };
     let grabbed = false;
     const g = <T,>(label: string, work: () => Promise<T>, stop = false): Promise<T> =>
-      gate.run(async () => { if (o.latencyMs) await sleep(o.latencyMs); return work(); }, stop)
+      gate.run(async () => { started.push(label); if (o.latencyMs) await sleep(o.latencyMs); return work(); }, stop)
         .then((r) => {
           if (o.grabAfter && !grabbed && label === o.grabAfter.op) {
             grabbed = true; const held = holdGate("get erpm_m4"); Object.assign(grab, held);
@@ -518,7 +520,8 @@ async function main() {
     const wrapped: Record<string, unknown> = {
       getStatus: () => g("status", () => inner.getStatus()),
       getVersion: () => g("version", () => inner.getVersion()),
-      getAllSettings: () => g("getAll", () => inner.getAllSettings()),
+      // `getAllError`: the call reaches the FC link and fails there (a transport error / FC reply), as in createHost.
+      getAllSettings: () => g("getAll", () => (o.getAllError !== undefined ? (h.ops.push("getAll"), Promise.reject(new Error(o.getAllError))) : inner.getAllSettings())),
       getSetting: async (key: SettingsKey) => {
         const r = await g(`get ${key}`, () => inner.getSetting(key));
         if (o.grabAfterGet && key === "motor_poles") { const held = holdGate("get erpm_m3"); setTimeout(held.release, o.grabAfterGet); }
@@ -540,7 +543,7 @@ async function main() {
         return typeof v === "function" ? v.bind(target) : v;
       },
     }) as unknown as MockBobFlightHost;
-    return { ...h, host, gate, refused, holdGate, grab };
+    return { ...h, host, gate, refused, started, holdGate, grab };
   }
   /** The real FiltersPage on a (gated) host. */
   function mountFilters(host: MockBobFlightHost): Root {
@@ -808,7 +811,255 @@ async function main() {
     await t.mock.disconnect();
   });
 
+  // ---- QA #60 trip 7: getAllSettings refused by the busy gate is not "older firmware" ----
+  const notchSection = () => visibleText(byAttr("data-testid", "gyro-notch")[0]);
+  const OLDER = /older firmware/;
+  const lpfInputs = ["gyro_lpf_hz", "dterm_lpf_hz"];
+  const lpf = (id: string) => { const el = container.findAll((e) => e.tagName === "INPUT" && e.getAttribute("id") === id)[0]; assert.ok(el, `input #${id}`); return el; };
+  const loading = () => container.findAll((e) => e.tagName === "P" && visibleText(e).startsWith("Connecting / loading settings")).length > 0;
+  const fallbackErr = () => failText().find((t) => /using local mockSettingsApi fallback/.test(t)) ?? null;
+  /** Filters reached nothing past getAllSettings (no notch / storage / RPM read). */
+  const pageReads = (ops: string[]) => ops.filter((op) => op === "getAll" || op === "storage" || op === "filters" || /^get (gyro_notch|rpm_filter|motor_poles)/.test(op) || op === "rpm_filter");
+
+  await test("trip 7: getAllSettings refused by the gate on every try -> busy line, values 'unknown', no 'older firmware' (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => testId("settings-busy") !== null, 1000), "busy line while still retrying");
+    assert.equal(testId("settings-busy"), GATE_BUSY_MESSAGE, "the gate's line, verbatim");
+    assert.ok(loading(), "still loading while retrying");
+    assert.ok(!OLDER.test(rpmSection()) && !OLDER.test(notchSection()), `no older-firmware text while retrying: ${notchSection()} | ${rpmSection()}`);
+    assert.equal(fallbackErr(), null, "not the local fallback while retrying");
+    const budget = RPM_GATE_ATTEMPTS * RPM_GATE_DELAY_MS + 1500;
+    assert.ok(await waitFor(() => !loading(), budget), `exhausted: refused=${count(t.refused, "getAll")}`);
+    assert.equal(count(t.refused, "getAll"), RPM_GATE_ATTEMPTS, "bounded: exactly RPM_GATE_ATTEMPTS tries");
+    assert.equal(testId("settings-busy"), GATE_BUSY_MESSAGE, "busy line stays after the last try");
+    assert.ok(!OLDER.test(rpmSection()), `RPM section: ${rpmSection()}`);
+    assert.ok(!OLDER.test(notchSection()), `notch section: ${notchSection()}`);
+    assert.equal(fallbackErr(), null, "never the local fallback");
+    for (const k of lpfInputs) { assert.equal(lpf(k).value, "unknown", k); assert.ok(isDisabled(lpf(k)), `${k} read-only`); }
+    for (const k of rpmInputs) { assert.equal(input(k).value, "unknown", k); assert.ok(isDisabled(input(k)), `${k} read-only`); }
+    for (const n of ["gyro_notch1_hz", "gyro_notch2_hz"]) assert.ok(isDisabled(input(n)), `${n} read-only`);
+    assert.ok(isDisabled(button("Save")), "Save disabled: nothing was read");
+    assert.deepEqual(pageReads(t.ops), [], `nothing reached the FC: ${JSON.stringify(t.ops)}`);
+    poll.release(); await poll.done;
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("trip 7: getAllSettings refused 2 tries then OK on schema 9 -> real values, no 'older firmware', no busy line (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const all = await t.mock.getAllSettings();
+    const poll = t.holdGate("get erpm_m1");
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => count(t.refused, "getAll") >= 2, 1000), `refused twice: ${JSON.stringify(t.refused)}`);
+    poll.release(); await poll.done;
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter"), 2500), `page loaded after the gate freed: ${JSON.stringify(t.ops)}`);
+    await sleep(30);
+    assert.equal(count(t.ops, "getAll"), 1, "getAllSettings reached the FC once");
+    assert.equal(testId("settings-busy"), null, "busy line cleared");
+    assert.equal(fallbackErr(), null);
+    assert.ok(!OLDER.test(rpmSection()) && !OLDER.test(notchSection()), `${notchSection()} | ${rpmSection()}`);
+    for (const k of lpfInputs) { assert.equal(String(lpf(k).value), String(Number(all[k as SettingsKey])), k); assert.ok(!isDisabled(lpf(k)), `${k} editable`); }
+    for (const k of rpmInputs) { assert.notEqual(input(k).value, "unknown", k); assert.ok(!isDisabled(input(k)), `${k} editable`); }
+    assert.equal(status("Filter reason"), "ok");
+    assert.ok(!isDisabled(button("Save")));
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("trip 7 R17: direct Filters mount, gate held ~300 ms by another command -> real values, never 'older firmware' (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const all = await t.mock.getAllSettings();
+    const other = t.holdGate("get erpm_m1");
+    setTimeout(other.release, 300);
+    const t0 = Date.now();
+    const root = mountFilters(t.host); // no Motors page at all
+    let sawOlder = false;
+    const done = await waitFor(() => { if (OLDER.test(rpmSection()) || OLDER.test(notchSection())) sawOlder = true; return t.ops.includes("rpm_filter"); }, 2500);
+    assert.ok(done, `loaded: ${JSON.stringify(t.ops)}`);
+    await sleep(30);
+    const tries = count(t.refused, "getAll");
+    assert.ok(tries >= 1, "getAllSettings met the held gate");
+    assert.ok(tries <= 6 && tries < RPM_GATE_ATTEMPTS / 3, `well inside the ${RPM_GATE_ATTEMPTS} x ${RPM_GATE_DELAY_MS} ms window: ${tries} refusals`);
+    assert.ok(Date.now() - t0 < RPM_GATE_ATTEMPTS * RPM_GATE_DELAY_MS / 3, `loaded in ${Date.now() - t0} ms`);
+    assert.ok(!sawOlder, "'older firmware' never shown while the gate was held");
+    assert.ok(!OLDER.test(rpmSection()) && !OLDER.test(notchSection()), `${notchSection()} | ${rpmSection()}`);
+    assert.equal(testId("settings-busy"), null);
+    assert.equal(fallbackErr(), null);
+    for (const k of lpfInputs) assert.equal(String(lpf(k).value), String(Number(all[k as SettingsKey])), k);
+    for (const k of rpmInputs) { assert.notEqual(input(k).value, "unknown", k); assert.ok(!isDisabled(input(k)), `${k} editable`); }
+    for (const n of ["gyro_notch1_hz", "gyro_notch2_hz"]) assert.notEqual(input(n).value, "unknown", n);
+    assert.equal(status("Filter reason"), "ok");
+    assert.equal(count(t.ops, "getAll"), 1);
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  for (const when of ["early (status/help)", "eRPM poll running"] as const) await test(`trip 7 R16: Motors -> Filters while MotorsPage's own commands hold the gate, switch ${when} (no artificial hold) -> real values, never 'older firmware' (QA #60)`, async () => {
+    (globalThis as Record<string, unknown>).document = { hidden: false, addEventListener() {}, removeEventListener() {} };
+    const t = await gatedHost("ok", { latencyMs: 60 }); // serial round trip: each Motors command holds the gate 60 ms
+    (globalThis as Record<string, unknown>).__setupTestHost = {
+      host: t.host, connectionStatus: "connected", version: "BobFlight test", status: null,
+      refreshStatus: async () => {}, pollAfterConnect: async () => {}, setLastError: () => {}, postFlashGate: false,
+    };
+    const motors: Root = createRoot(container as never);
+    flushSync(() => motors.render(<MotorsPage />));
+    const ready = when === "eRPM poll running" ? () => t.started.some((c) => /^get erpm_m/.test(c)) && t.started.some((c) => /dshot/.test(c)) : () => t.started.length >= 2;
+    assert.ok(await waitFor(ready, 4000), `MotorsPage sent its own commands: ${JSON.stringify(t.started)}`);
+    motors.unmount(); // switch tabs while a Motors command is in flight
+    const motorsCmds = [...t.started];
+    const t0 = Date.now();
+    const root = mountFilters(t.host);
+    let sawOlder = false;
+    const done = await waitFor(() => { if (OLDER.test(rpmSection()) || OLDER.test(notchSection())) sawOlder = true; return t.ops.includes("rpm_filter"); }, 4000);
+    assert.ok(done, `loaded: ${JSON.stringify(t.started)}`);
+    await sleep(30);
+    const tries = count(t.refused, "getAll");
+    assert.ok(tries >= 1, `the race happened: getAllSettings met a Motors command on the gate (${JSON.stringify(motorsCmds)})`);
+    assert.ok(motorsCmds.every((c) => c !== "getAll"), "only MotorsPage's commands held the gate");
+    assert.ok(tries < RPM_GATE_ATTEMPTS / 3, `well inside the ${RPM_GATE_ATTEMPTS} x ${RPM_GATE_DELAY_MS} ms window: ${tries} refusals`);
+    assert.ok(!sawOlder, "'older firmware' never shown");
+    assert.ok(!OLDER.test(rpmSection()) && !OLDER.test(notchSection()), `${notchSection()} | ${rpmSection()}`);
+    assert.equal(testId("settings-busy"), null);
+    assert.equal(fallbackErr(), null);
+    for (const k of rpmInputs) assert.ok(!isDisabled(input(k)), `${k} editable`);
+    assert.equal(status("Filter reason"), "ok");
+    assert.equal(count(t.ops, "getAll"), 1);
+    console.log(`  R16: Motors commands on the gate before the switch: ${motorsCmds.join(", ")}; getAll refusals ${tries}; Filters loaded in ${Date.now() - t0} ms`);
+    root.unmount(); await sleep(20); await t.mock.disconnect(); delete (globalThis as Record<string, unknown>).document;
+  });
+
+  await test("trip 7: real schema-8 FC with a busy start still says 'older firmware' in the RPM section (QA #60)", async () => {
+    const t = await gatedHost("old-fc");
+    const poll = t.holdGate("get erpm_m1");
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => count(t.refused, "getAll") >= 2, 1000), `refused twice: ${JSON.stringify(t.refused)}`);
+    assert.ok(!OLDER.test(rpmSection()), "not claimed while only the gate refused");
+    poll.release(); await poll.done;
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter"), 2500), JSON.stringify(t.ops));
+    await sleep(30);
+    assert.ok(/This FC does not report the RPM filter \(older firmware\)/.test(rpmSection()), rpmSection());
+    assert.equal(testId("settings-busy"), null);
+    assert.equal(testId("rpm-busy"), null);
+    assert.ok(!OLDER.test(notchSection()), `schema 8 has the notches: ${notchSection()}`);
+    for (const k of rpmInputs) { assert.equal(input(k).value, "unknown", k); assert.ok(isDisabled(input(k)), `${k} read-only`); }
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("trip 7: a real notch-less FC with a busy start still says 'older firmware' in the notch section (QA #60)", async () => {
+    const t = await gatedHost("old-fc");
+    t.mock.setMockGates({ gyroNotchScenario: "old-fc" }); // the FC answers "unknown key" for the notch keys
+    const poll = t.holdGate("get erpm_m1");
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => count(t.refused, "getAll") >= 2, 1000));
+    poll.release(); await poll.done;
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter"), 2500), JSON.stringify(t.ops));
+    await sleep(30);
+    assert.ok(/This FC does not report gyro notches \(older firmware\)/.test(notchSection()), notchSection());
+    assert.ok(OLDER.test(rpmSection()), rpmSection());
+    assert.equal(testId("settings-busy"), null);
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("trip 7: Filters unmount mid-retry stops the getAllSettings retries (nothing sent afterwards) (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => count(t.refused, "getAll") >= 2, 1000));
+    root.unmount();
+    const tries = count(t.refused, "getAll");
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.ok(count(t.refused, "getAll") <= tries, `no retry after unmount: ${tries} -> ${count(t.refused, "getAll")}`);
+    poll.release(); await poll.done;
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.ok(count(t.refused, "getAll") <= tries, `no retry after the gate freed: ${tries} -> ${count(t.refused, "getAll")}`);
+    assert.deepEqual(pageReads(t.ops), [], `nothing sent after unmount: ${JSON.stringify(t.ops)}`);
+    await t.mock.disconnect();
+  });
+
+  await test("trip 7: Reload mid-retry replaces the running load (one getAllSettings reaches the FC) (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => count(t.refused, "getAll") >= 2, 1000));
+    await click(button("Reload"));
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    poll.release(); await poll.done;
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter"), 2500), JSON.stringify(t.ops));
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.equal(count(t.ops, "getAll"), 1, `the older load stopped retrying: ${JSON.stringify(t.ops)}`);
+    assert.equal(count(t.ops, "rpm_filter"), 1, "one load completed");
+    assert.equal(testId("settings-busy"), null);
+    assert.equal(status("Filter reason"), "ok");
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("trip 7: disconnect mid-retry stops the getAllSettings retries; reconnect reads the FC (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => count(t.refused, "getAll") >= 2, 1000));
+    await t.mock.disconnect();
+    const tries = count(t.refused, "getAll");
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.ok(count(t.refused, "getAll") <= tries, `no retry after disconnect: ${tries} -> ${count(t.refused, "getAll")}`);
+    poll.release(); await poll.done;
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.deepEqual(pageReads(t.ops), [], `nothing sent while disconnected: ${JSON.stringify(t.ops)}`);
+    assert.equal(testId("settings-busy"), null, "no stale busy line once the retries stopped");
+    assert.ok(!OLDER.test(rpmSection()) && !OLDER.test(notchSection()));
+    await t.mock.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter"), 2500), `re-read after reconnect: ${JSON.stringify(t.ops)}`);
+    await sleep(30);
+    assert.equal(count(t.ops, "getAll"), 1);
+    assert.equal(status("Filter reason"), "ok");
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("trip 7: a transport error / FC reply on getAllSettings is not retried: today's fallback, but no 'older firmware' (QA #60)", async () => {
+    const t = await gatedHost("ok", { getAllError: "serial write failed" });
+    const t0 = Date.now();
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => fallbackErr() !== null, 1500), `fallback shown: ${failText().join(" | ")}`);
+    assert.ok(Date.now() - t0 < RPM_GATE_DELAY_MS + 500, `no retry delay: ${Date.now() - t0} ms`);
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.equal(count(t.ops, "getAll"), 1, `sent once, never retried: ${JSON.stringify(t.ops)}`);
+    assert.deepEqual(t.refused, [], "the gate was free");
+    assert.ok(/serial write failed/.test(fallbackErr() ?? ""), "the error is shown as today");
+    assert.equal(testId("settings-busy"), null, "not a busy line");
+    assert.ok(!OLDER.test(rpmSection()), `a fallback alone never claims older firmware (RPM): ${rpmSection()}`);
+    assert.ok(!OLDER.test(notchSection()), `a fallback alone never claims older firmware (notch): ${notchSection()}`);
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("trip 7: QA repro: real MotorsPage eRPM poll in flight, then Filters -> busy line, then real values, never 'older firmware' (QA #60)", async () => {
+    (globalThis as Record<string, unknown>).document = { hidden: false, addEventListener() {}, removeEventListener() {} };
+    const t = await gatedHost("ok", { latencyMs: 5 });
+    const release = t.hold("get erpm_m1"); // the poll's own eRPM read stays in flight (QA's forced hold on `get erpm_m1`)
+    (globalThis as Record<string, unknown>).__setupTestHost = {
+      host: t.host, connectionStatus: "connected", version: "BobFlight test", status: null,
+      refreshStatus: async () => {}, pollAfterConnect: async () => {}, setLastError: () => {}, postFlashGate: false,
+    };
+    const motors: Root = createRoot(container as never);
+    flushSync(() => motors.render(<MotorsPage />));
+    assert.ok(await waitFor(() => t.ops.includes("get erpm_m1"), 3000), `the real Motors poll sent get erpm_m1: ${JSON.stringify(t.ops)}`);
+    motors.unmount(); // switch tabs: Motors -> Filters while the poll's command still holds the gate
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => t.refused.includes("getAll"), 1000), `Filters' getAllSettings met the busy gate: ${JSON.stringify(t.refused)}`);
+    await sleep(300);
+    assert.equal(testId("settings-busy"), GATE_BUSY_MESSAGE, "busy line while the poll holds the gate");
+    assert.ok(!OLDER.test(rpmSection()) && !OLDER.test(notchSection()), `no older-firmware text: ${notchSection()} | ${rpmSection()}`);
+    assert.equal(fallbackErr(), null, "not the local fallback");
+    release();
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter"), 3000), `Filters loaded once the poll finished: ${JSON.stringify(t.ops)}`);
+    await sleep(30);
+    assert.equal(testId("settings-busy"), null);
+    assert.ok(!OLDER.test(rpmSection()) && !OLDER.test(notchSection()), `${notchSection()} | ${rpmSection()}`);
+    assert.equal(status("Filter reason"), "ok");
+    for (const k of rpmInputs) assert.ok(!isDisabled(input(k)), `${k} editable`);
+    assert.equal(count(t.ops, "getAll"), 1);
+    root.unmount(); await sleep(20); await t.mock.disconnect(); delete (globalThis as Record<string, unknown>).document;
+  });
+
   console.log(`PASS RPM filter render: ${passed} tests`);
 }
-const guard = setTimeout(() => { console.error("timeout"); process.exit(1); }, 120000);
+const guard = setTimeout(() => { console.error("timeout"); process.exit(1); }, 180000);
 main().then(() => clearTimeout(guard)).catch((e) => { clearTimeout(guard); console.error(e); process.exitCode = 1; });
