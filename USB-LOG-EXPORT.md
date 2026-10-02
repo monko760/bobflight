@@ -1,10 +1,15 @@
 # Read-only USB log export
 
-This update provides a PC utility, not an integrated configurator download button or USB mass-storage mode. It reads a named root-directory `BFLxxxxx.BBL` from the actual FAT32 card, including files recorded before a reboot or firmware update. It does not require the recorder's RAM state and never issues a card write, format, repair, erase, recording-start, arming or Save command.
+There are two read-only ways to copy a root-directory `BFLxxxxx.BBL` from the actual FAT32 card over USB, including files recorded before a reboot or firmware update: the **Download** section on the Configurator's Blackbox tab, and the PC utility `tools/download_blackbox.py`, which remains the fallback. A powered-off SD card reader is the last fallback. USB mass-storage mode is not offered. Neither path needs the recorder's RAM state, and neither issues a card write, format, repair, erase, recording-start, arming or Save command.
 
 Firmware version must end in `-sdprobe2-bbl2-sdread1` (or the earlier `-sdprobe2-bbl1-sdread1`). The added `sd read N` API is available only after a successful read-only probe, while disarmed, motor tests/calibration stopped and USB connected. It cannot interrupt an active recorder, including through `sd cancel`. Reads advance asynchronously with a bounded polling quantum, a three-second aggregate timeout, CRC checking and cancellation on guard loss. Normal radio arming/failsafe behavior is unchanged; a guard loss aborts the read, not the aircraft controller.
 
-The PC utility checks every sector response's identity, exact length and IEEE CRC32; validates FAT32 device/partition/volume bounds, FAT capacity, clean flags and mirrored sectors; follows fragmented chains with cycle/length checks; and exports only after the whole file has been read. An existing PC output file is never overwritten. Failed local writes remove only the newly created incomplete output. It accepts root `BFLxxxxx.BBL` files up to 64 MiB; it does not browse subdirectories, repair dirty cards, or offer a complete filesystem consistency check. The root scan is capped at 4096 sectors. MBR support requires exactly one FAT32 partition; GPT/exFAT are refused.
+Both the Configurator and the PC utility check every sector response's identity, exact length and IEEE CRC32. Both validate the FAT32 device/partition/volume bounds, FAT capacity, clean flags and mirrored FAT sectors, and follow fragmented chains with cycle/length checks. Both accept root `BFLxxxxx.BBL` files up to 64 MiB, cap the root scan at 4096 sectors, refuse a root entry with that name that is a subdirectory, and do not browse subdirectories, repair dirty cards or offer a complete filesystem consistency check. MBR support requires exactly one FAT32 partition; GPT/exFAT are refused (the Configurator shows the card's `sd_filesystem_hint` and points to a card reader).
+
+How the file reaches the PC differs:
+
+- **Configurator (browser):** the file is handed to the browser as one download (a Blob) only after every sector verified and the length matches the directory entry. Nothing is written before that, so an aborted download leaves no partial file. Where the file goes, and what happens if a file with the same name already exists, is up to the browser's own download settings (most browsers add a number to the name).
+- **`tools/download_blackbox.py`:** it writes to the output path you give it. An existing output file is never overwritten, and a failed local write removes only the newly created incomplete output.
 
 ## Before updating
 
@@ -35,9 +40,22 @@ Expected image: `C:\Users\Monko\BF ChatGPt\bobflight-kakute_f7_hdv-main.hex`. Us
 
 After flashing, check `version`, `storage` and `diff all`: correct Kakute target, the version suffix above, and the intended saved alignment/motor order/configuration. Stop on missing settings or unexpected defaults. No new recording, motor test or flight is needed to retrieve the existing file.
 
-## Copy an existing file to the PC
+## Download from the Configurator (Blackbox tab)
 
-Disconnect the configurator and close other serial monitors first. Only one program can own the controller's COM port. Python 3 and its Windows `py` launcher are required. If `py` is unavailable, stop and install/locate Python 3 rather than running commands against a guessed environment.
+Connect the Configurator to the controller and open the **Blackbox** tab. The section **Download logs from the onboard SD card** works like this:
+
+1. Disarm, stop motor tests and calibration, and wait until the onboard recorder reports `done`. The buttons stay disabled, with the reason shown, while recording, armed, disconnected, before the post-flash checks are done, while the SD card check or USB bench recorder runs, or while a settings save, defaults restore or storage refresh is in progress. The firmware still enforces its own locks; its refusal lines are shown exactly as sent.
+2. Click **Probe card and list logs**. Every list and every download starts with a fresh `sd probe`, waits for `sd_state: done` (15 s cap), re-reads `blackbox status` and `status` (it refuses while a recording is active or the controller is armed; a real reply that does not report the state, as from older firmware, shows "Recorder state unknown" or "Arm state unknown" and relies on the firmware lock, while a missing reply, a timeout or a busy connection stops with nothing read), reads the FAT32 root and lists the `BFLxxxxx.BBL` files with their sizes. It ends with `sd cancel` once an SD command has gone out.
+3. Click **Download BFLxxxxx.BBL** for the file you want. Sectors are read one at a time (`sd read N`, never more than one in flight), each checked against its CRC-32. A progress bar shows bytes and sectors. A sector with a CRC mismatch is read again once; a second mismatch stops the download and names the sector.
+4. The browser saves the file only after every sector verified and the length matches the directory entry. Any error, timeout, **Cancel download**, tab change or disconnect discards the partial data, and `sd cancel` is sent while connected (once an SD command has gone out). After a timeout the USB link is reset: reconnect and download again. If another command was using the connection, nothing was read: try again.
+
+The Configurator re-reads `blackbox status` and `status` right before the first sector is read and refuses while recording or armed. If the firmware's reply does not report the recorder or arm state, the download continues and shows "Recorder state unknown" or "Arm state unknown". Arming, starting a recording or a motor test **during** a download is not watched by the Configurator: the flight controller's own guard stops the read (`sd_data_error: guard check failed`), and the Configurator then shows that line and saves nothing.
+
+Check the saved size against the listed size, and keep the final `blackbox status` counters alongside it.
+
+## Fallback: copy an existing file with the PC utility
+
+Use this if the Configurator download is unavailable or fails repeatedly. Disconnect the configurator and close other serial monitors first. Only one program can own the controller's COM port. Python 3 and its Windows `py` launcher are required. If `py` is unavailable, stop and install/locate Python 3 rather than running commands against a guessed environment.
 
 ```powershell
 $ErrorActionPreference = 'Stop'

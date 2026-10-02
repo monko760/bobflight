@@ -162,6 +162,16 @@ export { MockGyroNotch, GYRO_NOTCH_MOCK_SCENARIOS } from "./gyro-notch-mock";
 export type { GyroNotchMockScenario } from "./gyro-notch-mock";
 
 export * from "./gyro-health";
+// Onboard SD download: `sd read` sector helper (holds the UI CommandGate) and FAT32 root reader.
+export {
+  SD_SECTOR_BYTES, SD_READ_TIMEOUT_MS, SD_READ_REPLY_CAP, SD_PROBE_TIMEOUT_MS, SD_MAX_SECTOR,
+  SD_DATA_ERROR_TEXTS, SD_PROBE_REFUSALS, SD_PROBE_ACTIVE_STATES,
+  crc32Ieee, formatCrc32, formatSdReadCommand, parseSdReadReply, parseSdStatusReply, sdReadyCapacity,
+  SdSectorReader, SdGateBusyError,
+} from "./sd-read";
+export type { SdReadResult, SdStatusResult, SdCommandGate, SdReadSend } from "./sd-read";
+export { Fat32RootReader, Fat32Error, FAT32_MAX_FILE_BYTES, FAT32_ROOT_SCAN_SECTORS } from "./fat32-root";
+export type { Fat32BblEntry } from "./fat32-root";
 export {
   RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, RPM_FILTER_REASONS,
   isRpmFilterKey, isRpmFilterCliCommand, rpmValueProblem, qFromX100, qToX100,

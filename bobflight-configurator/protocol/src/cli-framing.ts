@@ -74,16 +74,18 @@ export class ResponseCollector {
   private readonly reject: (err: Error) => void;
   private readonly idleMs: number;
   private readonly endMarker?: string;
+  private readonly maxChars: number;
 
   constructor(
     resolve: (text: string) => void,
     reject: (err: Error) => void,
-    opts: { idleMs?: number; timeoutMs?: number; endMarker?: string } = {}
+    opts: { idleMs?: number; timeoutMs?: number; endMarker?: string; maxChars?: number } = {}
   ) {
     this.resolve = resolve;
     this.reject = reject;
     this.idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
     this.endMarker = opts.endMarker;
+    this.maxChars = opts.maxChars ?? 65536;
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.hardTimer = setTimeout(() => {
       this.finish(true);
@@ -94,8 +96,8 @@ export class ResponseCollector {
     if (this.settled) return;
     // Bound retained input even if a device never sends the expected terminator.
     // The CLI protocol is ASCII; this is a conservative UTF-16 storage bound.
-    if (text.length > 65536 - this.receivedChars) {
-      this.cancel(new Error("CLI response exceeds 65536-character limit"));
+    if (text.length > this.maxChars - this.receivedChars) {
+      this.cancel(new Error(`CLI response exceeds ${this.maxChars}-character limit`));
       return;
     }
     this.receivedChars += text.length;
