@@ -10,6 +10,8 @@ const page = path.join("src", "pages", "BlackboxPage.tsx");
 await build({
   entryPoints: [path.join(here, "test-blackbox-download.tsx")],
   bundle: true, platform: "node", format: "esm", packages: "external", outfile, jsx: "automatic", logLevel: "warning",
+  // createHost (exercised by behaviour in the test) reads Vite's import.meta.env.
+  define: { "import.meta.env": "{}" },
   plugins: [{
     name: "blackbox-page-stubs",
     setup(b) {

@@ -2,10 +2,12 @@
 /**
  * Integrated onboard SD log download (BB2a). Frozen FW sequence (#42) on every
  * list and every download: fresh `sd probe` -> `sd status` until done (15 s
- * cap; sd_sectors present, sd_io_error 0) -> `blackbox status` re-read (refuse
- * while recording; an unreadable/older reply is allowed and shown as
- * "Recorder state unknown") -> one `sd read <N>` at a time (protocol
- * SdSectorReader through the shared CommandGate) -> `sd cancel`.
+ * cap; sd_sectors present, sd_io_error 0) -> `blackbox status` and `status`
+ * re-read (refuse while recording or armed; a real reply that does not say is
+ * allowed and shown as "Recorder state unknown" / "Arm state unknown"; a reply
+ * that never arrives aborts) -> one `sd read <N>` at a time (protocol
+ * SdSectorReader through the shared CommandGate) -> `sd cancel`, sent and
+ * reported only when an SD command actually went out.
  *
  * Never saves a corrupted file: a CRC mismatch is retried once for that sector,
  * then the download aborts naming the sector. The Blob is created only after
@@ -29,7 +31,7 @@ import {
 } from '@bobflight/protocol';
 import { ONBOARD_ACTIVE_STATES, parseOnboardReply } from './onboard';
 
-export type SdDownloadCommand = 'sd probe' | 'sd status' | 'sd cancel' | 'blackbox status';
+export type SdDownloadCommand = 'sd probe' | 'sd status' | 'sd cancel' | 'blackbox status' | 'status';
 export interface SdDownloadLink {
   getConnectionStatus(): string;
   sendCommand(cmd: SdDownloadCommand): Promise<string>;
@@ -45,14 +47,14 @@ export interface SdDownloadProgress {
   bytesDone: number;
   sectorsTotal: number;
   sectorsDone: number;
-  /** Measured from real timings of completed sector reads; null before the first sector. */
-  bytesPerSecond: number | null;
 }
 export interface SdDownloadMessage {
   tone: 'info' | 'ok' | 'error';
   text: string;
   /** FW line exactly as sent (error/refusal), or null. */
   fwLine: string | null;
+  /** Raw technical detail (e.g. the internal error line) shown small but visible, or null. */
+  detail?: string | null;
 }
 export interface SdDownloadOptions {
   /** Hands the verified file to the browser (Blob download). */
@@ -97,9 +99,29 @@ export function downloadBlockedReason(s: { connected: boolean; postFlashGate: bo
   return null;
 }
 
-/** Shown (visible) when the pre-download `blackbox status` gave no usable recorder state. */
+/** Shown (visible) when the pre-read `blackbox status` reply arrived but gave no usable recorder state. */
 export const RECORDER_STATE_UNKNOWN =
-  "Recorder state unknown: the controller's blackbox status reply could not be read (older firmware?). The download relies on the controller's own SD card lock.";
+  "Recorder state unknown: the controller's blackbox status reply did not report a recorder state (older firmware?). The download relies on the controller's own SD card lock.";
+
+/** Shown (visible) when the pre-read `status` reply arrived without `arm: armed` / `arm: disarmed`. */
+export const ARM_STATE_UNKNOWN =
+  "Arm state unknown: the controller's status reply did not report arm: armed or arm: disarmed, so the Configurator's arm lock is inactive. The flight controller's own guard still refuses SD reads while armed.";
+
+/** Plain text when the shared connection stayed busy (CommandGate refused) past the retry window. */
+export const GATE_BUSY_TEXT = 'Another command was using the connection; nothing was read. Try again.';
+export const GATE_BUSY_MID_READ_TEXT = 'Another command was using the connection, so the download stopped. Nothing was saved. Try again.';
+
+export type ArmVerdict = { kind: 'disarmed' } | { kind: 'armed'; line: string } | { kind: 'unknown' };
+
+/** Arm state from a real `status` reply: `arm: armed` refuses (any such line wins), `arm: disarmed` passes, else unknown. */
+export function armVerdict(raw: string): ArmVerdict {
+  const lines = raw.split(/\r\n|\n|\r/).map((l) => l.trim()).filter((l) => /^arm:/.test(l));
+  const values = lines.map((l) => l.replace(/^arm:\s*/, ''));
+  const armed = lines.find((_, i) => values[i] === 'armed');
+  if (armed !== undefined) return { kind: 'armed', line: armed };
+  if (values.length > 0 && values.every((v) => v === 'disarmed')) return { kind: 'disarmed' };
+  return { kind: 'unknown' };
+}
 
 export type RecorderVerdict = { kind: 'idle' } | { kind: 'recording'; line: string } | { kind: 'unknown' };
 
@@ -108,8 +130,7 @@ export type RecorderVerdict = { kind: 'idle' } | { kind: 'recording'; line: stri
  * unreadable one still refuses on any sign of an active session
  * (`blackbox_active: 1` or an active state); otherwise the state is unknown.
  */
-export function recorderVerdict(raw: string | null): RecorderVerdict {
-  if (raw === null) return { kind: 'unknown' };
+export function recorderVerdict(raw: string): RecorderVerdict {
   const lines = raw.split(/\r\n|\n|\r/).map((l) => l.trim());
   const stateLine = lines.find((l) => /^blackbox_state:/.test(l)) ?? null;
   const activeLine = lines.find((l) => /^blackbox_active:/.test(l)) ?? null;
@@ -125,7 +146,11 @@ export function recorderVerdict(raw: string | null): RecorderVerdict {
 }
 
 class Abort extends Error {
-  constructor(readonly text: string, readonly fwLine: string | null = null, readonly tone: 'error' | 'info' = 'error') { super(text); }
+  constructor(readonly text: string, readonly fwLine: string | null = null, readonly tone: 'error' | 'info' = 'error', readonly detail: string | null = null) { super(text); }
+}
+/** The CommandGate stayed busy past the retry window: nothing was sent for this step. */
+class GateBusyAbort extends Abort {
+  constructor(raw: string) { super(GATE_BUSY_TEXT, null, 'error', raw); }
 }
 /** A command timed out; the text depends on whether the client reset the USB link. */
 class TimeoutAbort extends Abort {
@@ -134,6 +159,8 @@ class TimeoutAbort extends Abort {
 
 const NOTHING_SAVED = 'Nothing was saved.';
 const isGateBusy = (e: unknown) => /request not queued/.test(e instanceof Error ? e.message : String(e));
+/** The gate dropped the request because the USB session changed: it was never written. */
+const isSessionChanged = (e: unknown) => /USB session changed/.test(e instanceof Error ? e.message : String(e));
 const isTimeoutError = (e: unknown) => /terminator missing|timed out/.test(e instanceof Error ? e.message : String(e));
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
@@ -142,10 +169,18 @@ export class SdDownloadController {
   files: Fat32BblEntry[] | null = null;
   progress: SdDownloadProgress | null = null;
   message: SdDownloadMessage | null = null;
-  /** RECORDER_STATE_UNKNOWN when the last pre-read `blackbox status` gave no usable state, else null. */
+  /** RECORDER_STATE_UNKNOWN when the last pre-read `blackbox status` reply gave no usable state, else null. */
   recorderNote: string | null = null;
+  /** ARM_STATE_UNKNOWN when the last pre-read `status` reply gave no arm state, else null. */
+  armNote: string | null = null;
+  /** Visible problems found in the card root (e.g. a BFL-named subdirectory). */
+  warnings: string[] = [];
   /** Sector reads sent in the current/last operation (tests and diagnostics). */
   sectorReads = 0;
+  /** Sector reads that returned a reply (any kind) in the current operation. */
+  private sectorsAnswered = 0;
+  /** True once an SD command of the current operation was handed to the link (not refused by the gate). */
+  private sdOnWire = false;
   private cancelReason: SdCancelReason | null = null;
   private readonly now: () => number;
   private readonly probeTimeoutMs: number;
@@ -194,13 +229,26 @@ export class SdDownloadController {
 
   private sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
 
-  private async withGate<T>(what: string, work: () => Promise<T>): Promise<T> {
+  /**
+   * Runs one command through the shared CommandGate, retrying for gateRetryMs
+   * while another command holds it (nothing is sent meanwhile). `sd` marks SD
+   * commands: once one was handed to the link (not refused by the gate) the
+   * operation ends with `sd cancel`.
+   */
+  private async withGate<T>(what: string, work: () => Promise<T>, sd = false): Promise<T> {
     const deadline = this.now() + this.gateRetryMs;
     for (;;) {
-      try { return await work(); } catch (e) {
+      try {
+        const r = await work();
+        if (sd) this.sdOnWire = true;
+        return r;
+      } catch (e) {
+        const notSent = isGateBusy(e) || isSessionChanged(e);
+        if (sd && !notSent) this.sdOnWire = true;
         if (isGateBusy(e) && this.now() < deadline && !this.cancelReason) { await this.sleep(40); continue; }
         if (isTimeoutError(e)) throw new TimeoutAbort(what, `no complete reply: ${errText(e)}`);
         if (!this.connected()) throw new Abort(this.cancelText('disconnected', what), null, 'info');
+        if (isGateBusy(e)) throw new GateBusyAbort(errText(e));
         throw e;
       }
     }
@@ -208,9 +256,9 @@ export class SdDownloadController {
 
   private async sendSd(cmd: 'sd probe' | 'sd status', what: string): Promise<Extract<SdStatusResult, { kind: 'status' }>> {
     let raw: string;
-    try { raw = await this.withGate(what, () => this.link.sendCommand(cmd)); } catch (e) {
+    try { raw = await this.withGate(what, () => this.link.sendCommand(cmd), true); } catch (e) {
       if (e instanceof Abort) throw e;
-      throw new Abort(`${cmd} failed: ${errText(e)}. ${NOTHING_SAVED}`);
+      throw new Abort(`${cmd} failed. ${NOTHING_SAVED}`, null, 'error', errText(e));
     }
     this.check(what);
     const st = parseSdStatusReply(raw);
@@ -248,26 +296,45 @@ export class SdDownloadController {
       sectors = cap.sectors;
       break;
     }
-    await this.checkRecorder(what);
+    await this.checkLocks(what);
     this.phase = 'scanning'; this.changed();
     const fs = new Fat32RootReader((lba) => this.readVerified(lba, what), sectors);
     await this.fat(() => fs.mount());
     return fs;
   }
 
-  /** Re-read `blackbox status` before any sd read: refuse while recording; unknown is allowed (FW lock) and shown. */
-  private async checkRecorder(what: string): Promise<void> {
-    let raw: string | null = null;
-    try { raw = await this.withGate(what, () => this.link.sendCommand('blackbox status')); } catch (e) {
+  /**
+   * A real reply to a lock re-read. Anything else (gate still busy, USB session
+   * changed, timeout, client error, disconnect) aborts visibly before any sd
+   * read: a missing reply is never treated as "state unknown".
+   */
+  private async lockReply(cmd: 'blackbox status' | 'status', what: string): Promise<string> {
+    try { return await this.withGate(what, () => this.link.sendCommand(cmd)); } catch (e) {
       if (e instanceof Abort) throw e;
-      raw = null; // reply missing: treat as unknown (older FW)
+      throw new Abort(`${cmd} could not be read, so the recorder and arm locks were not checked. No sd read was sent. ${NOTHING_SAVED}`, null, 'error', errText(e));
     }
+  }
+
+  /**
+   * Re-read `blackbox status` and `status` right before any sd read: refuse
+   * while recording or armed. A real reply that does not report the state is
+   * allowed (the FW guard applies) and shown as a visible note.
+   */
+  private async checkLocks(what: string): Promise<void> {
+    const bb = await this.lockReply('blackbox status', what);
     this.check(what);
-    const v = recorderVerdict(raw);
-    if (v.kind === 'recording') {
-      throw new Abort(`Onboard recording is active, so the recorder owns the SD card: stop recording and wait for done, then try again. No sd read was sent. ${NOTHING_SAVED}`, v.line);
+    const rec = recorderVerdict(bb);
+    if (rec.kind === 'recording') {
+      throw new Abort(`Onboard recording is active, so the recorder owns the SD card: stop recording and wait for done, then try again. No sd read was sent. ${NOTHING_SAVED}`, rec.line);
     }
-    this.recorderNote = v.kind === 'unknown' ? RECORDER_STATE_UNKNOWN : null;
+    const st = await this.lockReply('status', what);
+    this.check(what);
+    const arm = armVerdict(st);
+    if (arm.kind === 'armed') {
+      throw new Abort(`The flight controller reports it is armed: disarm, then try again. No sd read was sent. ${NOTHING_SAVED}`, arm.line);
+    }
+    this.recorderNote = rec.kind === 'unknown' ? RECORDER_STATE_UNKNOWN : null;
+    this.armNote = arm.kind === 'unknown' ? ARM_STATE_UNKNOWN : null;
     this.changed();
   }
 
@@ -283,10 +350,13 @@ export class SdDownloadController {
     if (!read) throw new Abort('This connection cannot read SD sectors.');
     try {
       this.sectorReads++;
-      return await this.withGate(what, () => read.call(this.link, lba));
+      const r = await this.withGate(what, () => read.call(this.link, lba), true);
+      this.sectorsAnswered++;
+      return r;
     } catch (e) {
+      if (e instanceof GateBusyAbort && this.sectorsAnswered > 0) throw new Abort(GATE_BUSY_MID_READ_TEXT, null, 'error', e.detail);
       if (e instanceof Abort) throw e;
-      throw new Abort(`sd read ${lba} failed: ${errText(e)}. ${NOTHING_SAVED}`);
+      throw new Abort(`sd read ${lba} failed. ${NOTHING_SAVED}`, null, 'error', errText(e));
     }
   }
 
@@ -309,15 +379,22 @@ export class SdDownloadController {
     }
   }
 
-  /** `sd cancel` at the end of every sequence (success or abort) while connected. */
+  /**
+   * `sd cancel` at the end of every sequence (success or abort) while
+   * connected, but only if an SD command of this operation actually went out:
+   * otherwise there is nothing to cancel and nothing is claimed.
+   */
   private async endSession(): Promise<string> {
+    if (!this.sdOnWire) return '';
     if (!this.connected()) return ' sd cancel was not sent (not connected).';
     try {
       const raw = await this.withGate('Download', () => this.link.sendCommand('sd cancel'));
       const st = parseSdStatusReply(raw);
       return st.kind === 'refused' ? ` Sent sd cancel; the controller replied: ${st.line}` : ' Sent sd cancel.';
     } catch (e) {
-      return ` sd cancel could not be sent: ${errText(e)}.`;
+      return e instanceof GateBusyAbort
+        ? ' sd cancel could not be sent: another command was using the connection.'
+        : ` sd cancel could not be sent: ${errText(e)}.`;
     }
   }
 
@@ -327,7 +404,10 @@ export class SdDownloadController {
     this.message = null;
     this.progress = null;
     this.sectorReads = 0;
+    this.sectorsAnswered = 0;
+    this.sdOnWire = false;
     this.recorderNote = null;
+    this.armNote = null;
     if (this.link.storageActionPending?.()) {
       this.message = { tone: 'error', text: `${STORAGE_BLOCK_TEXT.settings} Nothing was sent.`, fwLine: null };
       this.changed();
@@ -348,11 +428,11 @@ export class SdDownloadController {
   }
 
   private async fail(e: unknown): Promise<void> {
-    const abort = e instanceof Abort ? e : new Abort(`Download failed: ${errText(e)}. ${NOTHING_SAVED}`);
+    const abort = e instanceof Abort ? e : new Abort(`Download failed. ${NOTHING_SAVED}`, null, 'error', errText(e));
     this.progress = null; // partial data is discarded with the operation's buffers
     const text = abort instanceof TimeoutAbort ? await this.timeoutText(abort) : abort.text;
     const cancelNote = await this.endSession();
-    this.message = { tone: abort.tone, text: text + (abort.tone === 'info' ? ` Partial data was discarded.${cancelNote}` : cancelNote), fwLine: abort.fwLine };
+    this.message = { tone: abort.tone, text: text + (abort.tone === 'info' ? ` Partial data was discarded.${cancelNote}` : cancelNote), fwLine: abort.fwLine, detail: abort.detail };
   }
 
   private finish(): void {
@@ -365,12 +445,14 @@ export class SdDownloadController {
   async list(): Promise<boolean> {
     if (!this.begin()) return false;
     this.files = null;
+    this.warnings = [];
     try {
       const fs = await this.openVolume('Listing');
       const files = await this.fat(() => fs.listBblFiles());
       this.check('Listing');
       const note = await this.endSession();
       this.files = files;
+      this.warnings = fs.bblSubdirectories.map((n) => `${n} in the card root is a subdirectory, not a log file: it is not listed and cannot be downloaded here. Check the card with an SD card reader.`);
       this.message = { tone: 'ok', text: `${files.length ? `Found ${files.length} log file${files.length === 1 ? '' : 's'}` : 'No BFLxxxxx.BBL log files'} in the card root.${note}`, fwLine: null };
       return true;
     } catch (e) {
@@ -393,15 +475,12 @@ export class SdDownloadController {
       if (listed && listed.size !== entry.size) throw new Abort(`${name} changed since it was listed (${listed.size} to ${entry.size} bytes); list the card again. ${NOTHING_SAVED}`);
       const lbas = await this.fat(() => fs.fileDataSectors(entry));
       this.phase = 'downloading';
-      this.progress = { file: name, bytesTotal: entry.size, bytesDone: 0, sectorsTotal: lbas.length, sectorsDone: 0, bytesPerSecond: null };
+      this.progress = { file: name, bytesTotal: entry.size, bytesDone: 0, sectorsTotal: lbas.length, sectorsDone: 0 };
       this.changed();
       const buf = new Uint8Array(lbas.length * 512);
-      const t0 = this.now();
       for (let i = 0; i < lbas.length; i++) {
         buf.set(await this.readVerified(lbas[i], 'Download'), i * 512);
-        const done = Math.min((i + 1) * 512, entry.size);
-        const elapsed = this.now() - t0;
-        this.progress = { ...this.progress, bytesDone: done, sectorsDone: i + 1, bytesPerSecond: elapsed > 0 ? (done * 1000) / elapsed : null };
+        this.progress = { ...this.progress, bytesDone: Math.min((i + 1) * 512, entry.size), sectorsDone: i + 1 };
         this.changed();
       }
       data = buf.subarray(0, entry.size);
@@ -422,10 +501,4 @@ export class SdDownloadController {
       this.finish();
     }
   }
-}
-
-/** "12.3 KiB/s" style rate, or "measuring…" before the first sector. */
-export function formatRate(bps: number | null): string {
-  if (bps === null || !Number.isFinite(bps)) return 'measuring…';
-  return bps >= 1024 ? `${(bps / 1024).toFixed(1)} KiB/s` : `${Math.round(bps)} B/s`;
 }

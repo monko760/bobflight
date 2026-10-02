@@ -16,8 +16,8 @@ export const BLACKBOX_COUNTER_KEYS = [
   'blackbox_rate_requested_hz',
   'blackbox_rate_reason',
 ] as const;
-/** From the `status` reply. */
-export const STATUS_COUNTER_KEYS = ['loop_overruns'] as const;
+/** From the `status` reply (arm state shown verbatim so a stale value can be marked). */
+export const STATUS_COUNTER_KEYS = ['arm', 'loop_overruns'] as const;
 export const COUNTER_UNKNOWN = 'unknown';
 
 export interface CounterRow { key: string; value: string }

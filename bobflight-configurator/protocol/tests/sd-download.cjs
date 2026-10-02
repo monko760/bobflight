@@ -123,6 +123,8 @@ async function probeDone(r) {
     assert.equal(r.fw.readsWhileActive, 0);
     for (let s = 1; s <= 5; s++) assert.equal((await r.reader.read(s)).kind, 'data');
     assert.equal(r.wire.max, 1, 'exactly one sd read in flight');
+    assert.equal(r.fw.maxReadsInFlight, 1, 'FW saw at most one sd read in flight (receipt to sd_data_end)');
+    assert.equal(r.fw.readsInFlight, 0);
     assert.deepEqual(r.fw.readsStarted, [0, 1, 2, 3, 4, 5]);
     await r.client.disconnect();
   });
@@ -183,12 +185,39 @@ async function probeDone(r) {
     await probeDone(r);
     r.fw.readDelayMs = 30;
     const out = [];
+    const before = r.fw.maxReadsInFlight;
+    assert.equal(before, 1, 'sequential reads: one in flight');
     r.fw.handle('sd read 1', (t) => out.push(t));
     r.fw.handle('sd read 2', (t) => out.push(t));
     assert.equal(r.fw.readsWhileActive, 1);
+    assert.equal(r.fw.maxReadsInFlight, 2, 'a pipelined second read is counted as concurrent');
     assert.match(out.join(''), /sd_data_error: read in progress/);
     await sleep(50);
+    assert.equal(r.fw.readsInFlight, 0, 'both replies ended with sd_data_end');
+    // A read cancelled by `sd cancel` leaves flight too.
+    r.fw.addFault(9, { type: 'silent' });
+    r.fw.handle('sd read 9', (t) => out.push(t));
+    assert.equal(r.fw.readsInFlight, 1);
+    r.fw.handle('sd cancel', (t) => out.push(t));
+    assert.equal(r.fw.readsInFlight, 0);
     await r.client.disconnect();
+  });
+
+  await test('client forwards the per-command reply cap and timeout (sd read framing over 64-byte chunks)', async () => {
+    const r = await rig();
+    await probeDone(r);
+    await assert.rejects(() => r.client.sendCommand('sd read 0', { timeoutMs: 8000, maxResponseChars: 1000 }), /exceeds 1000-character limit/, 'maxResponseChars reaches the response collector');
+    await sleep(20);
+    const r2 = await rig();
+    await probeDone(r2);
+    const raw = await r2.client.sendCommand('sd read 0', { timeoutMs: 8000, maxResponseChars: 16384 });
+    assert.ok(raw.length > 1000 && raw.length <= 16384, `a full sector reply fits the 16 KiB cap (${raw.length} chars)`);
+    r2.fw.addFault(1, { type: 'silent' });
+    const t0 = Date.now();
+    await assert.rejects(() => r2.client.sendCommand('sd read 1', { timeoutMs: 150, maxResponseChars: 16384 }), /terminator missing/);
+    assert.ok(Date.now() - t0 < 2000, 'timeoutMs reaches the response collector');
+    await sleep(20);
+    await r.client.disconnect().catch(() => {}); await r2.client.disconnect().catch(() => {});
   });
 
   await test('FAT32 root reader: lists BFL*.BBL with sizes, multi-cluster and fragmented chains, MBR', async () => {
@@ -220,7 +249,8 @@ async function probeDone(r) {
       ['dirty volume', (c) => c.setFat(1, 0x07ffffff), /Dirty FAT volume/],
       ['hard error', (c) => c.setFat(1, 0x0bffffff), /hard error/],
       ['mirror mismatch', (c) => c.setFat(4, 0x0ffffff9, [2]), /FAT mirror mismatch/],
-      ['cycle', (c) => c.setFat(5, 4), /longer than allocated|Cycle/],
+      // 3 -> 4 -> 5 -> 4: the revisit is caught by the cycle check before the length check could fire.
+      ['cycle', (c) => c.setFat(5, 4), /Cycle detected in file cluster chain at cluster 4/],
       ['short chain', (c) => c.setFat(4, 0x0fffffff), /ended prematurely/],
       ['long chain', (c) => { c.setFat(5, 6); c.setFat(6, 0x0fffffff); }, /longer than allocated/],
       ['free cluster link', (c) => c.setFat(4, 0), /out of valid cluster range/],
@@ -242,11 +272,37 @@ async function probeDone(r) {
     const dirCard = new SparseFat32Card(); dirCard.sector(dirCard.clusterLba(2))[11] = 0x10;
     const fsDir = new P.Fat32RootReader(async (l) => dirCard.readSector(l), dirCard.cardSectors); await fsDir.mount();
     assert.deepEqual(await fsDir.listBblFiles(), [], 'a BFL-named subdirectory is not a log file');
+    assert.deepEqual(fsDir.bblSubdirectories, ['BFL00001.BBL'], 'and it is reported, not skipped silently');
     const empty = new SparseFat32Card({ files: [{ name: 'BFL00009.BBL', size: 0, clusters: [3] }] });
     const fsE = new P.Fat32RootReader(async (l) => empty.readSector(l), empty.cardSectors); await fsE.mount();
     const [e] = await fsE.listBblFiles(); assert.equal(e.size, 0);
     await assert.rejects(() => fsE.fileDataSectors(e), /empty/);
     await assert.rejects(() => fsE.fileDataSectors({ ...e, size: 64 * 1024 * 1024 + 1 }), /64 MiB/);
+  });
+
+  await test('FAT32 root chain: cycle and bad links refused; BFL-named subdirectory reported next to real files', async () => {
+    const list = async (card) => { const fs = new P.Fat32RootReader(async (l) => card.readSector(l), card.cardSectors); await fs.mount(); return [fs, await fs.listBblFiles()]; };
+    // Root 2 -> 8 -> 2 with no end-of-directory entry: only the cycle check stops the scan.
+    const cyc = new SparseFat32Card();
+    cyc.setFat(2, 8); cyc.setFat(8, 2); cyc.fillDirectoryClusterDeleted(2); cyc.fillDirectoryClusterDeleted(8);
+    await assert.rejects(() => list(cyc), /Cycle detected in root directory cluster chain/);
+    for (const [label, link] of [['reserved cluster 1', 1], ['free cluster 0', 0], ['reserved 0x0FFFFFF0', 0x0ffffff0], ['beyond the volume', 0x0fffffef]]) {
+      const bad = new SparseFat32Card();
+      bad.setFat(2, link);
+      await assert.rejects(() => list(bad), /Invalid root chain link/, label);
+    }
+    // A valid two-cluster root chain still lists (no false positives).
+    const two = new SparseFat32Card();
+    two.setFat(2, 8); two.setFat(8, 0x0fffffff); two.fillDirectoryClusterDeleted(2);
+    assert.deepEqual((await list(two))[1].map((f) => f.name), ['BFL00001.BBL']);
+    const sub = new SparseFat32Card({ files: [{ name: 'BFL00001.BBL', size: 40116, clusters: [3, 4, 5] }, { name: 'BFL00002.BBL', size: 700, clusters: [6] }] });
+    sub.addRootSubdirectory('BFL00007.BBL', 20);
+    const [fsSub, files] = await list(sub);
+    assert.deepEqual(files.map((f) => f.name), ['BFL00001.BBL', 'BFL00002.BBL']);
+    assert.deepEqual(fsSub.bblSubdirectories, ['BFL00007.BBL']);
+    const clash = new SparseFat32Card();
+    clash.addRootSubdirectory('BFL00001.BBL', 20);
+    await assert.rejects(() => list(clash), /Duplicate filename 'BFL00001.BBL'/);
   });
 
   console.log(`PASS SD download protocol layer: ${passed} tests`);

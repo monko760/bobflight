@@ -182,10 +182,19 @@ export class Fat32RootReader {
     return this.firstDataSector + (cluster - 2) * this.secPerClus;
   }
 
-  /** Scan the root directory chain for `BFLxxxxx.BBL` files (subdirectories and other names are skipped). */
+  /**
+   * `BFLxxxxx.BBL` names in the root that are subdirectories (from the last
+   * listBblFiles). They are not log files: like tools/download_blackbox.py
+   * ("Requested target ... is a subdirectory") they can never be downloaded,
+   * and callers must show them as an error rather than skip them silently.
+   */
+  bblSubdirectories: string[] = [];
+
+  /** Scan the root directory chain for `BFLxxxxx.BBL` files (other names are skipped; BFL-named subdirectories are reported in bblSubdirectories). */
   async listBblFiles(): Promise<Fat32BblEntry[]> {
     if (!this.mounted) throw new Fat32Error("FAT32 volume is not mounted");
     const found = new Map<string, Fat32BblEntry>();
+    const subdirs = new Set<string>();
     const visited = new Set<number>();
     let cur = this.rootClus;
     let scanned = 0;
@@ -205,12 +214,13 @@ export class Fat32RootReader {
           if (first === 0x00) { end = true; break; }
           if (first === 0xe5) continue;
           const attr = sec[o + 11];
-          if (attr === 0x0f || attr & 0x08 || attr & 0x10) continue;
+          if (attr === 0x0f || attr & 0x08) continue;
           let short = "";
           for (let i = 0; i < 11; i++) short += String.fromCharCode(sec[o + i]);
           if (!/^BFL[0-9]{5}BBL$/.test(short)) continue;
           const name = `${short.slice(0, 8)}.${short.slice(8)}`;
-          if (found.has(name)) throw new Fat32Error(`Duplicate filename '${name}' found in root directory`);
+          if (found.has(name) || subdirs.has(name)) throw new Fat32Error(`Duplicate filename '${name}' found in root directory`);
+          if (attr & 0x10) { subdirs.add(name); continue; }
           found.set(name, { name, firstCluster: ((u16(sec, o + 20) << 16) | u16(sec, o + 26)) >>> 0, size: u32(sec, o + 28) });
         }
       }
@@ -218,6 +228,7 @@ export class Fat32RootReader {
       cur = next;
     }
     this.rootClusters = visited;
+    this.bblSubdirectories = [...subdirs].sort();
     this.listed = true;
     return [...found.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   }

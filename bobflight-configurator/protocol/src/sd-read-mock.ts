@@ -134,6 +134,35 @@ export class SparseFat32Card {
     return p;
   }
 
+  /** Rewrites a root entry's size field (the file "changed" on the card). */
+  setDirEntrySize(name: string, size: number): void {
+    const idx = this.files.findIndex((f) => f.name === name);
+    if (idx < 0) throw new Error(`no file ${name}`);
+    put32(this.sector(this.clusterLba(this.rootClus)), idx * 32 + 28, size);
+  }
+
+  /** Adds a root entry with the directory attribute (0x10) after the files. */
+  addRootSubdirectory(name: string, cluster: number): void {
+    const root = this.sector(this.clusterLba(this.rootClus));
+    let o = 0;
+    while (root[o] !== 0) o += 32;
+    const [base, ext] = name.split(".");
+    const short = base.padEnd(8, " ") + (ext ?? "").padEnd(3, " ");
+    for (let i = 0; i < 11; i++) root[o + i] = short.charCodeAt(i);
+    root[o + 11] = 0x10;
+    put16(root, o + 20, (cluster >>> 16) & 0xffff);
+    put16(root, o + 26, cluster & 0xffff);
+    this.setFat(cluster, 0x0fffffff);
+  }
+
+  /** Marks every free (0x00) directory slot of a cluster deleted (0xE5), so a root scan continues past it. */
+  fillDirectoryClusterDeleted(cluster: number): void {
+    for (let s = 0; s < this.secPerClus; s++) {
+      const sec = this.sector(this.clusterLba(cluster) + s);
+      for (let o = 0; o < 512; o += 32) if (sec[o] === 0) sec[o] = 0xe5;
+    }
+  }
+
   /** LBA holding byte `offset` of a file. */
   fileSectorLba(name: string, offset: number): number {
     const f = this.files.find((x) => x.name === name);
@@ -222,8 +251,11 @@ export class MockSdCliFirmware {
   readonly readsStarted: number[] = [];
   /** `sd read` received while another read was still active (pipelining). */
   readsWhileActive = 0;
+  /** `sd read` lines received whose reply (ending `sd_data_end: 1`) has not been emitted yet, and not cancelled. */
+  readsInFlight = 0;
+  /** Highest readsInFlight seen: 1 for a correct host, 2+ when reads are pipelined. */
   maxReadsInFlight = 0;
-  private readActive: { sector: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  private readActive: { sector: number; timer: ReturnType<typeof setTimeout> | null; done: () => void } | null = null;
   private probeTimer: ReturnType<typeof setTimeout> | null = null;
   readonly faults = new Map<number, SdReadFault[]>();
   /** Called when a read begins (tests use it to disconnect/cancel/arm mid-read). */
@@ -273,12 +305,23 @@ export class MockSdCliFirmware {
 
   private cancelRead(): void {
     if (this.readActive?.timer) clearTimeout(this.readActive.timer);
+    this.readActive?.done();
     this.readActive = null;
   }
 
   /** Handle one trimmed command line; `emit` writes FW output (may be called later for async replies). */
-  handle(line: string, emit: (text: string) => void): void {
+  handle(line: string, emitRaw: (text: string) => void): void {
     this.log.push(line);
+    let emit = emitRaw;
+    let readDone = () => {};
+    if (line.startsWith("sd read") && (line.length === 7 || line[7] === " ")) {
+      // Concurrency is counted from receipt to the reply's `sd_data_end: 1` (or cancel).
+      let open = true;
+      readDone = () => { if (open) { open = false; this.readsInFlight--; } };
+      this.readsInFlight++;
+      this.maxReadsInFlight = Math.max(this.maxReadsInFlight, this.readsInFlight);
+      emit = (text: string) => { emitRaw(text); if (/(^|\n)sd_data_end: 1\r?\n/.test(text)) readDone(); };
+    }
     if (line === "status") { emit(this.statusLines.map((l) => `${l}\r\n`).join("")); return; }
     if (line === "blackbox status") { emit(this.blackboxStatus); return; }
     if (line === "version") { emit("BobFlight 0.1.0-sdsim\r\n"); return; }
@@ -303,7 +346,7 @@ export class MockSdCliFirmware {
       emit(this.statusText());
       return;
     }
-    if (isRead) { this.beginRead(line, emit); return; }
+    if (isRead) { this.beginRead(line, emit, readDone); return; }
     if (line === "sd probe") {
       if (!this.guard() || this.probeBusy()) {
         emit(`${this.guardRefusalLine}\r\nsd_end: 1\r\n`);
@@ -323,7 +366,7 @@ export class MockSdCliFirmware {
     emit(this.statusText());
   }
 
-  private beginRead(line: string, emit: (text: string) => void): void {
+  private beginRead(line: string, emit: (text: string) => void, done: () => void): void {
     if (!this.guard()) { emit("sd_data_error: disarm, stop motor tests/calibration, connect USB required\r\nsd_data_end: 1\r\n"); return; }
     if (this.phase !== "done" || !this.cardReady || !this.card) { emit("sd_data_error: card not probed or not ready\r\nsd_data_end: 1\r\n"); return; }
     const arg = line.slice(8);
@@ -334,10 +377,9 @@ export class MockSdCliFirmware {
     const fault = queue?.shift();
     if (fault?.type === "immediate") { emit(`${fault.line}\r\nsd_data_end: 1\r\n`); return; }
     const card = this.card;
-    const active = { sector, timer: null as ReturnType<typeof setTimeout> | null };
+    const active = { sector, timer: null as ReturnType<typeof setTimeout> | null, done };
     this.readActive = active;
     this.readsStarted.push(sector);
-    this.maxReadsInFlight = Math.max(this.maxReadsInFlight, 1);
     this.onReadBegin?.(sector);
     if (fault?.type === "silent" || this.readActive !== active) return;
     active.timer = setTimeout(() => {

@@ -15,7 +15,7 @@ import {
   onboardEffectiveHz,
   type OnboardCommand,
 } from '../blackbox/onboard';
-import { SdDownloadController, downloadBlockedReason, formatRate, storageBlock } from '../blackbox/sdDownload';
+import { SdDownloadController, downloadBlockedReason, storageBlock } from '../blackbox/sdDownload';
 import { saveBlobFile } from '../blackbox/saveBlob';
 import { BLACKBOX_COUNTER_KEYS, STATUS_COUNTER_KEYS, verbatimCounters } from '../blackbox/fcCounters';
 
@@ -61,6 +61,11 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
   const onboardEnabled = visible && connectionStatus === 'connected' && !postFlashGate;
   const pollBusy = useRef(false);
   const nextStatusPoll = useRef(0);
+  // Freshness of the polled values (arm state, loop_overruns, recorder counters): polls pause while an
+  // SD download holds the connection, and a failed refresh keeps the last values. Both are marked visibly.
+  const statusRefreshError = useRef<string | null>(null);
+  const pausedForSd = useRef(false);
+  if (sdLogs.busy) pausedForSd.current = true;
   useEffect(() => {
     onboard.setEnabled(onboardEnabled);
     update();
@@ -73,7 +78,14 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
           await onboard.tick();
           if (!sdLogs.busy && performance.now() >= nextStatusPoll.current) {
             nextStatusPoll.current = performance.now() + 2000;
-            await refreshStatus().catch(() => undefined);
+            try {
+              await refreshStatus();
+              statusRefreshError.current = null;
+              // A complete poll after the SD operation: the values are live again.
+              if (!sdLogs.busy && !onboard.stale) pausedForSd.current = false;
+            } catch (e) {
+              statusRefreshError.current = e instanceof Error ? e.message : String(e);
+            }
           }
         } finally {
           pollBusy.current = false;
@@ -178,6 +190,11 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
     storageBlocked: storageBlock({ settingsPending: settingsStoragePending, sdCheckBusy: sd.busy, benchRecording: recorder.active }),
   });
   const strictCardShown = !!onboard.snapshot && !onboard.stale && !onboard.snapshot.unavailable;
+  const countersStale = sdLogs.busy || pausedForSd.current
+    ? 'Last read before download: status polling pauses while the SD card is read, so these values are not live until the next refresh.'
+    : statusRefreshError.current !== null || onboard.stale
+    ? 'Refresh failed: these are the last values read and may be out of date.'
+    : null;
   // Fill gaps only: recorder counters already in the card above are not repeated; loop_overruns always.
   const counterRows = [
     ...(strictCardShown ? [] : verbatimCounters(onboard.lastRaw, BLACKBOX_COUNTER_KEYS)),
@@ -407,9 +424,17 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             <h4 id="bb-fc-counters-title">Counters as reported by the FC</h4>
             <p className="muted">
               Exactly as sent (no math); “unknown” means the FC did not report it.
-              {strictCardShown ? ' Recorder counters are shown in the card above; loop_overruns comes from status.' : ''}
+              {strictCardShown ? ' Recorder counters are shown in the card above; arm and loop_overruns come from status.' : ''}
             </p>
-            <dl data-testid="bb-fc-counters">
+            {countersStale && (
+              <p role="status" data-testid="bb-fc-counters-stale">
+                <strong>{countersStale}</strong>
+                {statusRefreshError.current !== null && !sdLogs.busy && !pausedForSd.current && (
+                  <small> ({statusRefreshError.current})</small>
+                )}
+              </p>
+            )}
+            <dl data-testid="bb-fc-counters" data-stale={countersStale ? 'true' : undefined}>
               {counterRows.map((row) => (
                 <div key={row.key} data-key={row.key}>
                   <dt>
@@ -430,10 +455,12 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
         <p>
           Reads <code>BFLxxxxx.BBL</code> logs from the FAT32 card root over USB, one 512-byte
           sector at a time, checking each sector&apos;s CRC-32. Read-only: nothing is written to
-          the card. Every list and download starts with a fresh SD probe and ends with{' '}
-          <code>sd cancel</code>. A file is saved only after every sector verified and its size
+          the card. Every list and download starts with a fresh SD probe and, once an sd command has
+          gone out, ends with <code>sd cancel</code>. A file is saved only after every sector verified and its size
           matches the directory entry. Disarm first; recording must be stopped and done (the
-          recorder state is re-read with <code>blackbox status</code> before any sector is read).
+          recorder and arm state are re-read with <code>blackbox status</code> and <code>status</code>{' '}
+          before any sector is read; arming or recording during a download is stopped by the
+          controller&apos;s own guard).
         </p>
         <p>
           <button disabled={!!downloadBlocked || sdLogs.busy} onClick={() => void sdLogs.list()}>
@@ -456,8 +483,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             <p>
               {sdLogs.progress.bytesDone.toLocaleString('en-US')} of{' '}
               {sdLogs.progress.bytesTotal.toLocaleString('en-US')} bytes ·{' '}
-              {sdLogs.progress.sectorsDone} of {sdLogs.progress.sectorsTotal} sectors ·{' '}
-              {formatRate(sdLogs.progress.bytesPerSecond)}
+              {sdLogs.progress.sectorsDone} of {sdLogs.progress.sectorsTotal} sectors
             </p>
           </div>
         )}
@@ -473,11 +499,28 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
               </p>
             )}
             <p data-testid="bb-download-message">{sdLogs.message.text}</p>
+            {sdLogs.message.detail && (
+              <p className="muted">
+                <small data-testid="bb-download-detail">Detail: {sdLogs.message.detail}</small>
+              </p>
+            )}
           </div>
+        )}
+        {sdLogs.warnings.length > 0 && (
+          <ul role="alert" data-testid="bb-download-warnings">
+            {sdLogs.warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
         )}
         {sdLogs.recorderNote && (
           <p role="status" data-testid="bb-download-recorder-note">
             {sdLogs.recorderNote}
+          </p>
+        )}
+        {sdLogs.armNote && (
+          <p role="status" data-testid="bb-download-arm-note">
+            {sdLogs.armNote}
           </p>
         )}
         {sdLogs.files && sdLogs.files.length > 0 && (
