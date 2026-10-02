@@ -10,38 +10,59 @@
  * gate) disables the input and the button. The button is also disabled while
  * the client hint shows (13, 38, ...): nothing is sent for an invalid draft.
  * The FC value is re-read whenever the connection status changes.
+ *
+ * QA #60: the panel mounts while the Motors eRPM poll holds the command gate.
+ * The rpmFilter helpers retry only the gate's refusal; if the gate stays busy
+ * the value shows "unknown" with the gate's message (never malformed, never
+ * the older-FC fallback). Unmount, a disconnect or a newer read aborts the
+ * retries, so nothing is sent for an unmounted panel.
  */
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { rpmValueProblem, type RpmFilterReportResult, type RpmGetResult } from "../protocol";
-import { applyRpmSetting, emptyRpmSnapshot, readRpmKey, readRpmReport, type RpmHost, type RpmSnapshot } from "../filters/rpmFilter";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { rpmValueProblem, type RpmFilterReportResult } from "../protocol";
+import { RpmCancelled, applyRpmSetting, emptyRpmSnapshot, readRpmKey, readRpmReport, type RpmHost, type RpmReadResult, type RpmSnapshot } from "../filters/rpmFilter";
 
 export function MotorPolesPanel({ host, fallback, blocked = false }: { host: RpmHost; fallback: ReactNode; blocked?: boolean }) {
   const [snap, setSnap] = useState<RpmSnapshot>(emptyRpmSnapshot);
   const [draft, setDraft] = useState("");
   const [fcLine, setFcLine] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const show = (v: RpmGetResult | null) => (v?.kind === "value" ? v.value : "");
+  /** Aborted on unmount: stops an apply's gate retries. */
+  const mounted = useRef<AbortController | null>(null);
+  const show = (v: RpmReadResult | null) => (v?.kind === "value" ? v.value : "");
 
-  const reload = useCallback(async () => {
-    const value = await readRpmKey(host, "motor_poles");
-    const report: RpmFilterReportResult | null = value.kind === "value" ? await readRpmReport(host) : null;
+  const reload = useCallback(async (signal: AbortSignal) => {
+    let value: RpmReadResult;
+    let report: RpmFilterReportResult | null;
+    try {
+      value = await readRpmKey(host, "motor_poles", signal);
+      report = value.kind === "value" ? await readRpmReport(host, signal) : null;
+    } catch (e) {
+      if (e instanceof RpmCancelled) return;
+      throw e;
+    }
+    if (signal.aborted) return;
     const next = { ...emptyRpmSnapshot(), values: { ...emptyRpmSnapshot().values, motor_poles: value }, report };
     setSnap(next);
     setDraft(show(value));
   }, [host]);
   useEffect(() => {
+    const life = new AbortController();
+    mounted.current = life;
+    let read: AbortController | null = null;
+    const start = () => { read?.abort(); read = new AbortController(); void reload(read.signal); };
     let last = host.getConnectionStatus?.() ?? null;
-    void reload();
+    start();
     const off = host.onStatus?.((s) => {
       if (s === last) return;
       last = s;
-      if (s === "connected") { void reload(); return; }
+      if (s === "connected") { start(); return; }
       // Not connected: nothing is known about the FC any more (never keep a stale value).
+      read?.abort();
       setSnap(emptyRpmSnapshot());
       setDraft("");
       setFcLine(null);
     });
-    return () => { off?.(); };
+    return () => { off?.(); read?.abort(); life.abort(); };
   }, [host, reload]);
 
   const value = snap.values.motor_poles;
@@ -53,15 +74,19 @@ export function MotorPolesPanel({ host, fallback, blocked = false }: { host: Rpm
 
   async function apply() {
     if (!Number.isFinite(n) || blocked || hint) return;
+    const signal = mounted.current?.signal;
     setBusy(true);
     setFcLine(null);
     try {
-      const res = await applyRpmSetting(host, snap, "motor_poles", n);
+      const res = await applyRpmSetting(host, snap, "motor_poles", n, signal);
+      if (signal?.aborted) return;
       setSnap(res.snap);
       setDraft(show(res.snap.values.motor_poles));
       if (!res.ok) setFcLine(res.fcLine);
+    } catch (e) {
+      if (!(e instanceof RpmCancelled)) throw e;
     } finally {
-      setBusy(false);
+      if (!signal?.aborted) setBusy(false);
     }
   }
 
@@ -72,6 +97,7 @@ export function MotorPolesPanel({ host, fallback, blocked = false }: { host: Rpm
       <button disabled={value?.kind !== "value" || busy || blocked || draft.trim() === held || !Number.isFinite(n) || !!hint} onClick={() => void apply()}>Set on controller</button></div>
     <p>Controller holds: <code data-rpm="motor_poles">{value?.kind === "value" ? value.value : value ? "unknown" : "reading…"}</code>
       {reason && <> · RPM filter: <code data-rpm="reason">{reason}</code></>}</p>
+    {value?.kind === "busy" && <p className="fail" data-testid="motor-poles-busy">{value.message}</p>}
     {hint && <p className="banner-warn" data-testid="motor-poles-hint">{hint}</p>}
     {fcLine && <p className="fail" data-testid="motor-poles-fc-line">{fcLine}</p>}
     <p className="muted">Even number from 4 to 36; 14 is common for 2306 motors. The RPM filter on the controller uses it to turn eRPM into motor Hz. Refused while armed; Save to controller keeps it after reboot. It does not change motor output or enable bidirectional DShot.</p>

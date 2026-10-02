@@ -9,12 +9,24 @@
  * rpm_filter_mN_hz (never from erpm_mN); every `set` is followed by `get <key>`
  * and then `rpm_filter` (no optimistic update); a refused set shows the FC's
  * line verbatim and the inputs return to what the FC holds.
+ *
+ * Busy gate (QA #60): the shared CommandGate refuses, never queues, a command
+ * while another is in flight (e.g. the Motors-tab eRPM poll). That refusal
+ * happens before anything is sent, so it is the ONLY outcome retried, up to
+ * RPM_GATE_ATTEMPTS tries RPM_GATE_DELAY_MS apart. An FC reply (a `set failed`
+ * line, a malformed value, "unknown key") or any other error is never retried,
+ * so an accepted set is never sent again. Still refused after the last try:
+ * a read is `busy` (shown "unknown" with the gate's message, never malformed
+ * or "older FC"); a set returns the gate's message like any other error. An
+ * aborted `signal` (unmount, newer read) stops the retries: RpmCancelled is
+ * thrown and nothing more is sent.
  */
 import {
   RPM_FILTER_KEYS, parseRpmFilterReport, qFromX100, qToX100, rpmFilterView, rpmValueProblem,
   type RpmFilterKey, type RpmFilterReportResult, type RpmFilterView, type RpmGetResult, type SettingsKey,
 } from "../protocol";
 import type { CliCommand } from "../protocol/types";
+import { isGateBusy } from "../protocol/commandGate";
 
 export interface RpmHost {
   getSetting(key: SettingsKey): Promise<{ key: SettingsKey; value: string }>;
@@ -25,37 +37,74 @@ export interface RpmHost {
   getConnectionStatus?(): string;
 }
 
+/** A `get` result, or `busy`: the command gate stayed busy for every try, so nothing was read. */
+export type RpmReadResult = RpmGetResult | { kind: "busy"; message: string };
 export interface RpmSnapshot {
-  values: Record<RpmFilterKey, RpmGetResult | null>;
+  values: Record<RpmFilterKey, RpmReadResult | null>;
   report: RpmFilterReportResult | null;
 }
 export function emptyRpmSnapshot(): RpmSnapshot {
   return { values: { rpm_filter_harmonics: null, rpm_filter_min_hz: null, rpm_filter_q_x100: null, motor_poles: null }, report: null };
 }
 
-export async function readRpmKey(host: RpmHost, key: RpmFilterKey): Promise<RpmGetResult> {
+export const RPM_GATE_ATTEMPTS = 30;
+export const RPM_GATE_DELAY_MS = 100;
+/** The caller's signal aborted while a command was waiting for the gate: nothing more is sent. */
+export class RpmCancelled extends Error {
+  constructor() { super("RPM command cancelled"); this.name = "RpmCancelled"; }
+}
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(t); signal?.removeEventListener("abort", done); resolve(); };
+    const t = setTimeout(done, ms);
+    signal?.addEventListener("abort", done);
+  });
+}
+/** Runs `fn`; retries only the gate's own refusal (nothing was sent), at most RPM_GATE_ATTEMPTS tries. */
+async function gated<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    if (signal?.aborted) throw new RpmCancelled();
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isGateBusy(e) || attempt >= RPM_GATE_ATTEMPTS) throw e;
+    }
+    await pause(RPM_GATE_DELAY_MS, signal);
+  }
+}
+
+export async function readRpmKey(host: RpmHost, key: RpmFilterKey, signal?: AbortSignal): Promise<RpmReadResult> {
   try {
-    const { value } = await host.getSetting(key as SettingsKey);
+    const { value } = await gated(() => host.getSetting(key as SettingsKey), signal);
     return Number.isFinite(Number(value)) && value.trim() !== "" ? { kind: "value", value } : { kind: "malformed", raw: value };
   } catch (e) {
+    if (e instanceof RpmCancelled) throw e;
     const msg = e instanceof Error ? e.message : String(e);
+    if (isGateBusy(e)) return { kind: "busy", message: msg };
     return /unknown key/.test(msg) ? { kind: "unsupported" } : { kind: "malformed", raw: msg };
   }
 }
-export async function readRpmReport(host: RpmHost): Promise<RpmFilterReportResult | null> {
-  try { return parseRpmFilterReport(await host.sendCommand("rpm_filter")); } catch { return null; }
+/** The parsed report; null when missing (older FC) or the gate stayed busy (shown "unknown"). */
+export async function readRpmReport(host: RpmHost, signal?: AbortSignal): Promise<RpmFilterReportResult | null> {
+  try { return parseRpmFilterReport(await gated(() => host.sendCommand("rpm_filter"), signal)); } catch (e) {
+    if (e instanceof RpmCancelled) throw e;
+    return null;
+  }
 }
 /** `get` for the four keys, then the `rpm_filter` report. */
-export async function readRpm(host: RpmHost): Promise<RpmSnapshot> {
+export async function readRpm(host: RpmHost, signal?: AbortSignal): Promise<RpmSnapshot> {
   const snap = emptyRpmSnapshot();
-  for (const k of RPM_FILTER_KEYS) snap.values[k] = await readRpmKey(host, k);
-  snap.report = await readRpmReport(host);
+  for (const k of RPM_FILTER_KEYS) snap.values[k] = await readRpmKey(host, k, signal);
+  snap.report = await readRpmReport(host, signal);
   return snap;
 }
 
 /** Older FC (schema < 9, a key or the report missing) makes the section read-only and unknown. */
 export function rpmView(snap: RpmSnapshot, schema: number | null): RpmFilterView {
-  const v = rpmFilterView(snap.values, snap.report);
+  // A `busy` key was not read: the view treats it as missing, so the section shows "unknown".
+  const read: Partial<Record<RpmFilterKey, RpmGetResult | null>> = {};
+  for (const k of RPM_FILTER_KEYS) { const r = snap.values[k]; read[k] = r?.kind === "busy" ? null : r; }
+  const v = rpmFilterView(read, snap.report);
   if (schema !== null && schema < 9 && v.supported) return rpmFilterView({}, null);
   return v;
 }
@@ -96,16 +145,21 @@ export type RpmSetResult = { ok: true; ops: string[]; snap: RpmSnapshot } | { ok
 /**
  * One RPM setting: `set <key> <n>`, then `get <key>`, then `rpm_filter`.
  * `snap` is merged with the re-read key and the new report; on a refusal
- * the FC's line is returned verbatim and the key is still re-read.
+ * the FC's line is returned verbatim and the key is still re-read. Only a
+ * gate refusal of the set itself is retried (it was never sent); once the FC
+ * answered, the set is not sent again and only the `get` / report are retried.
  */
-export async function applyRpmSetting(host: RpmHost, snap: RpmSnapshot, key: RpmFilterKey, n: number): Promise<RpmSetResult> {
+export async function applyRpmSetting(host: RpmHost, snap: RpmSnapshot, key: RpmFilterKey, n: number, signal?: AbortSignal): Promise<RpmSetResult> {
   const ops = [`set ${key} ${n}`];
   let fcLine: string | null = null;
-  try { await host.setSetting(key as SettingsKey, String(n)); } catch (e) { fcLine = e instanceof Error ? e.message : String(e); }
+  try { await gated(() => host.setSetting(key as SettingsKey, String(n)), signal); } catch (e) {
+    if (e instanceof RpmCancelled) throw e;
+    fcLine = e instanceof Error ? e.message : String(e);
+  }
   ops.push(`get ${key}`);
-  const value = await readRpmKey(host, key);
+  const value = await readRpmKey(host, key, signal);
   ops.push("rpm_filter");
-  const report = await readRpmReport(host);
+  const report = await readRpmReport(host, signal);
   const next: RpmSnapshot = { values: { ...snap.values, [key]: value }, report };
   return fcLine === null ? { ok: true, ops, snap: next } : { ok: false, ops, fcLine, snap: next };
 }

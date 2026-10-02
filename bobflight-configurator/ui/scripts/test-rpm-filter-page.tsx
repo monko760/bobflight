@@ -15,6 +15,16 @@
  * poles panel; invalid pole drafts (13, 38) send nothing; the panel re-reads
  * on reconnect, shows "unknown" and the FC reason token verbatim; the
  * schema < 9 downgrade guard; strict numeric report fields.
+ *
+ * QA #60 (busy gate): the stub host above has no CommandGate, which is how
+ * CI missed that the poles panel's one-shot read was refused while the
+ * Motors eRPM poll held the gate. `gatedHost` wires the REAL CommandGate
+ * exactly as ProtocolHostAdapter (createHost) does. Asserted: the value shows
+ * once the gate frees (also on the real MotorsPage with its real poll), the
+ * older-FC fallback returns, a refused set / report is retried and sent once,
+ * a FW refusal and a malformed value are never retried, an accepted set is
+ * never re-sent, an exhausted retry shows
+ * "unknown" + the gate's message, and unmount stops the retries.
  */
 import assert from "node:assert/strict";
 import { flushSync } from "react-dom";
@@ -23,7 +33,8 @@ import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { FiltersPage } from "../src/pages/FiltersPage";
 import { MotorPolesPanel } from "../src/motors/MotorPolesPanel";
 import { MotorsPage } from "../src/pages/MotorsPage";
-import { readRpm, rpmView, type RpmSnapshot } from "../src/filters/rpmFilter";
+import { RPM_GATE_ATTEMPTS, RPM_GATE_DELAY_MS, readRpm, rpmView, type RpmSnapshot } from "../src/filters/rpmFilter";
+import { CommandGate, GATE_BUSY_MESSAGE, isGateBusy } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { RPM_FILTER_MOCK_SCENARIOS, type RpmFilterMockScenario } from "../../protocol/src/rpm-filter-mock";
 import { STORAGE_SCOPE_V8, STORAGE_SCOPE_V9 } from "../../protocol/src/storage";
@@ -473,6 +484,213 @@ async function main() {
     assert.ok(await waitFor(() => testId("browser-poles") !== null));
     assert.ok(!t.ops.some((op) => op.startsWith("set ")), JSON.stringify(t.ops));
     await t.done();
+  });
+
+  // ---- QA #60: the REAL CommandGate (as wired by ProtocolHostAdapter / createHost) ----
+  /** The rig's host behind a real CommandGate: every FC command takes the gate, refusals are
+   * recorded in `refused` (nothing sent), what reached the FC is in `ops`. `latencyMs` models
+   * the serial round trip so a poll burst really holds the gate. `grabAfterSet` makes another
+   * command take the gate right after a set completes (before the panel's `get`);
+   * `grabAfterGet` does the same right after `get motor_poles` (before `rpm_filter`). */
+  async function gatedHost(scenario: RpmFilterMockScenario, o: RigOpts & { latencyMs?: number; grabAfterSet?: number; grabAfterGet?: number } = {}) {
+    const h = await mockHost(scenario, o);
+    const gate = new CommandGate(() => 1);
+    const refused: string[] = [];
+    const inner = h.host;
+    const g = <T,>(label: string, work: () => Promise<T>, stop = false): Promise<T> =>
+      gate.run(async () => { if (o.latencyMs) await sleep(o.latencyMs); return work(); }, stop)
+        .catch((e: unknown) => { if (isGateBusy(e)) refused.push(label); throw e; });
+    /** Hold the gate like an in-flight poll command; returns release + the command's promise. */
+    const holdGate = (label = "get erpm_m1") => { const release = h.hold(label); const done = inner.sendCommand(label as CliCommand).catch(() => "");
+      const p = g(label, () => done); return { release, done: p }; };
+    const wrapped: Record<string, unknown> = {
+      getStatus: () => g("status", () => inner.getStatus()),
+      getVersion: () => g("version", () => inner.getVersion()),
+      getAllSettings: () => g("getAll", () => inner.getAllSettings()),
+      getSetting: async (key: SettingsKey) => {
+        const r = await g(`get ${key}`, () => inner.getSetting(key));
+        if (o.grabAfterGet && key === "motor_poles") { const held = holdGate("get erpm_m3"); setTimeout(held.release, o.grabAfterGet); }
+        return r;
+      },
+      setSetting: async (key: SettingsKey, value: string) => {
+        const r = await g(`set ${key} ${value}`, () => inner.setSetting(key, value));
+        if (o.grabAfterSet) { const held = holdGate("get erpm_m2"); setTimeout(held.release, o.grabAfterSet); }
+        return r;
+      },
+      sendCommand: (cmd: CliCommand) => g(cmd, () => inner.sendCommand(cmd), cmd === "motor_test 0"),
+      saveSettings: () => g("save", () => inner.saveSettings()),
+      restoreDefaults: () => g("defaults", () => inner.restoreDefaults()),
+    };
+    const host = new Proxy(inner, {
+      get(target, prop) {
+        if (typeof prop === "string" && prop in wrapped) return wrapped[prop];
+        const v = Reflect.get(target, prop, target);
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    }) as unknown as MockBobFlightHost;
+    return { ...h, host, gate, refused, holdGate };
+  }
+  const fallbackEl = <p data-testid="browser-poles">browser preference</p>;
+  const count = (xs: string[], x: string) => xs.filter((y) => y === x).length;
+
+  await test("real gate: poles panel mounted while an eRPM poll holds the gate shows the FC value once it frees (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => t.refused.includes("get motor_poles"), 1000), `the panel's read was refused by the busy gate: ${JSON.stringify(t.refused)}`);
+    await sleep(250);
+    assert.ok(!t.ops.includes("get motor_poles"), `nothing reached the FC while the gate was held: ${JSON.stringify(t.ops)}`);
+    assert.equal(poles(), "reading…", "still retrying: not 'unknown' / malformed while the gate is busy");
+    poll.release(); await poll.done;
+    assert.ok(await waitFor(() => poles() === "14", 1500), `value shows after the gate frees: ${poles()} ops=${JSON.stringify(t.ops)}`);
+    assert.deepEqual(t.ops.filter((op) => op !== "get erpm_m1"), ["get motor_poles", "rpm_filter"], "get -> rpm_filter, each sent once");
+    assert.equal(input("motor_poles").value, "14");
+    assert.ok(!isDisabled(input("motor_poles")), "editable");
+    assert.equal(testId("motor-poles-busy"), null);
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate + real MotorsPage poll: poles panel shows the FC value (QA #60)", async () => {
+    (globalThis as Record<string, unknown>).document = { hidden: false, addEventListener() {}, removeEventListener() {} };
+    const t = await gatedHost("ok", { latencyMs: 5 });
+    (globalThis as Record<string, unknown>).__setupTestHost = {
+      host: t.host, connectionStatus: "connected", version: "BobFlight test", status: null,
+      refreshStatus: async () => {}, pollAfterConnect: async () => {}, setLastError: () => {}, postFlashGate: false,
+    };
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorsPage />));
+    assert.ok(await waitFor(() => byAttr("data-testid", "motor-poles-fc").length > 0 && poles() === "14", 4000),
+      `poles panel shows the FC value under the real poll: "${byAttr("data-testid", "motor-poles-fc").length ? poles() : "(no panel)"}" refused=${JSON.stringify(t.refused)}`);
+    assert.ok(t.refused.includes("get motor_poles"), `the race happened (the poll held the gate at mount): ${JSON.stringify(t.refused)}`);
+    assert.equal(count(t.ops, "get motor_poles"), 1, "motor_poles read reached the FC exactly once");
+    assert.ok(t.ops.indexOf("rpm_filter") > t.ops.indexOf("get motor_poles"), "get -> rpm_filter");
+    assert.ok(!isDisabled(input("motor_poles")), "editable when idle");
+    root.unmount(); await sleep(20); await t.mock.disconnect(); delete (globalThis as Record<string, unknown>).document;
+  });
+
+  await test("real gate: older FC behind a busy gate -> browser preference fallback returns (QA #60)", async () => {
+    const t = await gatedHost("old-fc");
+    const poll = t.holdGate("get erpm_m1");
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => t.refused.includes("get motor_poles"), 1000));
+    await sleep(150);
+    assert.equal(testId("browser-poles"), null, "no fallback while the read is only refused by the gate");
+    poll.release(); await poll.done;
+    assert.ok(await waitFor(() => testId("browser-poles") !== null, 1500), "older-FC fallback after the FC answers 'unknown key'");
+    assert.ok(!t.ops.some((op) => op.startsWith("set ")), JSON.stringify(t.ops));
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: FW refusal ('set failed: armed') is sent once, shown verbatim, never retried (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => poles() === "14"));
+    await t.mock.sendCommand("arm");
+    await type(input("motor_poles"), "12");
+    const before = t.ops.length;
+    const t0 = Date.now();
+    await click(button("Set on controller"));
+    assert.ok(await waitFor(() => testId("motor-poles-fc-line") !== null, 1500));
+    assert.equal(testId("motor-poles-fc-line"), "set failed: armed");
+    assert.deepEqual(t.ops.slice(before), ["set motor_poles 12", "get motor_poles", "rpm_filter"], "set sent once, then get -> rpm_filter");
+    assert.ok(Date.now() - t0 < 2 * RPM_GATE_DELAY_MS + 500, `no retry delay: ${Date.now() - t0} ms`);
+    assert.equal(poles(), "14");
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: an accepted set is never re-sent; only the get waits for the gate (QA #60)", async () => {
+    const t = await gatedHost("ok", { grabAfterSet: 250 });
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => poles() === "14"));
+    await type(input("motor_poles"), "12");
+    const before = t.ops.length;
+    await click(button("Set on controller"));
+    assert.ok(await waitFor(() => poles() === "12", 2000), `FC holds 12: ${JSON.stringify(t.ops.slice(before))}`);
+    assert.ok(t.refused.includes("get motor_poles"), `the get after the set was refused by the gate: ${JSON.stringify(t.refused)}`);
+    assert.deepEqual(t.ops.slice(before).filter((op) => op !== "get erpm_m2"), ["set motor_poles 12", "get motor_poles", "rpm_filter"],
+      "set exactly once, then get -> rpm_filter");
+    assert.equal(testId("motor-poles-fc-line"), null);
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: a set refused by the busy gate is retried, then sent once (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => poles() === "14"));
+    await type(input("motor_poles"), "12");
+    const before = t.ops.length;
+    const poll = t.holdGate("get erpm_m1");
+    await click(button("Set on controller"));
+    assert.ok(await waitFor(() => t.refused.includes("set motor_poles 12"), 1000), `the set was refused by the busy gate: ${JSON.stringify(t.refused)}`);
+    await sleep(250);
+    assert.ok(!t.ops.slice(before).includes("set motor_poles 12"), "nothing set while the gate is held");
+    assert.equal(testId("motor-poles-fc-line"), null, "no error line while retrying");
+    poll.release(); await poll.done;
+    assert.ok(await waitFor(() => poles() === "12", 1500), `FC holds 12 after the gate frees: ${JSON.stringify(t.ops.slice(before))}`);
+    assert.deepEqual(t.ops.slice(before).filter((op) => op !== "get erpm_m1"), ["set motor_poles 12", "get motor_poles", "rpm_filter"], "set once, then get -> rpm_filter");
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: the rpm_filter report refused after the get is retried (reason shows) (QA #60)", async () => {
+    const t = await gatedHost("ok", { grabAfterGet: 250 });
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => t.refused.includes("rpm_filter"), 1000), `the report was refused by the busy gate: ${JSON.stringify(t.refused)}`);
+    assert.ok(await waitFor(() => byAttr("data-rpm", "reason").length > 0, 1500), `reason shows once the gate frees: ${JSON.stringify(t.ops)}`);
+    assert.equal(visibleText(byAttr("data-rpm", "reason")[0]), "ok");
+    assert.equal(poles(), "14");
+    assert.equal(count(t.ops, "rpm_filter"), 1, "report sent once");
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: a malformed FC value is not retried (one get, 'unknown', no busy line) (QA #60)", async () => {
+    const t = await gatedHost("ok", { getValue: { motor_poles: "abc" } });
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => poles() === "unknown", 1000), poles());
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.equal(count(t.ops, "get motor_poles"), 1, `one get only: ${JSON.stringify(t.ops)}`);
+    assert.equal(testId("motor-poles-busy"), null);
+    assert.equal(testId("browser-poles"), null);
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: gate busy for every try -> 'unknown' + the gate's message, not malformed / fallback (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    const budget = RPM_GATE_ATTEMPTS * RPM_GATE_DELAY_MS + 1500;
+    assert.ok(await waitFor(() => testId("motor-poles-busy") !== null, budget), `exhausted state shown: ${poles()} refused=${t.refused.length}`);
+    assert.equal(testId("motor-poles-busy"), GATE_BUSY_MESSAGE);
+    assert.equal(poles(), "unknown");
+    assert.equal(testId("browser-poles"), null, "not the older-FC fallback");
+    assert.ok(isDisabled(input("motor_poles")) && isDisabled(button("Set on controller")));
+    assert.equal(count(t.refused, "get motor_poles"), RPM_GATE_ATTEMPTS, "bounded: exactly RPM_GATE_ATTEMPTS tries");
+    assert.ok(!t.ops.includes("get motor_poles"));
+    poll.release(); await poll.done;
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: unmount stops the retries (nothing sent afterwards) (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => count(t.refused, "get motor_poles") >= 2, 1000));
+    root.unmount();
+    const tries = count(t.refused, "get motor_poles");
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    poll.release(); await poll.done;
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.ok(count(t.refused, "get motor_poles") <= tries, `no retry after unmount: ${tries} -> ${count(t.refused, "get motor_poles")}`);
+    assert.ok(!t.ops.includes("get motor_poles") && !t.ops.includes("rpm_filter"), `nothing sent after unmount: ${JSON.stringify(t.ops)}`);
+    await t.mock.disconnect();
   });
 
   console.log(`PASS RPM filter render: ${passed} tests`);

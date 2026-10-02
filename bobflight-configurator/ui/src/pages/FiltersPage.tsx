@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
 import { SETTINGS_KEYS, type SettingsKey } from "../protocol";
 import { ensureMockConnected } from "../protocol/ensureConnected";
@@ -27,6 +27,7 @@ import {
   type NotchSnapshot,
 } from "../filters/gyroNotch";
 import {
+  RpmCancelled,
   applyRpmSetting,
   emptyRpmSnapshot,
   readRpm,
@@ -112,9 +113,13 @@ export function FiltersPage() {
   const [rpmDraft, setRpmDraft] = useState<RpmDraft>({ harmonics: "", minHz: "", q: "" });
   const [rpmFcLine, setRpmFcLine] = useState<string | null>(null);
 
+  /** Aborted on unmount: stops the RPM commands' busy-gate retries (QA #60). */
+  const rpmLife = useRef<AbortController | null>(null);
+  useEffect(() => { const c = new AbortController(); rpmLife.current = c; return () => c.abort(); }, []);
+
   /** Re-read the RPM filter (`get` x4 + `rpm_filter`); inputs return to what the FC holds. */
   const reloadRpm = useCallback(async (schema: number | null) => {
-    const snap = await readRpm(host);
+    const snap = await readRpm(host, rpmLife.current?.signal);
     setRpmSnap(snap);
     setRpmDraft(rpmDraftFromView(rpmView(snap, schema)));
     return snap;
@@ -142,6 +147,7 @@ export function FiltersPage() {
       const notches = await reloadNotches();
       await reloadRpm(notches.schema);
     } catch (e) {
+      if (e instanceof RpmCancelled) return; // unmounted
       try {
         const fb = loadFiltersViaFallback();
         setValues(fb);
@@ -256,7 +262,7 @@ export function FiltersPage() {
       for (const k of rpmChanges) {
         const n = rpmValues[k];
         if (n === null) continue;
-        const res = await applyRpmSetting(host, rs, k, n);
+        const res = await applyRpmSetting(host, rs, k, n, rpmLife.current?.signal);
         rs = res.snap;
         setRpmSnap(rs);
         if (!res.ok) {
@@ -273,6 +279,7 @@ export function FiltersPage() {
       setMsg("saved");
       await load();
     } catch (e) {
+      if (e instanceof RpmCancelled) return; // unmounted mid-Save: nothing more is sent
       setErr(settingsErrorMessage(e));
     }
   }
