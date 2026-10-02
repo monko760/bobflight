@@ -176,6 +176,7 @@ typedef struct {
  uint32_t frames,dropped,accepted,missed,rate,requested,lowerings;char reason[40],pct_str[16];double pct;
  uint64_t bytes,sector_writes,sector_reads;size_t ring_peak,header_len;
  uint32_t max_overrun_us,max_late_us;char status[1024];
+ uint32_t status_missed,stalls;double eff_hz; /* frames / recording time (first capture .. stop) */
 } result_t;
 static const char *status_value(const char *status,const char *key,char *dst,size_t cap){
  char pat[64];snprintf(pat,sizeof pat,"%s: ",key);const char *p=strstr(status,pat);if(!p)return NULL;p+=strlen(pat);
@@ -188,6 +189,8 @@ typedef struct {
  uint64_t gyro_only_ns; /* gyro-only slot (denom > 1) */
  uint64_t pid_slot_ns;  /* gyro + PID cascade slot, incl. capture */
  uint64_t bg_ns;        /* USB/CLI work around each background call */
+ uint32_t stall_every;  /* inject a foreground stall every Nth PID slot while recording (0 = never) */
+ uint64_t stall_ns;     /* stall length: models a real CPU hiccup, so the scheduler skips deadlines */
 } loop_cfg_t;
 static uint32_t late_slots;
 static double model_t;
@@ -205,7 +208,8 @@ static result_t run(const loop_cfg_t *loop,const card_model_t *model,double seco
  const uint64_t period_us=1000000u/loop->gyro_hz;const double pid_dt=(double)loop->denom/(double)loop->gyro_hz;
  const uint64_t cli_overhead_ns=loop->bg_ns;
  bb_capture_ctx_t ctx={bb_loop_code(loop->gyro_hz/loop->denom),false,0,model_fill};
- uint64_t end_us=(uint64_t)(seconds*1e6);bool stopped=false;uint32_t max_overrun=0,max_late=0;unsigned pid_n=0,slot=0;
+ uint64_t end_us=(uint64_t)(seconds*1e6);bool stopped=false;uint32_t max_overrun=0,max_late=0,stalls=0;unsigned pid_n=0,slot=0;
+ uint64_t rec_start_us=0,rec_end_us=0;
  while(blackbox_cli_busy()){
   uint64_t now_us=vt_ns/1000u;
   if(now_us>=next_gyro_us){
@@ -221,8 +225,10 @@ static result_t run(const loop_cfg_t *loop,const card_model_t *model,double seco
    float rc[4]={(float)(.6*sin(t*.7)),(float)(-.4*sin(t*.5)),(float)(.2*sin(t*.3)),(float)(.5+.2*sin(t*.2))};
    pid_axis_out_t out;pid_set_dt((float)pid_dt);pid_update(gyro,sp,&out);
    vt_ns+=loop->pid_slot_ns;ctx.overruns_total=late_slots;
+   if(!rec_start_us&&recorder_active())rec_start_us=vt_ns/1000u;
    bb_capture_observe_ex(hal_micros(),raw,gyro,sp,&out,motor,rc,true,0,0,true,true,true,&ctx);
-   if(!stopped&&bbl.phase==BBS_RECORDING&&hal_micros()>=end_us){output[0]=0;cmd_blackbox("blackbox stop");stopped=true;}
+   if(loop->stall_every&&!stopped&&recorder_active()&&pid_n%loop->stall_every==0u){vt_ns+=loop->stall_ns;stalls++;}
+   if(!stopped&&bbl.phase==BBS_RECORDING&&hal_micros()>=end_us){output[0]=0;cmd_blackbox("blackbox stop");stopped=true;rec_end_us=vt_ns/1000u;}
    if(vt_ns/1000u>end_us+60000000u)break; /* hang guard */
    continue;
   }
@@ -245,6 +251,8 @@ static result_t run(const loop_cfg_t *loop,const card_model_t *model,double seco
  status_value(output,"blackbox_rate_reason",r.reason,sizeof r.reason);
  r.accepted=recorder_stats()->total_accepted;r.missed=recorder_stats()->total_missed;r.lowerings=bbl.rate_lowerings;r.bytes=bbl.file.bytes_written;
  r.sector_writes=sd.writes;r.sector_reads=sd.reads;r.ring_peak=bbl.ring_peak;r.max_overrun_us=max_overrun;r.max_late_us=max_late;
+ r.status_missed=(uint32_t)atol(status_value(output,"blackbox_missed",v,sizeof v));r.stalls=stalls;
+ r.eff_hz=rec_end_us>rec_start_us?r.frames*1e6/(double)(rec_end_us-rec_start_us):0.0;
  return r;
 }
 /* Extract the closed file through its directory entry and FAT chain. */
@@ -266,8 +274,8 @@ static void check_status_contract(const char *st){
  assert(fabs(pct-want)<=0.05+1e-9);
 }
 static void report(const loop_cfg_t *l,const card_model_t *m,const result_t *r,double seconds){
- printf("%-8s %-36s %4.0fs: frames=%lu dropped=%lu (%s%%) missed=%lu rate=%lu/%lu reason=%s lowerings=%lu bytes=%llu B/frame=%.1f sectorW=%llu R=%llu ring_peak=%zu B quantum_overrun_max=%lu us gyro_late_max=%lu us\n",
-  l->name,m->name,seconds,(unsigned long)r->frames,(unsigned long)r->dropped,r->pct_str,(unsigned long)r->missed,(unsigned long)r->rate,(unsigned long)r->requested,r->reason,(unsigned long)r->lowerings,(unsigned long long)r->bytes,
+ printf("%-8s %-36s %4.0fs: frames=%lu dropped=%lu (%s%%) missed=%lu eff=%.1fHz stalls=%lu rate=%lu/%lu reason=%s lowerings=%lu bytes=%llu B/frame=%.1f sectorW=%llu R=%llu ring_peak=%zu B quantum_overrun_max=%lu us gyro_late_max=%lu us\n",
+  l->name,m->name,seconds,(unsigned long)r->frames,(unsigned long)r->dropped,r->pct_str,(unsigned long)r->missed,r->eff_hz,(unsigned long)r->stalls,(unsigned long)r->rate,(unsigned long)r->requested,r->reason,(unsigned long)r->lowerings,(unsigned long long)r->bytes,
   r->frames?(double)(r->bytes-r->header_len-13u)/r->frames:0.0,
   (unsigned long long)r->sector_writes,(unsigned long long)r->sector_reads,r->ring_peak,(unsigned long)r->max_overrun_us,(unsigned long)r->max_late_us);
 }
@@ -276,9 +284,9 @@ static FILE *status_out; /* optional: argv[1] receives each final status for the
 static void save_status(const char *st){if(status_out){fputs(st,status_out);fputs("---\n",status_out);}}
 #define REQ BLACKBOX_RATE_DEFAULT_HZ
 static const loop_cfg_t loops[]={
- {"1000/1",1000,1,0,80000,12000},      /* 1 kHz: one 80 us cascade per 1000 us slot */
- {"8000/2",8000,2,30000,80000,8000},   /* 4 kHz PID: gyro-only 30 us, PID slot 80 us of 125 us */
- {"8000/1",8000,1,0,80000,8000},       /* 8 kHz PID: every 125 us slot is an 80 us PID slot */
+ {"1000/1",1000,1,0,80000,12000,0,0},      /* 1 kHz: one 80 us cascade per 1000 us slot */
+ {"8000/2",8000,2,30000,80000,8000,0,0},   /* 4 kHz PID: gyro-only 30 us, PID slot 80 us of 125 us */
+ {"8000/1",8000,1,0,80000,8000,0,0},       /* 8 kHz PID: every 125 us slot is an 80 us PID slot */
 };
 #define LOOPS (sizeof loops/sizeof loops[0])
 int main(int argc,char **argv){
@@ -328,7 +336,10 @@ int main(int argc,char **argv){
    assert(r.rate==REQ&&!strcmp(r.reason,"default")&&r.lowerings==0);
    assert(r.dropped==0&&!strcmp(r.pct_str,"0.0")&&r.pct==0.0);
    assert(r.ring_peak<=32u*1024u);
-   assert(r.frames>=(uint32_t)(REQ*(secs-1.0)*0.75)); /* minus file prepare and jitter-missed slots (see missed=) */
+   /* QA #62 F2: a slot is not lost to scheduler jitter at the deadline. Before the
+    * recorder's early tolerance, 1000/1 @ 1000 Hz logged ~799 Hz with 3,703 missed. */
+   assert(r.missed==0&&r.status_missed==0);
+   assert(r.eff_hz>=REQ*0.995&&r.eff_hz<=REQ*1.005);
    snprintf(want,sizeof want,"H I interval:%u\nH P interval:1/%u\nH BobFlight log_rate_hz:%u requested_hz:%u reason:default ",
     (unsigned)(loop_hz/REQ),(unsigned)(loop_hz/REQ),(unsigned)REQ,(unsigned)REQ);assert(strstr((char*)file_buf,want));
    printf("  %s @ %u Hz: zero drops; %.1f encoded B/frame -> %.1f KiB/s; ring peak %zu B; gyro late max %lu us\n",lp->name,(unsigned)REQ,bpf,bpf*REQ/1024.0,r.ring_peak,(unsigned long)r.max_late_us);
@@ -358,7 +369,8 @@ int main(int argc,char **argv){
  {loop_cfg_t harsh_loop=loops[0];harsh_loop.name="1000/1 fg60";harsh_loop.bg_ns=60000u;
   card_model_t harsh=good;harsh.name="realistic card, 60us fg overhead";secs=20;
   r=run(&harsh_loop,&harsh,secs);report(&harsh_loop,&harsh,&r,secs);check_status_contract(r.status);
-  assert(bbl.phase==BBS_DONE&&r.rate==REQ&&r.dropped==0&&r.frames==r.accepted&&r.max_overrun_us<=2);}
+  assert(bbl.phase==BBS_DONE&&r.rate==REQ&&r.dropped==0&&r.frames==r.accepted&&r.max_overrun_us<=2);
+  assert(r.missed==0&&r.eff_hz>=REQ*0.995&&r.eff_hz<=REQ*1.005);} /* was 929 missed @ 1000 Hz before F2 */
 
  /* (d) Very slow card: 70 ms per block. Halves to the 125 Hz floor, never
   * lower, never raised; remaining losses are reported, not hidden. */
@@ -378,8 +390,32 @@ int main(int argc,char **argv){
   assert(bbl.phase==BBS_DONE&&r.frames==r.accepted&&r.rate==125&&r.lowerings==2&&!strcmp(r.reason,"auto-lowered-card-slow"));
   card_model_t near={"due-slot trigger card (8ms busy)",8000,400,0,0};r=run(&loops[2],&near,secs);report(&loops[2],&near,&r,secs);check_status_contract(r.status);
   assert(bbl.phase==BBS_DONE&&r.rate==250&&r.lowerings==1&&r.dropped>0&&r.dropped<=50);}
+ /* (f) Missed-slot accounting (QA #62 F2) at 1k, 4k and 8k PID loops on a fast card:
+  * (1) no stall -> missed 0 and effective rate == requested (jitter at the deadline never loses a slot);
+  * (2) a real 10.5 ms foreground stall about once a second (the scheduler skips deadlines, then runs one
+  *     late slot) -> every logging slot that had no loop is reported in blackbox_missed: floor(S/P)-1 ..
+  *     ceil(S/P) per stall depending on phase, the effective rate falls by exactly that, and missed slots
+  *     are never counted as dropped (no card loss: drop_pct stays 0.0).
+  * 8000/1 @ 1000 Hz is the documented writer limit (auto-lowers to 500 Hz even on this card, see (a));
+  * there only "missed 0" is asserted; the 500 Hz build covers the 8 kHz stall case. */
+ {card_model_t fast={"fast card (0.2ms busy, no stalls)",200,200,0,0};
+  const uint64_t stall_ns=10500000u;const uint32_t log_p=1000000u/REQ;
+  const uint32_t lo=(uint32_t)(stall_ns/1000u/log_p)-1u,hi=(uint32_t)((stall_ns/1000u+log_p-1u)/log_p);
+  for(unsigned l=0;l<LOOPS;l++){
+   loop_cfg_t lp=loops[l];const uint32_t loop_hz=lp.gyro_hz/lp.denom;secs=10;r=run(&lp,&fast,secs);report(&lp,&fast,&r,secs);check_status_contract(r.status);
+   assert(bbl.phase==BBS_DONE&&r.frames==r.accepted&&r.missed==0&&r.status_missed==0);
+   if(REQ==1000u&&loop_hz==8000u){assert(r.rate==500&&r.lowerings==1&&r.dropped>0);printf("  %s @ %u Hz fast card: missed 0 (writer-limited: auto-lowered to 500 Hz, %lu dropped, as in (a))\n",lp.name,(unsigned)REQ,(unsigned long)r.dropped);continue;}
+   assert(r.rate==REQ&&r.lowerings==0&&r.dropped==0&&r.eff_hz>=REQ*0.995&&r.eff_hz<=REQ*1.005);const double eff0=r.eff_hz;
+   char nm[48];snprintf(nm,sizeof nm,"%s stall",loops[l].name);lp.name=nm;lp.stall_every=997u*loop_hz/1000u;lp.stall_ns=stall_ns;
+   r=run(&lp,&fast,secs);report(&lp,&fast,&r,secs);check_status_contract(r.status);
+   assert(bbl.phase==BBS_DONE&&r.frames==r.accepted&&r.rate==REQ&&r.dropped==0&&!strcmp(r.pct_str,"0.0"));
+   assert(r.stalls>=8u&&r.missed==r.status_missed&&r.missed>=r.stalls*lo&&r.missed<=r.stalls*hi);
+   const double slots=r.frames+r.missed;assert(r.eff_hz>=REQ*0.995*r.frames/slots&&r.eff_hz<=REQ*1.005*r.frames/slots);
+   printf("  %s @ %u Hz: no stall -> missed 0, eff %.1f Hz; %lu injected 10.5 ms stalls -> blackbox_missed %lu (%.2f%% of slots), eff %.1f Hz, dropped 0\n",
+    loops[l].name,(unsigned)REQ,eff0,(unsigned long)r.stalls,(unsigned long)r.missed,100.0*r.missed/slots,r.eff_hz);
+  }}
  if(status_out)assert(!fclose(status_out));
- printf("PASS blackbox throughput model @ %u Hz requested: realistic-card drop matrix over 1000/1, 8000/2, 8000/1 (schema 3 frames, ring peak <= 32 KiB, gyro lateness <= 25 us%s); one threshold-card halving per loop with the header patched; harsh foreground; very slow card floors at 125 Hz; due-slot auto-rate trigger (500 Hz build); status api 2 contract\n",
+ printf("PASS blackbox throughput model @ %u Hz requested: realistic-card drop matrix over 1000/1, 8000/2, 8000/1 (schema 3 frames, ring peak <= 32 KiB, gyro lateness <= 25 us%s); one threshold-card halving per loop with the header patched; harsh foreground; very slow card floors at 125 Hz; due-slot auto-rate trigger (500 Hz build); missed 0 / effective == requested at 1k/4k/8k and injected stalls reported as missed; status api 2 contract\n",
   (unsigned)REQ,REQ==1000u?"; 8000/1 honestly auto-lowers to 500 Hz":"");
  return 0;
 }
