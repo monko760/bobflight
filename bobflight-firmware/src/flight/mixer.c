@@ -28,6 +28,25 @@ static float clampf(float v, float lo, float hi)
 
 void mixer_init(void) {}
 
+/* motor_direction (schema 10, docs/MOTOR-DIRECTION.md) tells the mixer which
+ * way the props spin; it never changes the ESC spin direction. props-out keeps
+ * the QUADX yaw signs below exactly as before; props-in negates the yaw term
+ * on all four motors. Read on every call, so a change applies immediately. */
+float mixer_yaw_direction(void)
+{
+    return config_motor_direction() == MOTOR_DIRECTION_PROPS_IN ? -1.f : 1.f;
+}
+
+/* Yaw coefficients of the four QUADX lines in mixer_update (props-out).
+ * host_mixer_direction checks this table against mixer_update's output. */
+static const int k_quadx_yaw[MIXER_MOTOR_COUNT] = {-1, +1, +1, -1};
+
+int mixer_yaw_sign(unsigned motor)
+{
+    if (motor >= MIXER_MOTOR_COUNT) return 0;
+    return mixer_yaw_direction() < 0.f ? -k_quadx_yaw[motor] : k_quadx_yaw[motor];
+}
+
 void mixer_update(const pid_axis_out_t *pid, float throttle, float motor_out[MIXER_MOTOR_COUNT])
 {
     const bf_config_t *cfg;
@@ -49,7 +68,7 @@ void mixer_update(const pid_axis_out_t *pid, float throttle, float motor_out[MIX
 
     const float roll = pid ? pid->roll : 0.f;
     const float pitch = pid ? pid->pitch : 0.f;
-    const float yaw = pid ? pid->yaw : 0.f;
+    const float yaw = (pid ? pid->yaw : 0.f) * mixer_yaw_direction();
 
     /* QUADX: +roll banks right, +pitch raises nose, +yaw CW looking down.
      * u[i] is the PID (differential) part of motor i; each axis column sums

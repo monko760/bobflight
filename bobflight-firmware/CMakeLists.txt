@@ -237,6 +237,12 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mixer_idle_test src/flight/mixer.c src/flight/config.c tests/host_mixer_idle.c)
   target_link_libraries(bobflight_mixer_idle_test m)
   add_test(NAME mixer_idle COMMAND bobflight_mixer_idle_test)
+  add_executable(bobflight_mixer_direction_test src/flight/mixer.c src/flight/config.c src/flight/pid.c src/flight/filter.c tests/host_mixer_direction.c)
+  target_link_libraries(bobflight_mixer_direction_test m)
+  add_test(NAME mixer_direction COMMAND bobflight_mixer_direction_test)
+  add_executable(bobflight_motor_direction_cli_test src/flight/mixer.c src/flight/config.c src/flight/pid.c src/flight/filter.c tests/host_motor_direction_cli.c)
+  target_link_libraries(bobflight_motor_direction_cli_test m)
+  add_test(NAME motor_direction_cli_unit COMMAND bobflight_motor_direction_cli_test)
   # Safety S1 (docs/SAFETY-NOISE.md): PID anti-windup + D-term order unit test,
   # and HF-noise rectification through the real scheduler/PID/mixer/filters.
   add_executable(bobflight_pid_s1_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_pid_s1.c)
@@ -516,6 +522,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/tests/host_gyro_notch_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   add_test(NAME rpm_filter_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_rpm_filter_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
+  add_test(NAME motor_direction_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_motor_direction_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
 
   foreach(task_test pid_elapsed loop_dt bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)

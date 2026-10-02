@@ -67,6 +67,20 @@ bool config_is_rpm_key(const char *key);
 bool config_rpm_value_valid(const char *key, float value);
 void config_load_blob(const bf_config_t *src);
 
+/* Motor direction (schema 10, CLI `motor_direction`): tells the mixer which way
+ * the props spin. It does NOT change the spin direction in the ESC.
+ *   props-out (default) = the QUADX yaw signs in flight/mixer.c unchanged
+ *   props-in            = the yaw term negated on all four motors
+ * Kept outside bf_config_t (a token, not a float key). See docs/MOTOR-DIRECTION.md. */
+typedef enum { MOTOR_DIRECTION_PROPS_OUT = 0, MOTOR_DIRECTION_PROPS_IN = 1 } motor_direction_t;
+motor_direction_t config_motor_direction(void);
+/** Valid value: stored (applies at the next mixer call) and true; otherwise unchanged and false. */
+bool config_set_motor_direction(motor_direction_t direction);
+/** "props-out" | "props-in" (NULL for an invalid value). */
+const char *config_motor_direction_name(motor_direction_t direction);
+/** Exact token "props-out" | "props-in" (case-sensitive, no spaces). */
+bool config_motor_direction_parse(const char *text, motor_direction_t *out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -2,6 +2,7 @@
 #ifndef BOBFLIGHT_STORAGE_CLI_H
 #define BOBFLIGHT_STORAGE_CLI_H
 #include "drivers/persist.h"
+#include "flight/config.h"
 #include "drivers/gyro.h"
 #include "drivers/power.h"
 #include "drivers/dshot.h"
@@ -18,9 +19,9 @@ static void cmd_storage(void)
     flight_enabled=1;
 #endif
     int n = snprintf(buf, sizeof(buf),
-        "storage_api: 1\r\nbackend: %s\r\nschema: 9\r\nstate: %s\r\n"
+        "storage_api: 1\r\nbackend: %s\r\nschema: 10\r\nstate: %s\r\n"
         "dirty: %u\r\ngeneration: %lu\r\nlast_error: %s\r\n"
-        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles\r\n"
+        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction\r\n"
         "armed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nflight_enabled: %u\r\nstorage_end: 1\r\n",
         persist_backend(), persist_state(), persist_dirty() ? 1u : 0u,
         (unsigned long)persist_generation(), persist_last_error(),
@@ -70,13 +71,14 @@ static void cmd_config_export(bool full)
         {"rpm_filter_q_x100", 500.f}, {"motor_poles", 14.f}
     };
     /* Configurator CONFIG_EXPORT_MAX_BYTES (2048 since schema 9; 1800 before):
-     * a %.9g schema 9 dump with accel calibration can exceed 1800. */
+     * a %.9g schema 9 dump with accel calibration can exceed 1800. Schema 10
+     * worst case (motor_direction props-in) is asserted in host_storage_cli. */
     char out[2048]; size_t used = 0;
     const board_t *b = board_get();
     bool ok = export_append(out, sizeof(out), &used,
-        "# bobflight_config: 1\r\n# schema: 9\r\n# board: %s\r\n"
+        "# bobflight_config: 1\r\n# schema: 10\r\n# board: %s\r\n"
         "# firmware: %s\r\n# kind: %s\r\n# mode_count: %u\r\n"
-        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles\r\n"
+        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction\r\n"
         "# excludes: gyro_calibration\r\n",
         b ? b->board_id : "unknown", BOBFLIGHT_VERSION_STRING, full ? "dump" : "diff", (unsigned)MODE_COUNT);
     gyro_calibration_info_t cal;gyro_calibration_info(&cal);
@@ -95,6 +97,10 @@ static void cmd_config_export(bool full)
         if (ok && (full || value != defaults[i].value))
             ok = export_append(out, sizeof(out), &used, "set %s %.9g\r\n", defaults[i].name, (double)value);
     }
+    /* Schema 10 motor_direction token (default props-out). */
+    if (ok && (full || config_motor_direction() != MOTOR_DIRECTION_PROPS_OUT))
+        ok = export_append(out, sizeof(out), &used, "set motor_direction %s\r\n",
+                           config_motor_direction_name(config_motor_direction()));
     if (ok && (full || loop_rate_setting_get() != loop_rate_setting_default_hz()))
         ok = export_append(out, sizeof(out), &used, "set loop_rate_hz %lu\r\n", (unsigned long)loop_rate_setting_get());
     if (ok && b && b->rx_uart > 0 && (full || b->rx_uart != BOARD_GENERATED_RX_UART))
