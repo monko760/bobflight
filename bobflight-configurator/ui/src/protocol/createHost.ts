@@ -11,6 +11,7 @@ import {
   AutoTransportFactory,
   BobFlightCliClient,
   MOCK_PORT_PATH,
+  SdSectorReader,
   WebSerialTransportFactory,
   isWebSerialAvailable,
   type CliCommand,
@@ -18,6 +19,7 @@ import {
   type ConnectionStatus,
   type ParsedStatus,
   type PortInfo,
+  type SdReadResult,
   type SettingsKey,
   type WebSerialRequestPortOptions,
 } from "@bobflight/protocol";
@@ -75,6 +77,8 @@ class ProtocolHostAdapter implements BobFlightHost {
   private lastError: string | null = null;
   private sessionGeneration = 0;
   private commands = new CommandGate(() => this.sessionGeneration);
+  /** `sd read` helper holding the same CommandGate as every other UI command. */
+  private sdReader = new SdSectorReader(this.commands, (cmd, opts) => this.client.sendCommand(cmd, opts));
   readonly mode: ProtocolMode;
 
   constructor(mode: ProtocolMode) {
@@ -201,6 +205,15 @@ class ProtocolHostAdapter implements BobFlightHost {
   async sendCommand(cmd: CliCommand): Promise<string> {
     try {
       return await this.commands.run(() => this.client.sendCommand(cmd), cmd === "motor_test 0");
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      throw err;
+    }
+  }
+
+  async readSdSector(sector: number): Promise<SdReadResult> {
+    try {
+      return await this.sdReader.read(sector);
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;

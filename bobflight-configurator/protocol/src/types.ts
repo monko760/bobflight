@@ -96,6 +96,8 @@ export interface SendCommandOptions {
   timeoutMs?: number;
   /** Quiet window after last byte before treating response as complete. */
   idleMs?: number;
+  /** Reply size cap in characters (default 65536); `sd read` uses 16384. */
+  maxResponseChars?: number;
 }
 
 /** Parsed `status` key:value lines (fail-closed markers noted in README). */

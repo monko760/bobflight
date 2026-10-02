@@ -69,6 +69,14 @@ jobs:
         run: node ui/scripts/test-onboard.cjs
       - name: Onboard Blackbox protocol and api 2 SD mocks
         run: npm --prefix protocol run test:blackbox
+      - name: SD probe/read allowlists (protocol client and UI CLI input)
+        run: |
+          npm --prefix protocol run test:sd
+          npm --prefix ui run test:sd
+      - name: SD download protocol layer (sd read helper on the CommandGate, CRC-32, FAT32 root reader, FW SD mock)
+        run: npm --prefix protocol run test:sd-download
+      - name: Blackbox tab SD download render test (list, download, CRC retry, verbatim FW errors, cancel/disconnect/tab leave, counters)
+        run: npm --prefix ui run test:blackbox-download
       - name: Protocol smoke
         run: npm --prefix protocol run smoke
       - name: DFU flash model test

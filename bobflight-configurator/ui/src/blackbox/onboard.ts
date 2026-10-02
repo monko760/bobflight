@@ -270,6 +270,8 @@ export class OnboardController {
    * not present its values as current.
    */
   stale = false;
+  /** Latest raw reply on this connection, even one the strict parser rejected (verbatim counters). */
+  lastRaw: string | null = null;
   error = '';
   pending = false;
   private enabled = false;
@@ -296,6 +298,7 @@ export class OnboardController {
     this.pending = false;
     this.snapshot = null;
     this.stale = false;
+    this.lastRaw = null;
     this.error = '';
     this.nextPoll = 0;
   }
@@ -318,6 +321,7 @@ export class OnboardController {
       if (!this.enabled || token !== this.epoch || this.link.getConnectionStatus() !== 'connected') {
         return false;
       }
+      this.lastRaw = raw;
       let snapshot: OnboardSnapshot;
       try {
         snapshot = parseOnboardReply(raw);

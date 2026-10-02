@@ -158,3 +158,14 @@ export {
 export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, NotchSetResult, NotchReport, FiltersReport, FiltersReportResult, NotchRowView } from "./gyro-notch";
 export { MockGyroNotch, GYRO_NOTCH_MOCK_SCENARIOS } from "./gyro-notch-mock";
 export type { GyroNotchMockScenario } from "./gyro-notch-mock";
+
+// Onboard SD download: `sd read` sector helper (holds the UI CommandGate) and FAT32 root reader.
+export {
+  SD_SECTOR_BYTES, SD_READ_TIMEOUT_MS, SD_READ_REPLY_CAP, SD_PROBE_TIMEOUT_MS, SD_MAX_SECTOR,
+  SD_DATA_ERROR_TEXTS, SD_PROBE_REFUSALS, SD_PROBE_ACTIVE_STATES,
+  crc32Ieee, formatCrc32, formatSdReadCommand, parseSdReadReply, parseSdStatusReply, sdReadyCapacity,
+  SdSectorReader, SdGateBusyError,
+} from "./sd-read";
+export type { SdReadResult, SdStatusResult, SdCommandGate, SdReadSend } from "./sd-read";
+export { Fat32RootReader, Fat32Error, FAT32_MAX_FILE_BYTES, FAT32_ROOT_SCAN_SECTORS } from "./fat32-root";
+export type { Fat32BblEntry } from "./fat32-root";
