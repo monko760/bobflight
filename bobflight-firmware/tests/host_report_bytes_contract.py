@@ -12,6 +12,12 @@ Allowed differences, nothing else:
     and `loop_overruns: <n>` depend on host wall-clock timing; they must
     still be plain decimal integers in the same place, the text around them
     is compared byte for byte.
+  * status (S3, fix/gyro-sanity, frozen spec): exactly the two lines
+    `gyro_health: ok\r\n` and `gyro_sat_count: 0\r\n` inserted right after
+    the golden's `gyro_ok: ...\r\n` line. These are the exact bytes every
+    host build prints (no gyro on the host: nothing to check, no samples, so
+    health ok and count 0); any other value or position fails. The golden is
+    not re-captured; the b77b845 bytes stay the reference for every other line.
 Golden: tests/golden/report_bytes_b77b845.json, captured from b77b845 host
 builds with:  python3 host_report_bytes_contract.py --capture <bobflight_host> <board>
 Usage (ctest):  python3 host_report_bytes_contract.py <bobflight_host> <board>"""
@@ -46,6 +52,14 @@ def mask_counters(text):
         text = rx.sub(sub, '\r\n' + text, count=1)[2:]
     return text
 
+S3_GYRO_STATUS_LINES = 'gyro_health: ok\r\ngyro_sat_count: 0\r\n'
+
+def s3_expected_status(golden_status):
+    m = re.search(r'(?:^|\r\n)gyro_ok: (?:yes|no)\r\n', golden_status)
+    assert m and golden_status.count('gyro_ok: ') == 1, 'golden: one gyro_ok line'
+    assert 'gyro_health: ' not in golden_status and 'gyro_sat_count: ' not in golden_status
+    return golden_status[:m.end()] + S3_GYRO_STATUS_LINES + golden_status[m.end():]
+
 def first_diff(a, b):
     for i, (x, y) in enumerate(zip(a, b)):
         if x != y:
@@ -59,7 +73,7 @@ def main():
     exe, board = sys.argv[1], sys.argv[2]
     golden = json.load(open(GOLDEN))[board]
     got = capture(exe)
-    gs, ls = mask_counters(golden['status']), mask_counters(got['status'])
+    gs, ls = mask_counters(s3_expected_status(golden['status'])), mask_counters(got['status'])
     if gs != ls:
         i = first_diff(gs, ls)
         raise AssertionError(f'{board} status differs from b77b845 at byte {i}:\n golden {gs[max(0,i-40):i+40]!r}\n got    {ls[max(0,i-40):i+40]!r}')
@@ -73,7 +87,7 @@ def main():
     if gf != lf:
         i = first_diff(gf, lf)
         raise AssertionError(f'{board} filters differs from b77b845 at byte {i}:\n golden {gf[max(0,i-40):i+40]!r}\n got    {lf[max(0,i-40):i+40]!r}')
-    print(f'PASS report bytes ({board}): status byte-identical to b77b845 (timing counters digits-only); {note}')
+    print(f'PASS report bytes ({board}): status byte-identical to b77b845 + exactly the S3 gyro_health/gyro_sat_count lines after gyro_ok (timing counters digits-only); {note}')
 
 if __name__ == '__main__':
     main()

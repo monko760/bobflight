@@ -10,6 +10,7 @@ import { mockSensorReply } from "./sensor-mock";
 import { MockReceiver } from "./receiver-mock";
 import { MockOnboardBlackbox, type MockBlackboxCard } from "./blackbox-mock";
 import { mockLoopStatusLines, mockLoopRateBidir, MockLoopRateSetting, type LoopRateMockScenario } from "./loop-rate-mock";
+import { mockGyroHealthLines, mockGyroHealthForcesUnhealthy, type GyroHealthMockScenario } from "./gyro-health";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -63,6 +64,8 @@ export interface MockSerialOptions {
   dshotTelemByMotor?: Partial<Record<1 | 2 | 3 | 4, DshotTelemStatus>>;
   /** `status` loop-rate keys; default "missing" (older FC: no loop_target_hz/actual/overruns). */
   loopRateScenario?: LoopRateMockScenario;
+  /** `status` gyro_health / gyro_sat_count; default "missing" (older FC). Non-ok health forces gyro_ok: no. */
+  gyroHealthScenario?: GyroHealthMockScenario;
   /**
    * Onboard Blackbox simulation (firmware status api 2). Default "none" keeps
    * the honest "no physical SD card" reply; "ok"/"slow" are explicit sims.
@@ -97,6 +100,7 @@ export class MockSerial extends EventEmitter {
   /** Optional telem overrides when bidir on (smoke fixtures). */
   private readonly telemByMotor: Partial<Record<1 | 2 | 3 | 4, DshotTelemStatus>>;
   private loopRateScenario: LoopRateMockScenario;
+  private gyroHealthScenario: GyroHealthMockScenario;
   /** `get/set loop_rate_hz` + `loop_rate`, derived from loopRateScenario (missing = older FC). */
   private readonly loopRateSetting = new MockLoopRateSetting(() => this.loopRateScenario);
   /** `get/set gyro_notch*` + `filters` (schema 8 notches; old-fc = older firmware). */
@@ -132,6 +136,7 @@ export class MockSerial extends EventEmitter {
     };
     this.telemByMotor = { ...(opts.dshotTelemByMotor ?? {}) };
     this.loopRateScenario = opts.loopRateScenario ?? "missing";
+    this.gyroHealthScenario = opts.gyroHealthScenario ?? "missing";
     this.blackbox = new MockOnboardBlackbox(opts.blackboxCard ?? "none");
     this.gyroNotch = new MockGyroNotch(opts.gyroNotchScenario ?? "off");
     // The RPM mock reads this transport's dshot_bidir, so the report and `get dshot_bidir` never disagree.
@@ -215,6 +220,11 @@ export class MockSerial extends EventEmitter {
     return true;
   }
 
+  /** FW contract: any non-ok gyro_health also makes gyro_ok no (and refuses arm). */
+  private gyroOk(): boolean {
+    return this.opts.gyroHealthy && !mockGyroHealthForcesUnhealthy(this.gyroHealthScenario);
+  }
+
   private emitData(s: string): void {
     this.emit("data", Buffer.from(s, "utf8"));
   }
@@ -269,7 +279,7 @@ export class MockSerial extends EventEmitter {
     } else if (line === "version") {
       this.emitData(`${PRODUCT} ${VERSION}\r\n`);
     } else if (line === "status") {
-      const gyroOk = this.opts.gyroHealthy ? "yes" : "no";
+      const gyroOk = this.gyroOk() ? "yes" : "no";
       const arm = this.armed ? "armed" : "disarmed";
       const failsafe = this.opts.failsafeActive ? "ACTIVE" : "ok";
       this.emitData(
@@ -277,6 +287,7 @@ export class MockSerial extends EventEmitter {
           `ir: dummy\r\n` +
           `mcu: mock hse_mhz=8\r\n` +
           `gyro_ok: ${gyroOk}\r\n` +
+          mockGyroHealthLines(this.gyroHealthScenario).map((l) => `${l}\r\n`).join("") +
           `gyro_bind: mock\r\n` +
           `dshot_bound: ${this.bench.ready ? "4/4" : "0/4"}\r\n` +
           `motor_output: ${this.bench.ready ? "DShot300 ready" : "unavailable"}\r\n` +
@@ -287,7 +298,7 @@ export class MockSerial extends EventEmitter {
           mockLoopStatusLines(this.loopRateScenario).map((l) => `${l}\r\n`).join("")
       );
     } else if (line === "arm") {
-      if (this.opts.gyroHealthy && !this.opts.failsafeActive) {
+      if (this.gyroOk() && !this.opts.failsafeActive) {
         this.armed = true;
         this.emitData("armed\r\n");
       } else {

@@ -161,6 +161,7 @@ export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, NotchSetR
 export { MockGyroNotch, GYRO_NOTCH_MOCK_SCENARIOS } from "./gyro-notch-mock";
 export type { GyroNotchMockScenario } from "./gyro-notch-mock";
 
+export * from "./gyro-health";
 export {
   RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, RPM_FILTER_REASONS,
   isRpmFilterKey, isRpmFilterCliCommand, rpmValueProblem, qFromX100, qToX100,

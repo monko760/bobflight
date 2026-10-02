@@ -23,7 +23,8 @@
     "test:motor-direction": "node scripts/run-motor-direction.mjs",
     "test:sd": "node scripts/test-sd-card.cjs && node scripts/test-sd-probe.cjs",
     "test:gyro-notch": "esbuild scripts/test-gyro-notch.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-gyro-notch.bundle.mjs && node scripts/test-gyro-notch.bundle.mjs",
-    "test:receiver-link": "node scripts/run-receiver-link.mjs"
+    "test:receiver-link": "node scripts/run-receiver-link.mjs",
+    "test:gyro-health": "node scripts/run-gyro-health.mjs"
   },
   "dependencies": {
     "@bobflight/protocol": "file:../protocol",
