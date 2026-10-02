@@ -14,7 +14,7 @@ static flight_recorder_stats_t stats={.queue_capacity=FLIGHT_RECORDER_QUEUE_CAPA
 static void inc(uint32_t *v){if(*v<UINT32_MAX)++*v;}
 static void plus(uint32_t *v,uint64_t n){*v=n>UINT32_MAX-*v?UINT32_MAX:*v+(uint32_t)n;}
 static bool valid(const flight_log_sample_t *s){
- if(!s||s->armed>1u||s->mode>2u||s->failsafe>2u||s->pid_valid>1u||s->gyro_valid>1u||s->rx_fresh>1u||s->output_healthy>1u)return false;
+ if(!flight_log_sample_flags_valid(s))return false;
  for(unsigned a=0;a<3;a++){
   if(!isfinite(s->gyro_raw[a])||!isfinite(s->gyro[a])||!isfinite(s->setpoint[a])||!isfinite(s->p[a])||!isfinite(s->i[a])||!isfinite(s->d[a])||!isfinite(s->pid_output[a]))return false;
   if(!isfinite(s->rc[a])||s->rc[a]<-1.f||s->rc[a]>1.f)return false;
@@ -62,5 +62,9 @@ bool recorder_capture(const flight_log_sample_t *s){
  if(count==FLIGHT_RECORDER_QUEUE_CAPACITY){inc(&stats.total_dropped);return false;}
  queue[head]=*s;queue[head].dropped=stats.total_dropped;
  head=(head+1u)%FLIGHT_RECORDER_QUEUE_CAPACITY;++count;stats.queue_depth=count;inc(&stats.total_accepted);return true;
+}
+bool recorder_skip_if_not_due(uint32_t t,uint32_t it){
+ if(!active||!have_time||t<last_time||it<last_iteration||(uint64_t)t>=next_due)return false;
+ inc(&stats.total_attempted);last_time=t;last_iteration=it;inc(&stats.total_skipped);return true;
 }
 const flight_recorder_stats_t *recorder_stats(void){return &stats;}

@@ -36,6 +36,7 @@ import {
   type SettingsKey,
 } from "./settings";
 import { isGyroNotchCliCommand } from "./gyro-notch";
+import { isRpmFilterCliCommand } from "./rpm-filter";
 
 /** R0b patterned CLI: get erpm_m1..4 / dshot_telem_m1..4 / get|set dshot_bidir on|off. */
 export function isR0bDshotCliCommand(cmd: string): boolean {
@@ -282,7 +283,7 @@ export class BobFlightCliClient {
     opts?: SendCommandOptions
   ): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd) && !isGyroNotchCliCommand(cmd)) {
+    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd) && !isGyroNotchCliCommand(cmd) && !isRpmFilterCliCommand(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);
@@ -423,7 +424,7 @@ export class BobFlightCliClient {
     const out = {} as Record<SettingsKey, string>;
     for (const key of SETTINGS_KEYS) {
       if (isOptionalSettingsKey(key)) {
-        // Schema 8 notch keys: an older FC answers "unknown key" -> omitted (unknown), never defaulted.
+        // Schema 8 notch / schema 9 RPM keys: an older FC answers "unknown key" -> omitted (unknown), never defaulted.
         const raw = await this.sendRaw(`get ${key}`, opts);
         const parsed = parseGetReply(raw);
         if (parsed.unknown) continue;

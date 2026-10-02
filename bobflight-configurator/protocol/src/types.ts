@@ -82,7 +82,11 @@ export type CliCommand =
   | `get gyro_notch${1 | 2}_hz`
   | `get gyro_notch${1 | 2}_cutoff_hz`
   | `set gyro_notch${1 | 2}_hz ${number}`
-  | `set gyro_notch${1 | 2}_cutoff_hz ${number}`;
+  | `set gyro_notch${1 | 2}_cutoff_hz ${number}`
+  // RPM notch filter (FW config schema 9; see rpm-filter.ts isRpmFilterCliCommand)
+  | "rpm_filter"
+  | `get ${"rpm_filter_harmonics" | "rpm_filter_min_hz" | "rpm_filter_q_x100" | "motor_poles"}`
+  | `set ${"rpm_filter_harmonics" | "rpm_filter_min_hz" | "rpm_filter_q_x100" | "motor_poles"} ${number}`;
 
 export interface ConnectOptions {
   path: string;

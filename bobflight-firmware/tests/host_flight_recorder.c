@@ -36,5 +36,34 @@ int main(void){
  assert(recorder_lower_rate(125)&&!recorder_lower_rate(250)&&recorder_stats()->rate_hz==125);
  s.time_us=12000;s.iteration=5;assert(recorder_capture(&s));s.time_us=16000;s.iteration=6;assert(!recorder_capture(&s));s.time_us=20000;s.iteration=7;assert(recorder_capture(&s));
  recorder_stop();assert(!recorder_lower_rate(125));
- puts("PASS recorder: FIFO/retention; 125/250/500/1000Hz; in-session lower-only rate; O(1) missed slots; invalid/regressed inputs; timestamp extremes; cumulative loss");
+ /* Decimate-first (schema 3 capture): recorder_skip_if_not_due() answers "not due"
+  * with the same counters capture() would, so skipped loops never build a sample. */
+ {const uint32_t rates[]={1000,500,250,125};
+  for(unsigned r=0;r<4;r++){flight_recorder_stats_t a,b;uint32_t popped_a=0,popped_b=0;
+   for(unsigned pass=0;pass<2;pass++){
+    init();recorder_stop();assert(recorder_start(rates[r]));uint32_t popped=0;
+    assert(!recorder_skip_if_not_due(0,0)); /* first sample establishes the clock */
+    for(uint32_t n=0;n<4000;n++){
+     s.iteration=n;s.time_us=n*125u+(n%7u==3u?40u:0u); /* 8 kHz with jitter */
+     if(pass&&recorder_skip_if_not_due(s.time_us,s.iteration))continue;
+     (void)recorder_capture(&s);
+     if(recorder_stats()->queue_depth>32){assert(recorder_pop(&out));popped++;}
+    }
+    while(recorder_pop(&out))popped++;
+    if(pass){b=*recorder_stats();popped_b=popped;}else{a=*recorder_stats();popped_a=popped;}
+    recorder_stop();
+   }
+   assert(a.total_attempted==b.total_attempted&&a.total_skipped==b.total_skipped&&a.total_accepted==b.total_accepted);
+   assert(a.total_missed==b.total_missed&&a.total_dropped==b.total_dropped&&popped_a==popped_b&&a.total_dropped==0);
+   assert(a.total_accepted>=4000u*125u*rates[r]/1000000u-1u);
+  }
+  /* Never skips when due, inactive, before the first sample, or on regression. */
+  init();assert(!recorder_skip_if_not_due(5,5));assert(recorder_start(500));assert(!recorder_skip_if_not_due(0,0));
+  s.time_us=1000;s.iteration=1;assert(recorder_capture(&s));
+  assert(recorder_skip_if_not_due(1500,2)&&recorder_stats()->total_skipped==1&&recorder_stats()->total_attempted==2);
+  assert(!recorder_skip_if_not_due(1400,3)); /* time regressed: capture() must count it */
+  assert(!recorder_skip_if_not_due(1600,1)); /* iteration regressed */
+  assert(!recorder_skip_if_not_due(3000,4)); /* due */
+  recorder_stop();assert(!recorder_skip_if_not_due(3100,5));}
+ puts("PASS recorder: FIFO/retention; 125/250/500/1000Hz; in-session lower-only rate; O(1) missed slots; invalid/regressed inputs; timestamp extremes; cumulative loss; decimate-first skip matches capture() counters at 1000/500/250/125 Hz");
 }

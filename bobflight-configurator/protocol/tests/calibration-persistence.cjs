@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 const assert=require('node:assert/strict');
 const path=require('node:path');
-const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3,STORAGE_SCOPE_V4,STORAGE_SCOPE_V5,STORAGE_SCOPE_V6,STORAGE_SCOPE_V7,STORAGE_SCOPE_V8,STORAGE_PAYLOAD_BYTES_V8}=require('../dist');
+const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3,STORAGE_SCOPE_V4,STORAGE_SCOPE_V5,STORAGE_SCOPE_V6,STORAGE_SCOPE_V7,STORAGE_SCOPE_V8,STORAGE_PAYLOAD_BYTES_V8,STORAGE_SCOPE_V9,STORAGE_PAYLOAD_BYTES_V9,CONFIG_EXPORT_MAX_BYTES}=require('../dist');
 const {mockSensorReply}=require('../dist/sensor-mock');
 const {loadUiTs}=require('./load-ui-ts.cjs');
 const {parseKeyValueSnapshot}=loadUiTs(path.resolve(__dirname,'../../ui/src/sensors/telemetry.ts'));
@@ -50,12 +50,21 @@ assert.equal(STORAGE_SCOPE_V8,STORAGE_SCOPE_V7+',gyro_notch1_hz,gyro_notch1_cuto
 for(const bad of [v8.replace('set gyro_notch1_hz 200','set gyro_notch1_hz 10'),v8.replace('set gyro_notch1_hz 200','set gyro_notch1_hz 1001'),v8.replace('set gyro_notch2_cutoff_hz 0','set gyro_notch2_cutoff_hz 1000'),v7.replace('# config_end: 1','set gyro_notch1_hz 0\n# config_end: 1')])assert.throws(()=>parseConfigurationExport(bad,'dump'));
 assert.equal(parseStorage(storage(8,STORAGE_SCOPE_V8)).schema,8);assert.throws(()=>parseStorage(storage(8,STORAGE_SCOPE_V7)));assert.throws(()=>parseStorage(storage(7,STORAGE_SCOPE_V8)));assert.throws(()=>parseStorage(storage(9,STORAGE_SCOPE_V8)));
 console.log('PASS schema8 capability (gyro_notch1/2 centre+cutoff @ 192..207 / 208-byte payload)');
+const v9=v8.replace('# schema: 8','# schema: 9').replace(STORAGE_SCOPE_V8,STORAGE_SCOPE_V9).replace('# config_end: 1','set rpm_filter_harmonics 3\nset rpm_filter_min_hz 100\nset rpm_filter_q_x100 500\nset motor_poles 14\n# config_end: 1');
+assert.equal(parseConfigurationExport(v9,'dump').modeCount,4);assert.equal(STORAGE_PAYLOAD_BYTES_V9,224);assert.equal(CONFIG_EXPORT_MAX_BYTES,2048);
+assert.equal(STORAGE_SCOPE_V9,STORAGE_SCOPE_V8+',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles');
+for(const bad of [v9.replace('set rpm_filter_harmonics 3','set rpm_filter_harmonics 4'),v9.replace('set rpm_filter_harmonics 3','set rpm_filter_harmonics 2.5'),v9.replace('set rpm_filter_min_hz 100','set rpm_filter_min_hz 201'),
+  v9.replace('set rpm_filter_q_x100 500','set rpm_filter_q_x100 99'),v9.replace('set motor_poles 14','set motor_poles 15'),v9.replace('set motor_poles 14','set motor_poles 40'),v8.replace('# config_end: 1','set motor_poles 14\n# config_end: 1')])assert.throws(()=>parseConfigurationExport(bad,'dump'));
+{const pad='# config_end: 1';const big=v9.replace(pad,'set rate_max_roll 800\n'.repeat(Math.ceil((CONFIG_EXPORT_MAX_BYTES-v9.length)/22)+1)+pad);assert(big.length>CONFIG_EXPORT_MAX_BYTES);assert.throws(()=>parseConfigurationExport(big,'dump'),e=>e.message===`Configuration export is ${big.length} bytes; the limit is 2048 bytes`,'oversize message states the actual size and the 2048 limit');
+ const fits=v9.replace(pad,'set rate_max_roll 800\n'.repeat(Math.floor((1990-v9.length)/22))+pad);assert(fits.length>1800&&fits.length<=CONFIG_EXPORT_MAX_BYTES);assert.equal(parseConfigurationExport(fits,'dump').modeCount,4);}
+assert.equal(parseStorage(storage(9,STORAGE_SCOPE_V9)).schema,9);assert.throws(()=>parseStorage(storage(9,STORAGE_SCOPE_V8)));assert.throws(()=>parseStorage(storage(8,STORAGE_SCOPE_V9)));assert.throws(()=>parseStorage(storage(10,STORAGE_SCOPE_V9)));
+console.log('PASS schema9 capability (RPM filter harmonics/min_hz/q_x100/motor_poles @ 208..223 / 224-byte payload; export limit 2048)');
 
 // Render the actual save panel with old/new advertised capabilities.
 function nodes(t){return Array.isArray(t)?t.flatMap(nodes):t&&typeof t==='object'?[t,...nodes(t.props?.children)]:[];}
 function txt(t){return Array.isArray(t)?t.map(txt).join(''):t&&typeof t==='object'?txt(t.props?.children):String(t??'');}
 (async()=>{
- for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true],[4,STORAGE_SCOPE_V4,true],[5,STORAGE_SCOPE_V5,true],[6,STORAGE_SCOPE_V6,true],[7,STORAGE_SCOPE_V7,true],[8,STORAGE_SCOPE_V8,true]]){
+ for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true],[4,STORAGE_SCOPE_V4,true],[5,STORAGE_SCOPE_V5,true],[6,STORAGE_SCOPE_V6,true],[7,STORAGE_SCOPE_V7,true],[8,STORAGE_SCOPE_V8,true],[9,STORAGE_SCOPE_V9,true]]){
   let saves=0;
   const state=parseStorage(storage(schema,scope));
   const host={getConnectionStatus:()=> 'connected',sendCommand:async()=>storage(schema,scope),saveSettings:async()=>{saves++;}};

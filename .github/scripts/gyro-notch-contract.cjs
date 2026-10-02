@@ -1,8 +1,10 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
- * Real firmware gyro notch CLI (Kakute host build, schema 8) -> Configurator
+ * Real firmware gyro notch CLI (Kakute host build, keys from schema 8; FW now at schema 9) -> Configurator
  * notch parsers and Filters row model. Host build: proves the wire contract,
  * the FW refusal lines kept verbatim with the value unchanged, and a saved
- * 600 Hz notch reported above-nyquist after a 1 kHz loop change + reboot. The
+ * 600 Hz notch reported above-nyquist after a 1 kHz loop change + reboot
+ * (filters_sample_hz 8000 at the default 8000/2: since safety S1 the gyro
+ * filter runs on every gyro sample). The
  * host gyro path is passthrough, so this is not a DSP or hardware test. */
 const assert=require('node:assert/strict');
 const path=require('node:path');
@@ -23,12 +25,12 @@ const get=(o,k)=>{const all=[...o.matchAll(new RegExp(`^${k}=.*$`,'gm'))];return
  const o=run([...GYRO_NOTCH_KEYS.map(k=>`get ${k}`),'filters','storage']);
  for(const k of GYRO_NOTCH_KEYS)assert.deepEqual(get(o,k),[{kind:'value',value:'0'}],k);
  const [raw]=reports(o);
- assert.deepEqual(raw.trim().split(/\r?\n/),['filters_api: 1','filters_sample_hz: 4000','gyro_notch1_active: no','gyro_notch1_reason: off','gyro_notch2_active: no','gyro_notch2_reason: off','filters_end: 1']);
+ assert.deepEqual(raw.trim().split(/\r?\n/),['filters_api: 1','filters_sample_hz: 8000','gyro_notch1_active: no','gyro_notch1_reason: off','gyro_notch2_active: no','gyro_notch2_reason: off','filters_end: 1']);
  const rep=parseFiltersReport(raw);assert.equal(rep.kind,'report');
  const row=notchRowView(1,get(o,'gyro_notch1_hz')[0],get(o,'gyro_notch1_cutoff_hz')[0],rep);
  assert.deepEqual([row.supported,row.off,row.cutoffDisabled,row.active,row.reason],[true,true,true,'no','off']);
  const st=parseStorage(o.slice(o.indexOf('storage_api: 1'),o.indexOf('storage_end: 1')+'storage_end: 1'.length));
- assert.equal(st.schema,8);assert.ok(st.scope.endsWith(',gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz'));
+ assert.equal(st.schema,9,'schema 9 (RPM filter) keeps the schema 8 notch keys');assert.ok(st.scope.includes(',gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,'));
 }
 // 2. Write plan over the real FW: every step accepted, then re-read with get.
 {
@@ -61,7 +63,7 @@ const get=(o,k)=>{const all=[...o.matchAll(new RegExp(`^${k}=.*$`,'gm'))];return
  const o=run(['set gyro_notch2_cutoff_hz 420','set gyro_notch2_hz 600','filters','set loop_rate_hz 1000','save','reboot',PAD,
   'filters','get gyro_notch2_hz','get gyro_notch2_cutoff_hz','set gyro_notch2_hz 500','get gyro_notch2_hz','storage'],true);
  const [r0,r1]=reports(o).map(parseFiltersReport);
- assert.deepEqual(r0.report,{sampleHz:'4000',notches:{1:{active:'no',reason:'off'},2:{active:'yes',reason:'ok'}}});
+ assert.deepEqual(r0.report,{sampleHz:'8000',notches:{1:{active:'no',reason:'off'},2:{active:'yes',reason:'ok'}}});
  assert.deepEqual(r1.report,{sampleHz:'1000',notches:{1:{active:'no',reason:'off'},2:{active:'no',reason:'above-nyquist'}}});
  const after=o.slice(o.indexOf('reboot'));
  const c=get(after,'gyro_notch2_hz'),f=get(after,'gyro_notch2_cutoff_hz');
@@ -71,6 +73,6 @@ const get=(o,k)=>{const all=[...o.matchAll(new RegExp(`^${k}=.*$`,'gm'))];return
  const refused=line(after,/^set failed: gyro_notch2_hz must be below .*$/m);
  assert.equal(parseNotchSetReply(refused,'gyro_notch2_hz').message,'set failed: gyro_notch2_hz must be below 450 Hz at the running 1000 Hz loop rate');
  const st=parseStorage(after.slice(after.indexOf('storage_api: 1'),after.indexOf('storage_end: 1')+'storage_end: 1'.length));
- assert.equal(st.dirty,false,'runtime disable does not alter the stored config');assert.equal(st.schema,8);
+ assert.equal(st.dirty,false,'runtime disable does not alter the stored config');assert.equal(st.schema,9);
 }
 console.log('PASS firmware gyro notch CLI -> Configurator notch parsers/rows: defaults off with the frozen filters report shape, write plan accepted and re-read, refusals verbatim with values unchanged, saved 600 Hz notch above-nyquist after 1 kHz loop + reboot (setting kept, storage clean). Host build.');

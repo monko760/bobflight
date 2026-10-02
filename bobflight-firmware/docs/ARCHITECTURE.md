@@ -20,8 +20,8 @@ board/        board_t from owned IR / dummy
 ## Runtime contract
 
 ```
-loop_gyro @ gyro_hz
-  → loop_filter / loop_pid / mixer→dshot @ gyro_hz / pid_process_denom
+loop_gyro → loop_filter @ gyro_hz   (filter on every sample, safety S1)
+  → loop_pid / mixer→dshot @ gyro_hz / pid_process_denom
 background: rx_poll, cli_poll, failsafe_tick
 ```
 

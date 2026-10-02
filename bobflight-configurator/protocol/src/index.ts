@@ -61,6 +61,7 @@ export {
   SCHEMA5_FLOAT_KEYS,
   SCHEMA6_FLOAT_KEYS,
   SCHEMA8_FLOAT_KEYS,
+  SCHEMA9_INT_KEYS,
   isOptionalSettingsKey,
   DEFAULT_SETTINGS,
   DEFAULT_SETTING_VALUES,
@@ -80,6 +81,7 @@ export type {
   Schema5FloatKey,
   Schema6FloatKey,
   Schema8FloatKey,
+  Schema9IntKey,
   ParsedGetReply,
   ParsedSetReply,
 } from "./settings";
@@ -169,3 +171,11 @@ export {
 export type { SdReadResult, SdStatusResult, SdCommandGate, SdReadSend } from "./sd-read";
 export { Fat32RootReader, Fat32Error, FAT32_MAX_FILE_BYTES, FAT32_ROOT_SCAN_SECTORS } from "./fat32-root";
 export type { Fat32BblEntry } from "./fat32-root";
+export {
+  RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, RPM_FILTER_REASONS,
+  isRpmFilterKey, isRpmFilterCliCommand, rpmValueProblem, qFromX100, qToX100,
+  parseRpmGetReply, parseRpmSetReply, parseRpmFilterReport, rpmFilterView, RPM_FILTER_REPORT_FIELDS, rpmFilterReportIsExact,
+} from "./rpm-filter";
+export type { RpmFilterKey, RpmFilterMotor, RpmGetResult, RpmSetResult, RpmFilterReport, RpmFilterReportResult, RpmFilterView } from "./rpm-filter";
+export { MockRpmFilter, RPM_FILTER_MOCK_SCENARIOS } from "./rpm-filter-mock";
+export type { RpmFilterMockScenario } from "./rpm-filter-mock";

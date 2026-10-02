@@ -32,7 +32,8 @@
     "test:sd": "tsc && node tests/sd-probe.cjs && node tests/sd-read.cjs",
     "test:sd-download": "tsc && node tests/sd-download.cjs",
     "test:blackbox": "tsc && node tests/blackbox-recording.cjs",
-    "test:gyro-notch": "tsc && node tests/gyro-notch.cjs"
+    "test:gyro-notch": "tsc && node tests/gyro-notch.cjs",
+    "test:rpm-filter": "tsc && node tests/rpm-filter.cjs"
   },
   "engines": {
     "node": ">=18"

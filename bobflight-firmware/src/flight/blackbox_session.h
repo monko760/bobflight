@@ -9,10 +9,18 @@
 #define BB_SESSION_RING_BYTES 65536u
 /* Samples encoded per poll call (bounded work; ring space is checked first). */
 #define BB_SESSION_FRAMES_PER_POLL 16u
+/* One encoded frame or the end marker; sized to the encoder's proven
+ * worst-case frame (blackbox_encode.h), checked by static asserts. */
+#define BB_SESSION_PACKET_BYTES BLACKBOX_FRAME_MAX_BYTES
+_Static_assert(BB_SESSION_PACKET_BYTES >= BLACKBOX_FRAME_MAX_BYTES, "session packet must hold a worst-case frame");
+_Static_assert(BB_SESSION_PACKET_BYTES >= 13u, "session packet must hold the end marker");
+_Static_assert(BB_SESSION_PACKET_BYTES < 65536u / 4u, "ring must hold several worst-case frames");
 /* Deterministic auto-rate policy: evaluated once per window of session time.
  * If queue-full drops in the window exceed BB_RATE_DROP_PERMILLE of the
- * window's attempts, halve the rate (500 -> 250 -> 125). Never raised in a
- * session and never below BB_RATE_FLOOR_HZ. Only queue-full losses count. */
+ * window's due logging slots (capture attempts minus deliberate decimation,
+ * so the threshold means the same at 1, 4 and 8 kHz loops), halve the rate
+ * (500 -> 250 -> 125). Never raised in a session and never below
+ * BB_RATE_FLOOR_HZ. Only queue-full losses count. */
 #define BB_RATE_WINDOW_US 1000000u
 #define BB_RATE_DROP_PERMILLE 10u
 #define BB_RATE_FLOOR_HZ 125u
@@ -28,7 +36,7 @@ typedef struct {
  bool stop_requested,end_created,seen_armed,patch_done;
  blackbox_metadata_t meta;uint32_t header_tail_hash;
  char header[4096];size_t header_len;
- uint8_t sector[512],packet[256];
+ uint8_t sector[512],packet[BB_SESSION_PACKET_BYTES];
  size_t ring_head,ring_tail,ring_count,ring_peak;
  uint64_t window_start_us;uint32_t window_lost0,window_attempted0,settle_windows;
 } bb_session_t;

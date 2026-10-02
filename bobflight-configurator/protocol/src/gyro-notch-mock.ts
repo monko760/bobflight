@@ -16,13 +16,15 @@ export type GyroNotchMockScenario = (typeof GYRO_NOTCH_MOCK_SCENARIOS)[number];
 
 export class MockGyroNotch {
   private values: Record<GyroNotchKey, number> = { gyro_notch1_hz: 0, gyro_notch1_cutoff_hz: 0, gyro_notch2_hz: 0, gyro_notch2_cutoff_hz: 0 };
-  private rateHz = 4000;
+  /* Kakute default loop 4000 (8000/2): the gyro filter runs on every gyro
+   * sample since safety S1, so the FW reports filters_sample_hz 8000. */
+  private rateHz = 8000;
   constructor(private scenario: GyroNotchMockScenario = "off") { this.setScenario(scenario); }
   get supported(): boolean { return this.scenario !== "old-fc"; }
   setScenario(s: GyroNotchMockScenario): void {
     this.scenario = s;
     this.defaults();
-    this.rateHz = s === "above-nyquist" ? 1000 : 4000;
+    this.rateHz = s === "above-nyquist" ? 1000 : 8000;
     if (s === "ok" || s === "invalid") { this.values.gyro_notch1_cutoff_hz = 150; this.values.gyro_notch1_hz = 200; }
     if (s === "above-nyquist") { this.values.gyro_notch1_cutoff_hz = 420; this.values.gyro_notch1_hz = 600; }
   }

@@ -7,6 +7,7 @@
 #include "flight/blackbox_session.h"
 #include "flight/blackbox_capture.h"
 #include "sched/scheduler.h"
+#include "board/board.h"
 /* Configured/default logging rate. The effective rate may be lower after the
  * deterministic in-session auto-lower (blackbox_session.h); never higher. */
 #ifndef BLACKBOX_RATE_DEFAULT_HZ
@@ -46,7 +47,9 @@ static void blackbox_cli_poll(void){
   uint32_t loop_hz=sched->pid_process_denom?sched->gyro_hz/sched->pid_process_denom:0;
   /* Header states the rate actually used at start; a mid-session auto-lower
    * patches the fixed-width rate block in place before close. */
-  blackbox_metadata_t m={BLACKBOX_RATE_DEFAULT_HZ,loop_hz,dshot_speed_kbps(),BOBFLIGHT_VERSION_STRING,config_get(),BLACKBOX_RATE_DEFAULT_HZ,BB_RATE_REASON_DEFAULT};
+  const board_t *bb_board=board_get();
+  blackbox_metadata_t m={BLACKBOX_RATE_DEFAULT_HZ,loop_hz,dshot_speed_kbps(),BOBFLIGHT_VERSION_STRING,config_get(),BLACKBOX_RATE_DEFAULT_HZ,BB_RATE_REASON_DEFAULT,
+   bb_board?bb_board->board_id:NULL,sched->gyro_hz,sched->pid_process_denom};
   fatlog_io_t io={&bbl_card,bbl_card.card_info.capacity_sectors,bbl_read,bbl_write,bbl_card_poll};
   if(!bb_session_start(&bbl,&io,&m,hal_micros()))sd_spi_hw_cancel();
   return;

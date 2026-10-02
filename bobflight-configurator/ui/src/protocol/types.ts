@@ -43,6 +43,7 @@ export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "reboot", "bl", "bl discard",
   "get loop_rate_hz", "set loop_rate_hz 1000", "set loop_rate_hz 4000", "set loop_rate_hz 8000", "loop_rate",
   "filters", "get gyro_notch1_hz", "get gyro_notch1_cutoff_hz", "get gyro_notch2_hz", "get gyro_notch2_cutoff_hz",
+  "rpm_filter", "get rpm_filter_harmonics", "get rpm_filter_min_hz", "get rpm_filter_q_x100", "get motor_poles",
 ] as const;
 
 /** Exact single-line UI input; preserve complete arguments, never just a verb. */
@@ -64,6 +65,8 @@ export function parseCliInput(raw: string): CliCommand | null {
   }
   // Schema 8 gyro notches: plain decimal values only (FW decides validity).
   if (/^set gyro_notch[12]_(?:cutoff_)?hz (?:0|[1-9]\d{0,3})(?:\.\d{1,6})?$/.test(cmd)) return cmd as CliCommand;
+  // Schema 9 RPM filter: plain whole numbers only (FW decides validity).
+  if (/^set (?:rpm_filter_(?:harmonics|min_hz|q_x100)|motor_poles) (?:0|[1-9]\d{0,3})$/.test(cmd)) return cmd as CliCommand;
   return (ALLOWED_CLI_COMMANDS as readonly string[]).includes(cmd) ? cmd as CliCommand : null;
 }
 
