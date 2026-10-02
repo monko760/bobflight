@@ -15,7 +15,7 @@ export type { WebSerialRequestPortOptions } from "@bobflight/protocol";
 
 export { SETTINGS_KEYS } from "@bobflight/protocol";
 
-import type { CliCommand } from "@bobflight/protocol";
+import type { CliCommand, SdReadResult } from "@bobflight/protocol";
 import type {
   ConnectOptions,
   ConnectionStatus,
@@ -92,6 +92,20 @@ export interface BobFlightHost {
   onLine(cb: (line: string) => void): () => void;
   onStatus(cb: (s: ConnectionStatus) => void): () => void;
   getLastError(): string | null;
+  /**
+   * One `sd read <N>` through the shared CommandGate (protocol SdSectorReader):
+   * the gate is held until `sd_data_end: 1` for that sector arrives; never
+   * pipelined. Optional: hosts without it cannot download from the SD card.
+   */
+  readSdSector?(sector: number): Promise<SdReadResult>;
+  /**
+   * True while a settings storage action (flash save, `defaults`, `storage`
+   * read such as the StoragePanel refresh) is in flight on any page.
+   * Optional: hosts without it report no storage activity.
+   */
+  storageActionPending?(): boolean;
+  /** Called when `storageActionPending()` may have changed; returns an unsubscribe. */
+  onStorageActivity?(cb: () => void): () => void;
 
   /**
    * Chrome/Edge Web Serial picker (user gesture). Registers port and returns

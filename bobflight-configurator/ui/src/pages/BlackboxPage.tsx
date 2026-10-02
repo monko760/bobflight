@@ -1,5 +1,5 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHost } from '../hooks/useHost';
 import { Recorder, QUERIES, csv, type Query } from '../blackbox/recorder';
 import { SdCardController, type SdCommand } from '../blackbox/sd-card';
@@ -15,9 +15,12 @@ import {
   onboardEffectiveHz,
   type OnboardCommand,
 } from '../blackbox/onboard';
+import { SdDownloadController, downloadBlockedReason, storageBlock } from '../blackbox/sdDownload';
+import { saveBlobFile } from '../blackbox/saveBlob';
+import { BLACKBOX_COUNTER_KEYS, STATUS_COUNTER_KEYS, verbatimCounters } from '../blackbox/fcCounters';
 
 export function BlackboxPage({ visible }: { visible: boolean }) {
-  const { host, connectionStatus, postFlashGate, status } = useHost();
+  const { host, connectionStatus, postFlashGate, status, refreshStatus } = useHost();
   const recorder = useMemo(() => new Recorder(host), [host]);
   const sd = useMemo(() => new SdCardController(host), [host]);
   const onboard = useMemo(() => new OnboardController(host), [host]);
@@ -28,6 +31,15 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
   const [backupAck, setBackupAck] = useState(false);
 
   const update = () => render((n) => n + 1);
+  // Onboard SD log download (BB2a): fresh probe, one CRC-checked sector at a time, sd cancel.
+  const sdLogs = useMemo(
+    () => new SdDownloadController(host, { save: saveBlobFile, onChange: () => render((n) => n + 1) }),
+    [host]
+  );
+
+  // Host-wide settings storage actions (save, defaults, StoragePanel refresh) lock Download.
+  useEffect(() => host.onStorageActivity?.(update), [host]);
+  const settingsStoragePending = host.storageActionPending?.() ?? false;
 
   // USB Bench Recorder effect
   useEffect(() => {
@@ -44,20 +56,60 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
     };
   }, [recorder, visible, connectionStatus, postFlashGate]);
 
-  // Onboard Blackbox Controller effect
+  // Onboard Blackbox Controller effect (plus a 2 s `status` refresh for arm state and loop_overruns).
+  // One poll at a time, and none while an SD download holds the shared command gate.
   const onboardEnabled = visible && connectionStatus === 'connected' && !postFlashGate;
+  const pollBusy = useRef(false);
+  const nextStatusPoll = useRef(0);
+  // Freshness of the polled values (arm state, loop_overruns, recorder counters): polls pause while an
+  // SD download holds the connection, and a failed refresh keeps the last values. Both are marked visibly.
+  const statusRefreshError = useRef<string | null>(null);
+  // Why the 2 s status refresh last paused: an SD download or the SD check (both hold the link).
+  const pausedForSd = useRef<'download' | 'sd-check' | null>(null);
+  if (sdLogs.busy) pausedForSd.current = 'download';
+  else if (sd.busy && pausedForSd.current === null) pausedForSd.current = 'sd-check';
   useEffect(() => {
     onboard.setEnabled(onboardEnabled);
     update();
     if (!onboardEnabled) return;
     const timer = setInterval(() => {
-      void onboard.tick().then(update);
+      if (pollBusy.current || sdLogs.busy) return;
+      pollBusy.current = true;
+      void (async () => {
+        try {
+          await onboard.tick();
+          // The status refresh pauses while the SD check runs (as during a download), so it never collides with it.
+          if (!sdLogs.busy && !sd.busy && performance.now() >= nextStatusPoll.current) {
+            nextStatusPoll.current = performance.now() + 2000;
+            try {
+              await refreshStatus();
+              statusRefreshError.current = null;
+              // A complete poll after the SD operation: the values are live again.
+              if (!sdLogs.busy && !sd.busy && !onboard.stale) pausedForSd.current = null;
+            } catch (e) {
+              statusRefreshError.current = e instanceof Error ? e.message : String(e);
+            }
+          }
+        } finally {
+          pollBusy.current = false;
+          update();
+        }
+      })();
     }, 500);
     return () => {
       clearInterval(timer);
       onboard.setEnabled(false);
     };
-  }, [onboard, onboardEnabled]);
+  }, [onboard, onboardEnabled, sdLogs, sd, refreshStatus]);
+
+  // Abort a running SD download on disconnect, tab leave or post-flash lock (sd cancel is sent while connected).
+  useEffect(() => {
+    if (!sdLogs.busy) return;
+    if (connectionStatus !== 'connected') sdLogs.cancel('disconnected');
+    else if (!visible) sdLogs.cancel('left-tab');
+    else if (postFlashGate) sdLogs.cancel('blocked');
+  }, [sdLogs, visible, connectionStatus, postFlashGate]);
+  useEffect(() => () => sdLogs.cancel('left-tab'), [sdLogs]);
 
   // SD Diagnostic Controller effect
   const sdEnabled =
@@ -72,13 +124,13 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
     update();
     if (!sdEnabled) return;
     const timer = setInterval(() => {
-      void sd.tick().then(update);
+      if (!sdLogs.busy) void sd.tick().then(update);
     }, 1000);
     return () => {
       clearInterval(timer);
       sd.setEnabled(false);
     };
-  }, [sd, sdEnabled]);
+  }, [sd, sdEnabled, sdLogs]);
 
   function onboardCommand(command: OnboardCommand) {
     const request = onboard.command(command);
@@ -129,7 +181,40 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
     isArmed ||
     postFlashGate ||
     sd.busy ||
+    sdLogs.busy ||
     recorder.active;
+  const downloadBlocked = downloadBlockedReason({
+    connected: connectionStatus === 'connected',
+    postFlashGate,
+    supported: sdLogs.supported,
+    recording: onboard.active,
+    armed: isArmed,
+    // Storage lock: a settings storage action in flight, the SD diagnostic probe, or the USB bench recorder.
+    storageBlocked: storageBlock({ settingsPending: settingsStoragePending, sdCheckBusy: sd.busy, benchRecording: recorder.active }),
+  });
+  const strictCardShown = !!onboard.snapshot && !onboard.stale && !onboard.snapshot.unavailable;
+  const countersStale = sdLogs.busy || pausedForSd.current === 'download'
+    ? 'Last read before download: status polling pauses while the SD card is read, so these values are not live until the next refresh.'
+    : pausedForSd.current === 'sd-check'
+    ? 'Last read before the SD card check: status polling pauses while the check runs, so these values are not live until the next refresh.'
+    : statusRefreshError.current !== null || onboard.stale
+    ? 'Refresh failed: these are the last values read and may be out of date.'
+    : null;
+  // Fill gaps only: recorder counters already in the card above are not repeated; loop_overruns always.
+  const counterRows = [
+    ...(strictCardShown ? [] : verbatimCounters(onboard.lastRaw, BLACKBOX_COUNTER_KEYS)),
+    ...verbatimCounters(status?.raw, STATUS_COUNTER_KEYS),
+  ];
+  const downloadPhaseText =
+    sdLogs.phase === 'probing'
+      ? 'Probing the SD card (fresh sd probe, then sd status until done)…'
+      : sdLogs.phase === 'scanning'
+      ? 'Reading the FAT32 root directory…'
+      : sdLogs.phase === 'downloading'
+      ? `Downloading ${sdLogs.progress?.file ?? ''}…`
+      : sdLogs.phase === 'cancelling'
+      ? 'Cancelling: waiting for the current reply, then sending sd cancel…'
+      : 'No SD download in progress.';
 
   return (
     <section hidden={!visible} className="panel">
@@ -311,21 +396,8 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
               </p>
             )}
             {onboard.snapshot.dropped > 0 && <p role="alert">Samples were lost during recording. An empty final queue does not undo those losses. Preserve the file and final status for diagnosis; do not treat this as a complete tuning log.</p>}
-            <p>
-              <button
-                disabled
-                title="Use the PC USB extraction utility or an SD card reader. The integrated button is not implemented yet."
-              >
-                Download .bbl (PC utility or SD card reader)
-              </button>
-            </p>
             <p className="muted">
-              <strong>Log retrieval:</strong> With firmware ending in <code>-sdread1</code>,
-              disconnect the configurator and use <code>tools/download_blackbox.py</code>
-              on your PC to copy a named existing log over USB, including after reboot.
-              See <code>USB-LOG-EXPORT.md</code>. This integrated download button and USB
-              mass-storage mode are not implemented. Alternatively, after state is
-              <code> done</code>, power off and use an external SD card reader.
+              <strong>Log retrieval:</strong> use <em>Download logs from the onboard SD card</em> below.
             </p>
 
             <p className="muted">
@@ -351,6 +423,147 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
             <pre style={{ whiteSpace: 'pre-wrap' }}>{onboard.snapshot.raw}</pre>
           </details>
         )}
+
+        {connectionStatus === 'connected' && (
+          <div aria-labelledby="bb-fc-counters-title">
+            <h4 id="bb-fc-counters-title">Counters as reported by the FC</h4>
+            <p className="muted">
+              Exactly as sent (no math); “unknown” means the FC did not report it.
+              {strictCardShown ? ' Recorder counters are shown in the card above; arm and loop_overruns come from status.' : ''}
+            </p>
+            {countersStale && (
+              <p role="status" data-testid="bb-fc-counters-stale">
+                <strong>{countersStale}</strong>
+                {statusRefreshError.current !== null && !sdLogs.busy && pausedForSd.current === null && (
+                  <small> ({statusRefreshError.current})</small>
+                )}
+              </p>
+            )}
+            <dl data-testid="bb-fc-counters" data-stale={countersStale ? 'true' : undefined}>
+              {counterRows.map((row) => (
+                <div key={row.key} data-key={row.key}>
+                  <dt>
+                    <code>{row.key}</code>
+                  </dt>
+                  <dd>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+      </section>
+
+      <hr />
+
+      <section aria-labelledby="bb-download-title" data-testid="bb-download">
+        <h3 id="bb-download-title">Download logs from the onboard SD card</h3>
+        <p>
+          Reads <code>BFLxxxxx.BBL</code> logs from the FAT32 card root over USB, one 512-byte
+          sector at a time, checking each sector&apos;s CRC-32. Read-only: nothing is written to
+          the card. Every list and download starts with a fresh SD probe and, once an sd command has
+          gone out, ends with <code>sd cancel</code>. A file is saved only after every sector verified and its size
+          matches the directory entry. Disarm first; recording must be stopped and done (the
+          recorder and arm state are re-read with <code>blackbox status</code> and <code>status</code>{' '}
+          before any sector is read; arming or recording during a download is stopped by the
+          controller&apos;s own guard).
+        </p>
+        <p>
+          <button disabled={!!downloadBlocked || sdLogs.busy} onClick={() => void sdLogs.list()}>
+            Probe card and list logs
+          </button>{' '}
+          <button
+            disabled={!sdLogs.busy || sdLogs.phase === 'cancelling'}
+            onClick={() => sdLogs.cancel('user')}
+          >
+            Cancel download
+          </button>
+        </p>
+        {downloadBlocked && <p data-testid="bb-download-blocked">{downloadBlocked}</p>}
+        <p role="status" aria-live="polite" data-testid="bb-download-phase">
+          {downloadPhaseText}
+        </p>
+        {sdLogs.progress && (
+          <div data-testid="bb-download-progress">
+            <progress max={sdLogs.progress.bytesTotal} value={sdLogs.progress.bytesDone} />
+            <p>
+              {sdLogs.progress.bytesDone.toLocaleString('en-US')} of{' '}
+              {sdLogs.progress.bytesTotal.toLocaleString('en-US')} bytes ·{' '}
+              {sdLogs.progress.sectorsDone} of {sdLogs.progress.sectorsTotal} sectors
+            </p>
+          </div>
+        )}
+        {sdLogs.message && (
+          <div
+            role={sdLogs.message.tone === 'error' ? 'alert' : 'status'}
+            data-testid="bb-download-result"
+            data-tone={sdLogs.message.tone}
+          >
+            {sdLogs.message.fwLine !== null && (
+              <p>
+                Controller reply: <code data-testid="bb-download-fw-line">{sdLogs.message.fwLine}</code>
+              </p>
+            )}
+            <p data-testid="bb-download-message">{sdLogs.message.text}</p>
+            {sdLogs.message.detail && (
+              <p className="muted">
+                <small data-testid="bb-download-detail">Detail: {sdLogs.message.detail}</small>
+              </p>
+            )}
+          </div>
+        )}
+        {sdLogs.warnings.length > 0 && (
+          <ul role="alert" data-testid="bb-download-warnings">
+            {sdLogs.warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        )}
+        {sdLogs.recorderNote && (
+          <p role="status" data-testid="bb-download-recorder-note">
+            {sdLogs.recorderNote}
+          </p>
+        )}
+        {sdLogs.armNote && (
+          <p role="status" data-testid="bb-download-arm-note">
+            {sdLogs.armNote}
+          </p>
+        )}
+        {sdLogs.files && sdLogs.files.length > 0 && (
+          <table data-testid="bb-download-files">
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Size (bytes)</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sdLogs.files.map((f) => (
+                <tr key={f.name} data-file={f.name}>
+                  <td>
+                    <code>{f.name}</code>
+                  </td>
+                  <td>{f.size.toLocaleString('en-US')}</td>
+                  <td>
+                    <button
+                      disabled={!!downloadBlocked || sdLogs.busy || f.size === 0}
+                      onClick={() => void sdLogs.download(f.name)}
+                    >
+                      Download {f.name}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted">
+          <strong>Fallback:</strong> disconnect the configurator and run{' '}
+          <code>tools/download_blackbox.py</code> on your PC to copy a named log over USB (see{' '}
+          <code>USB-LOG-EXPORT.md</code>), or, after state is <code>done</code>, power off and use
+          an SD card reader (also the way to read a card that is not FAT32). USB mass-storage mode
+          is not offered.
+        </p>
       </section>
 
       <hr />
@@ -364,19 +577,19 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
         </p>
         <p>
           <button
-            disabled={!sdEnabled || sd.busy || onboard.active}
+            disabled={!sdEnabled || sd.busy || onboard.active || sdLogs.busy}
             onClick={() => sdCommand('sd probe')}
           >
             Check SD card
           </button>{' '}
           <button
-            disabled={!sdEnabled || sd.pending}
+            disabled={!sdEnabled || sd.pending || sdLogs.busy}
             onClick={() => sdCommand('sd status')}
           >
             Refresh status
           </button>{' '}
           <button
-            disabled={!sdEnabled || sd.pending}
+            disabled={!sdEnabled || sd.pending || sdLogs.busy}
             onClick={() => sdCommand('sd cancel')}
           >
             Cancel probe
@@ -500,6 +713,7 @@ export function BlackboxPage({ visible }: { visible: boolean }) {
         <button
           disabled={
             sd.busy ||
+            sdLogs.busy ||
             onboard.active ||
             recorder.active ||
             connectionStatus !== 'connected' ||
