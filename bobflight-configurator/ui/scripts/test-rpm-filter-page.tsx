@@ -169,14 +169,14 @@ async function main() {
     const U = "unavailable";
     const live = ["180", "182", "179", "185"];
     const expected: Record<RpmFilterMockScenario, { h: string; rate: string; run: string; act: string; reason: string; m: string[]; banner: boolean }> = {
-      off: { h: "0", rate: "4000", run: "0", act: "no", reason: "off", m: [U, U, U, U], banner: false },
-      ok: { h: "3", rate: "4000", run: "3", act: "yes", reason: "ok", m: live, banner: false },
-      "bidir-off": { h: "2", rate: "4000", run: "0", act: "no", reason: "bidir-off", m: [U, U, U, U], banner: true },
-      "erpm-unavailable": { h: "2", rate: "4000", run: "0", act: "no", reason: "erpm-unavailable", m: [U, U, U, U], banner: false },
+      off: { h: "0", rate: "8000", run: "0", act: "no", reason: "off", m: [U, U, U, U], banner: false },
+      ok: { h: "3", rate: "8000", run: "3", act: "yes", reason: "ok", m: live, banner: false },
+      "bidir-off": { h: "2", rate: "8000", run: "0", act: "no", reason: "bidir-off", m: [U, U, U, U], banner: true },
+      "erpm-unavailable": { h: "2", rate: "8000", run: "0", act: "no", reason: "erpm-unavailable", m: [U, U, U, U], banner: false },
       "trimmed-1k": { h: "3", rate: "1000", run: "1", act: "yes", reason: "ok", m: live, banner: false },
       "old-fc": { h: "unknown", rate: "unknown", run: "unknown", act: "unknown", reason: "unknown", m: ["unknown", "unknown", "unknown", "unknown"], banner: false },
-      "off-erpm-live": { h: "0", rate: "4000", run: "0", act: "no", reason: "off", m: [U, U, U, U], banner: false },
-      "active-partial": { h: "3", rate: "4000", run: "3", act: "yes", reason: "ok", m: ["180", U, "179", "185"], banner: false },
+      "off-erpm-live": { h: "0", rate: "8000", run: "0", act: "no", reason: "off", m: [U, U, U, U], banner: false },
+      "active-partial": { h: "3", rate: "8000", run: "3", act: "yes", reason: "ok", m: ["180", U, "179", "185"], banner: false },
     };
     for (const s of RPM_FILTER_MOCK_SCENARIOS) {
       const t = await rig(s);

@@ -67,10 +67,10 @@ const float *gyro_latest_dps(void);
 bool gyro_sample(float dps[3]);
 bool gyro_is_healthy(void);
 void gyro_filter(const float in_dps[3], float out_dps[3]);
-/** Sample period for soft gyro LPF (seconds); set every PID cycle from the
- * scheduler's gyro_hz / pid_process_denom. */
+/** Sample period for the soft gyro LPF + notches (seconds); set on every
+ * gyro sample from the scheduler's 1 / gyro_hz (safety S1). */
 void gyro_filter_set_dt(float dt);
-/** Actual gyro-filter sample rate (1 / filter dt = PID cadence), Hz. */
+/** Actual gyro-filter sample rate (1 / filter dt = gyro rate), Hz. */
 float gyro_filter_sample_hz(void);
 /** Filter sample period in seconds (the exact dt the filters run with). */
 float gyro_filter_dt(void);

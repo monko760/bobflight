@@ -81,7 +81,7 @@ async function main(){
  });
  await test('MockGyroNotch: five scenarios produce the FW report shape',()=>{
   assert.deepEqual([...GYRO_NOTCH_MOCK_SCENARIOS],['off','ok','above-nyquist','invalid','old-fc']);
-  const exp={off:['4000','no','off'],ok:['4000','yes','ok'],'above-nyquist':['1000','no','above-nyquist'],invalid:['4000','no','invalid']};
+  const exp={off:['8000','no','off'],ok:['8000','yes','ok'],'above-nyquist':['1000','no','above-nyquist'],invalid:['8000','no','invalid']}; // S1: filter rate = gyro rate
   for(const [s,[hz,a,r]] of Object.entries(exp)){
    const m=new MockGyroNotch(s);const rep=parseFiltersReport(m.handle('filters',false));
    assert.equal(rep.report.sampleHz,hz,s);assert.deepEqual(rep.report.notches[1],{active:a,reason:r},s);assert.deepEqual(rep.report.notches[2],{active:'no',reason:'off'},s);

@@ -7,7 +7,9 @@ bidir-off / erpm-unavailable and every motor unavailable); harmonics > 0 never
 enables bidir; save + reboot keeps the values; the full dump fits the 2048-byte export buffer."""
 import os,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
-RATE='4000' if board=='kakute_f7_hdv' else '1000'
+# Safety S1: the RPM filter runs inside gyro_filter() on every gyro sample, so the
+# report shows the gyro rate (Kakute default 8000/2 -> 8000; was the PID rate 4000).
+RATE='8000' if board=='kakute_f7_hdv' else '1000'
 def run(cmds,reinit=False):
     env=dict(os.environ)
     if reinit: env['BOBFLIGHT_HOST_REBOOT_REINIT']='1'

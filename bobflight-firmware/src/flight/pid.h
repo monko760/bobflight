@@ -32,6 +32,16 @@ void pid_trace_enable(bool enabled);
 bool pid_trace_read(pid_trace_t *out);
 
 void pid_init(void);
+/* Safety S1 anti-windup: the mixer reports after every armed cascade whether
+ * it had to scale the PID part down to fit the motors in [min_throttle, 1].
+ * While set, each axis' I accumulator is frozen (it may still shrink toward
+ * zero). Cleared by pid_init(). */
+void pid_set_mixer_saturated(bool saturated);
+/* Safety S1: second-order D-term LPF (two first-order stages, still -3 dB at
+ * dterm_lpf_hz). Set once at boot: on when the gyro runs wide-band (8 kHz
+ * ODR / DLPF 0, Kakute at loop_rate_hz 4000 or 8000), off otherwise. */
+void pid_set_dterm_lpf_pt2(bool enabled);
+bool pid_dterm_lpf_pt2(void);
 void pid_set_dt(float dt);
 void pid_update(const float gyro_dps[3], const float setpoint_dps[3],
                 pid_axis_out_t *out);

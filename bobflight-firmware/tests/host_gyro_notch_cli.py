@@ -8,7 +8,7 @@ refused sets leave the value unchanged, the read-only `filters` report, and
 import os,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
 FAST=board=='kakute_f7_hdv'
-RATE='4000' if FAST else '1000'
+RATE='8000' if FAST else '1000'   # S1: the gyro filter runs on every gyro sample (8000/2 -> 8000 Hz)
 def run(cmds,reinit=False):
     env=dict(os.environ)
     if reinit: env['BOBFLIGHT_HOST_REBOOT_REINIT']='1'

@@ -218,3 +218,18 @@ void filter_notch_bank_apply(filter_notch_bank_t *b, float v[3])
         }
     }
 }
+
+void filter_gyro_chain_step(float lpf_state[3], filter_notch_bank_t *notch, float lpf_hz,
+                            float dt, const float in[3], float out[3])
+{
+    if (!lpf_state || !in || !out) {
+        return;
+    }
+    const float alpha = filter_lpf_alpha(lpf_hz, dt);
+    for (unsigned i = 0; i < 3; i++) {
+        out[i] = filter_lpf_step(&lpf_state[i], in[i], alpha);
+    }
+    if (notch) {
+        filter_notch_bank_apply(notch, out);
+    }
+}

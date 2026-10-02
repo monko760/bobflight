@@ -28,8 +28,9 @@ static filter_notch_bank_t g_notch;
 /* Optional post-filter after the notches (RPM filter, registered at init). */
 static gyro_post_filter_fn g_post_filter;
 static void gyro_notch_refresh(void);
-/* Until the first loop_filter() call: the scheduler's fallback PID period. */
-static float g_filter_dt = (float)SCHEDULER_DEFAULT_PID_DENOM / (float)SCHEDULER_DEFAULT_GYRO_HZ;
+/* Gyro sample period (safety S1: the chain runs on every gyro sample). Until
+ * the first loop_filter() call: the scheduler's fallback gyro period. */
+static float g_filter_dt = 1.f / (float)SCHEDULER_DEFAULT_GYRO_HZ;
 static sensor_calibration_t g_cal;
 static uint8_t g_sensor_id;
 static bool g_manual;
@@ -499,8 +500,8 @@ float gyro_filter_dt(void)
     return g_filter_dt;
 }
 
-/* Recompute notch coefficients when a notch setting or the filter dt (PID
- * cadence from the scheduler) changed; otherwise a handful of compares. The
+/* Recompute notch coefficients when a notch setting or the filter dt (gyro
+ * sample period from the scheduler) changed; otherwise a handful of compares. The
  * settings are never modified here: an invalid/above-nyquist notch is only
  * disabled at runtime and reported. Cooperative scheduler: the CLI and the
  * PID cascade never preempt each other, so the CLI may refresh too. */
@@ -538,19 +539,17 @@ void gyro_filter(const float in_dps[3], float out_dps[3])
      * then the registered post-filter (RPM notches).
      * Coefficients follow the loop rate (g_filter_dt) and the settings. */
     gyro_notch_refresh();
-#if BOBFLIGHT_HOST
+#if BOBFLIGHT_HOST && !BOBFLIGHT_HOST_GYRO_CHAIN
     /* Host inject/cascade tests expect bit-exact passthrough (the notch DSP
-     * and RPM DSP are covered by the filter_notch / rpm_filter host tests). */
+     * and RPM DSP are covered by the filter_notch / rpm_filter host tests).
+     * BOBFLIGHT_HOST_GYRO_CHAIN=1 (test gyro_post_filter_chain only) runs
+     * the target chain below on the host. */
     memcpy(out_dps, in_dps, 3 * sizeof(float));
 #else
     {
         const bf_config_t *cfg = config_get();
         const float fc = cfg ? cfg->gyro_lpf_hz : 320.f;
-        const float alpha = filter_lpf_alpha(fc, g_filter_dt);
-        for (unsigned i = 0; i < 3; i++) {
-            out_dps[i] = filter_lpf_step(&g_filter[i], in_dps[i], alpha);
-        }
-        filter_notch_bank_apply(&g_notch, out_dps);
+        filter_gyro_chain_step(g_filter, &g_notch, fc, g_filter_dt, in_dps, out_dps);
         if (g_post_filter) g_post_filter(out_dps, g_filter_dt);
     }
 #endif

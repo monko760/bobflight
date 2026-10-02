@@ -41,7 +41,7 @@ Also: DT `1/4000`, I limit ±50, output clamp ±0.4 with conditional I anti-wind
 
 AirMode (`airmode` 0/1, default **0**): when off, low throttle (`<0.05`) resets I while armed; when on, I keeps integrating at idle. Always resets on disarm.
 
-Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
+Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). **With airmode off there is no roll/pitch/yaw correction at `min_throttle`** (safety S1 mixer: motors may not go below it and the average may not rise above the throttle), and with `min_throttle` above 0.05 stick between 5 % and `min_throttle` is uncorrected; fly tests with `airmode 1` or the default 0.05 (`docs/SAFETY-NOISE.md`). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
 
 ## Soft LPF (`flight/filter`) — Filters R0 (schema 5)
 
@@ -60,7 +60,7 @@ y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
 | `gyro_lpf_hz` | `320` | `0` = off, else `10..1000` | Matches prior hardcoded α≈0.3345 at `dt=1/4000` (`α = dt/(τ+dt)`, `τ=1/(2π·fc)` → fc≈320 Hz) |
 | `dterm_lpf_hz` | `53` | `0` = off, else `10..1000` | Matches prior D-term τ=0.003 s (`fc=1/(2π·0.003)≈53 Hz) |
 
-Gyro LPF `dt` comes from the scheduler PID cadence (`pid_process_denom / gyro_hz`, default 2/8000 → 1/4000). D-term LPF uses the live `pid_set_dt` period (default `1/4000`).
+Gyro LPF `dt` is the gyro sample period (`1 / gyro_hz`, default 1/8000): since safety S1 `loop_filter` runs on every gyro sample, not only on PID cycles. D-term LPF uses the live `pid_set_dt` period (default `1/4000`); on 8 kHz-ODR gyros (Kakute at `loop_rate_hz` 4000/8000) it is two first-order stages, still -3 dB at `dterm_lpf_hz`. Mixer desaturation, I-term freeze and the upgrade note: `docs/SAFETY-NOISE.md`.
 
 Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 6, 188 bytes; 176–179 `gyro_lpf_hz`, 180–183 `dterm_lpf_hz`, 184–187 `pid_yaw_d`).
 
