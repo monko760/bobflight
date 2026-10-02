@@ -40,6 +40,22 @@ int main(int argc,char **argv){ config_init();blackbox_metadata_t meta={500,1000
   assert(!strstr(header,"bobflightIteration"));
   const char *names=strstr(header,"H Field I name:");assert(names);unsigned commas=0;for(const char *q=names;*q&&*q!='\n';q++)commas+=*q==',';assert(commas+1u==BLACKBOX_FIELD_COUNT);
   assert(strstr(names,",bobflightDropped,bobflightSchema,bobflightPidValid,bobflightGyroValid,bobflightRxFresh,bobflightOutputHealthy,eRPM[0],eRPM[1],eRPM[2],eRPM[3],bobflightTelemOk,bobflightFilterFlags,bobflightEvents,bobflightLoopCode,bobflightOverruns\n"));}
+ /* Standard `H motor_poles:` (BB1 QA F1): stock Explorer scales eRPM[] by it (value*200/motor_poles). Exactly one line,
+  * equal to the frozen config value (and to `H BobFlight motor_poles`), in the standard key group after the
+  * fixed-width rate block (after motor_pwm_protocol, before the BobFlight block and the field definitions).
+  * An invalid pole count omits it (Explorer default) and never blocks the log. */
+ {const char *std=strstr(header,"\nH motor_poles:14\n");assert(std);assert(!strstr(std+1,"\nH motor_poles:"));
+  const char *rate=strstr(header,"H BobFlight log_rate_hz:");assert(rate&&rate+BLACKBOX_RATE_BLOCK_BYTES<=std+1);
+  assert(strstr(header,"\nH motor_pwm_protocol:6\nH motor_poles:14\nH BobFlight rate_max_roll:"));
+  assert(std<strstr(header,"\nH BobFlight motor_poles:14\n")&&std<strstr(header,"H Field I name:"));
+  bf_config_t pc=*config_get();blackbox_metadata_t mp=meta;mp.config=&pc;char hp[4096];
+  pc.motor_poles=36.f;assert(blackbox_header(hp,sizeof hp,&mp)==h&&strstr(hp,"\nH motor_poles:36\n")&&strstr(hp,"\nH BobFlight motor_poles:36\n"));
+  pc.motor_poles=4.f;assert(blackbox_header(hp,sizeof hp,&mp)==h-2u&&strstr(hp,"\nH motor_poles:4\n")&&strstr(hp,"\nH BobFlight motor_poles:4\n"));
+  const size_t line=strlen("H motor_poles:14\n");
+  pc.motor_poles=13.f;assert(blackbox_header(hp,sizeof hp,&mp)==h-line&&!strstr(hp,"H motor_poles:")&&strstr(hp,"\nH BobFlight motor_poles:13\n"));
+  pc.motor_poles=0.f;assert(blackbox_header(hp,sizeof hp,&mp)==h-line-1u&&!strstr(hp,"H motor_poles:"));
+  pc.motor_poles=38.f;assert(blackbox_header(hp,sizeof hp,&mp)&&!strstr(hp,"H motor_poles:"));
+  pc.motor_poles=14.5f;assert(blackbox_header(hp,sizeof hp,&mp)&&!strstr(hp,"H motor_poles:"));}
  {blackbox_metadata_t mb=meta;char hb[4096];
   mb.board=NULL;assert(blackbox_header(hb,sizeof hb,&mb)&&strstr(hb,"\nH BobFlight board:unknown\n"));
   mb.board="";assert(blackbox_header(hb,sizeof hb,&mb)&&strstr(hb,"\nH BobFlight board:unknown\n"));
@@ -48,6 +64,7 @@ int main(int argc,char **argv){ config_init();blackbox_metadata_t meta={500,1000
   char rev[96];memset(rev,'R',95);rev[95]=0;char brd[64];memset(brd,'B',63);brd[63]=0;mb.revision=rev;mb.board=brd;mb.loop_hz=8000;mb.gyro_hz=8000;mb.pid_denom=1;
   bf_config_t wide=*config_get();float *fp[]={&wide.rate_max_roll,&wide.rate_max_pitch,&wide.rate_max_yaw,&wide.rate_expo,&wide.pid_roll_p,&wide.pid_roll_i,&wide.pid_roll_d,&wide.pid_pitch_p,&wide.pid_pitch_i,&wide.pid_pitch_d,&wide.pid_yaw_p,&wide.pid_yaw_i,&wide.pid_yaw_d,&wide.gyro_lpf_hz,&wide.gyro_notch1_hz,&wide.gyro_notch1_cutoff_hz,&wide.gyro_notch2_hz,&wide.gyro_notch2_cutoff_hz,&wide.rpm_filter_harmonics,&wide.rpm_filter_min_hz,&wide.rpm_filter_q_x100,&wide.motor_poles};
   for(unsigned k=0;k<sizeof fp/sizeof fp[0];k++){*fp[k]=-1.23456789e-30f;}
+  wide.motor_poles=36.f; /* widest: a valid pole count also writes the standard `H motor_poles:36` line (+7 B vs any invalid value) */
   mb.config=&wide;mb.rate_reason="auto-lowered-card-slow";mb.requested_hz=1000;mb.sample_hz=125;
   size_t hw=blackbox_header(hb,sizeof hb,&mb);assert(hw&&hw<sizeof hb);assert(strstr(hb,"\nH BobFlight board:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"));
   printf("schema 3 header: typical %zu B, worst case %zu B (session buffer 4096 B)\n",h,hw);

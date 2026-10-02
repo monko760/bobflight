@@ -83,6 +83,9 @@ def main():
                 "gyro_notch2_cutoff_hz", "rpm_filter_harmonics", "rpm_filter_min_hz",
                 "rpm_filter_q_x100", "motor_poles"):
         float(headers["BobFlight " + key])
+    # Standard key (stock Explorer RPM scaling) equals the BobFlight value (BB1 QA F1).
+    assert headers["motor_poles"] == "14", headers.get("motor_poles")
+    assert int(headers["motor_poles"]) == float(headers["BobFlight motor_poles"])
     assert len(frames) == 600, len(frames)
     for j, f in enumerate(frames):
         assert f["loopIteration"] == j * 2 and f["time"] == 10000 + j * 2000, j

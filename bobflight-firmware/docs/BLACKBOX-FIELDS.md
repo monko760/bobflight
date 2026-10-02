@@ -38,7 +38,7 @@ Signed fields use zigzag varints; unsigned fields use plain varints (`H Field I 
 ### eRPM (`eRPM[0..3]`)
 
 - The value is **electrical RPM divided by 100, truncated** (integer division). 12,399 eRPM logs as 123; anything below 100 eRPM logs as 0.
-- Mechanical RPM = `eRPM[m] × 100 / (motor_poles / 2)`. `motor_poles` is in the header. Mechanical Hz = that / 60.
+- Mechanical RPM = `eRPM[m] × 100 / (motor_poles / 2)`. `motor_poles` is in the header (standard `H motor_poles:` and `H BobFlight motor_poles:`). Mechanical Hz = that / 60. Stock Blackbox Explorer does this conversion itself from `H motor_poles:` (`eRPM × 200 / motor_poles` rpm).
 - **0 means no valid telemetry for that motor.** A motor whose telemetry is not `OK` (bidirectional DShot off, timeout, CRC/GCR failure or stale) logs 0. A motor can be OK and still report 0 (stopped motor); `bobflightTelemOk` tells these apart.
 - The source is the decoded bidirectional-DShot telemetry the RPM filter uses (`dshot_erpm()`), read once per logged frame.
 
@@ -97,7 +97,11 @@ Latch and clear rules:
 
 ## Header keys (schema 3)
 
-The file keeps its existing header lines, including the fixed 128-byte rate block in sector 0 that is patched in place on an auto-lower (`docs/BLACKBOX-THROUGHPUT.md`). Schema 3 adds the following lines after the PID gains:
+The file keeps its existing header lines, including the fixed 128-byte rate block in sector 0 that is patched in place on an auto-lower (`docs/BLACKBOX-THROUGHPUT.md`).
+
+Schema 3 also writes the standard Betaflight key `H motor_poles:<n>` right after `H motor_pwm_protocol` (after the rate block, before the BobFlight lines). It carries the same frozen value as `H BobFlight motor_poles`. Stock Blackbox Explorer reads it to turn `eRPM[]` into RPM; without it Explorer assumes 1 pole and shows RPM 14× too high on a 14-pole motor. It is written only for a valid pole count (even, 4..36, the `motor_poles` setting rule); an invalid stored value omits this one line and never blocks the log.
+
+Schema 3 adds the following lines after the PID gains:
 
 ```
 H BobFlight log_schema:3
@@ -121,7 +125,7 @@ H BobFlight units:...;eRPM=eRPM/100;events,flags=bits(docs/BLACKBOX-FIELDS.md)
 - **log_schema**: `3`. Every frame also carries `bobflightSchema = 3`.
 - **loop_rate_hz / gyro_hz / pid_denom**: the scheduler at session start. See the loop-code note above for changes during a session.
 - **Filter settings**: the saved/runtime values at session start. Configuration writes are refused while recording, so these values hold for the whole file. RPM `q_x100` is Q × 100, as in the CLI.
-- The worst-case header (95-character version, long board id, widest numbers) is 3,273 B. The session header buffer is 4,096 B (host test `blackbox_encode`). A typical header is about 2.9 KiB.
+- The worst-case header (95-character version, long board id, widest numbers, `motor_poles` 36) is 3,280 B. The session header buffer is 4,096 B (host test `blackbox_encode`). A typical header is about 2.9 KiB.
 
 ## Byte budget
 
@@ -181,7 +185,7 @@ One counting difference is deliberate: a loop that is not due is no longer valid
 
   Names, signedness and units are unchanged for every field that stays. A decoder that reads fields by position breaks from field 40 on: it would read `bobflightSchema` as `bobflightIteration` and every validity flag one slot off. Look fields up by name from the `H Field I name` header list (as Explorer does); such decoders keep working.
 - `bobflightSchema` is now 3, and the header carries `H BobFlight log_schema:3`. Check the header key, or the first frame, before you interpret the new fields.
-- New header keys: board, fw_version, loop/gyro/denom and filter settings (listed above). Existing header lines and the 128-byte rate block are unchanged.
+- New header keys: board, fw_version, loop/gyro/denom and filter settings (listed above), plus the standard `H motor_poles:` for stock Explorer's RPM display. Existing header lines and the 128-byte rate block are unchanged.
 - **Unchanged**: CLI keys, `blackbox status` (api 2) keys and values, the recorder rates (125/250/500/1000 Hz, default 500), the 64 KiB ring and file naming. The firmware version string is also unchanged in this change: tell builds apart by `H BobFlight log_schema:3`.
 - **Auto-rate fix**: the 1 % drop threshold is now measured against **due logging slots**, not against every PID loop. Before, at 8 kHz PID / 500 Hz, the threshold was effectively about 16 % of frames, so a struggling card kept dropping for longer before the rate halved. At a 1 kHz loop with 500 Hz logging it was 2 % of frames; it is now 1 %.
-- The repository's Explorer oracle script (`tests/verify_blackbox_explorer.cjs`) now expects 54 fields and schema 3. The in-repo clean-room decoder test (`tests/host_blackbox_decode.py`, CTest `blackbox_schema3_decode`) checks the header keys and all schema 3 fields round-trip.
+- The repository's Explorer oracle script (`tests/verify_blackbox_explorer.cjs`) now expects 54 fields and schema 3, checks that `H motor_poles:` equals the configured value, and checks Explorer's own eRPM-to-RPM display against `eRPM × 100 / (motor_poles / 2)`. The in-repo clean-room decoder test (`tests/host_blackbox_decode.py`, CTest `blackbox_schema3_decode`) checks the header keys and all schema 3 fields round-trip.

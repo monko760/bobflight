@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Independent stock-Explorer oracle for host_blackbox_card's 600-sample output.
- * Usage: NODE_PATH=<esbuild+semver modules> node this-file.cjs <viewer checkout> <file.bbl>
+ * Usage: NODE_PATH=<esbuild+semver+pinia+vue modules> node this-file.cjs <viewer checkout> <file.bbl>
  * The external GPL viewer is not vendored or linked into BobFlight firmware. */
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');
 const esbuild=require('esbuild');
@@ -29,7 +29,24 @@ try {
  assert(Math.abs(view.gyroRawToDegreesPerSecond(250)-25)<.00001);
  assert.equal(view.rcMotorRawToPctPhysical(0),0);assert.equal(view.rcMotorRawToPctPhysical(48),0);assert.equal(view.rcMotorRawToPctPhysical(2047),100);
  assert(Math.abs(view.rcMotorRawToPctPhysical(447)-100*399/1999)<1e-8);
+ // BB1 QA F1: the standard `H motor_poles:` header is present once, equals the config value (written as
+ // `H BobFlight motor_poles`), is parsed by Explorer, and Explorer's own eRPM presenter scales with it
+ // (value*200/motor_poles rpm). Without the line Explorer assumes 1 pole and shows RPM 14x too high.
+ const head=bytes.subarray(0,4096).toString(),std=head.match(/\nH motor_poles:(\d+)\n/),bf=head.match(/\nH BobFlight motor_poles:([0-9.]+)\n/);
+ assert(std,'standard H motor_poles header present');assert(bf,'H BobFlight motor_poles present');
+ assert.equal((head.match(/\nH motor_poles:/g)||[]).length,1);
+ const poles=Number(std[1]);assert.equal(poles,Number(bf[1]),'H motor_poles == configured motor_poles');assert.equal(poles,14,'card fixture: default motor_poles 14');
+ assert.equal(p.sysConfig.motor_poles,poles,'Explorer sysConfig.motor_poles from the standard key');
+ esbuild.buildSync({entryPoints:[path.join(viewer,'src','flightlog_fields_presenter.js')],outfile:path.join(tmp,'presenter.cjs'),bundle:true,format:'cjs',platform:'node',logLevel:'silent',external:['pinia','vue'],nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean)});
+ {const pinia=require('pinia');pinia.setActivePinia(pinia.createPinia());}
+ const pres=require(path.join(tmp,'presenter.cjs')),P=pres.FlightLogFieldPresenter||pres.default||pres;
+ for(const raw of [2000,123,1,0]){ // raw = eRPM/100 as logged; independent truth: mech RPM = eRPM / (poles/2)
+  const shown=P.decodeFieldToFriendly(view,'eRPM[0]',raw),m=shown.match(/^(\d+) rpm \/ ([0-9.]+) hz$/),rpm=raw*100/(poles/2);
+  assert(m,`presenter format: ${shown}`);assert.equal(m[1],rpm.toFixed(0),`eRPM raw ${raw}: ${shown}`);
+  assert(Math.abs(Number(m[2])-rpm/60)<=Math.max(0.1,rpm/60*1e-3),`eRPM raw ${raw} hz: ${shown}`);}
+ assert.equal(P.decodeFieldToFriendly(view,'eRPM[0]',2000).split(' / ')[0],'28571 rpm');
+ console.log(`motor_poles: H motor_poles:${poles} == H BobFlight motor_poles:${bf[1]}; Explorer eRPM[0] raw 2000 -> ${P.decodeFieldToFriendly(view,'eRPM[0]',2000)}`);
  const padded=decode(Buffer.concat([bytes,Buffer.alloc(512,0xff)]));assert.equal(padded.frames.length,600);assert.equal(padded.p.stats.totalCorruptFrames,0);
- console.log(`PASS stock Explorer ${pinned}: 600 frames, 54 fields (schema 3), direct recorded signals, zero corruption, EOF/padding, gyro conversion and DShot stop/mid/max physical percentage`);
+ console.log(`PASS stock Explorer ${pinned}: 600 frames, 54 fields (schema 3), direct recorded signals, zero corruption, EOF/padding, gyro conversion, DShot stop/mid/max physical percentage and eRPM -> RPM with H motor_poles`);
  console.log('Legacy computed rcCommands/axisError remain unsupported for BobFlight; use recorded setpoint and bobflightError. This does not test the graphical app or real hardware.');
 }finally{fs.rmSync(tmp,{recursive:true,force:true});}

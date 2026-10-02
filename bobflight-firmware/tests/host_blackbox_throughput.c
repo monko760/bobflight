@@ -368,8 +368,18 @@ int main(int argc,char **argv){
   assert(r.rate==125&&r.requested==REQ&&!strcmp(r.reason,"auto-lowered-card-slow")&&r.lowerings==(REQ==1000u?3u:2u));
   assert(r.dropped>0&&r.pct>0.0);
   size_t n=extract(file_buf,sizeof file_buf);(void)n;snprintf(want,sizeof want,"H BobFlight log_rate_hz:125 requested_hz:%u reason:auto-lowered-card-slow",(unsigned)REQ);assert(strstr((char*)file_buf,want));}
+ /* (e) Due-slot trigger (BB1 QA M20). 8000/1 at 500 Hz has 16 PID loops per logging slot, 32 at 250 Hz.
+  * The 1 % trigger counts due slots only, so a card that keeps losing a few % of due slots is halved again;
+  * counting every PID loop (the old formula) would see 1/16 or 1/32 of that and let it keep dropping.
+  * Deterministic virtual-time model: a 15 ms card halves twice (to 125 Hz), an 8 ms card halves after a few
+  * drops (the old formula: once to 250 Hz and still ~6 % dropping; 8 ms card ~175 drops before halving). */
+ if(REQ==500u){
+  card_model_t mild={"due-slot trigger card (15ms busy)",15000,400,0,0};secs=12;r=run(&loops[2],&mild,secs);report(&loops[2],&mild,&r,secs);check_status_contract(r.status);
+  assert(bbl.phase==BBS_DONE&&r.frames==r.accepted&&r.rate==125&&r.lowerings==2&&!strcmp(r.reason,"auto-lowered-card-slow"));
+  card_model_t near={"due-slot trigger card (8ms busy)",8000,400,0,0};r=run(&loops[2],&near,secs);report(&loops[2],&near,&r,secs);check_status_contract(r.status);
+  assert(bbl.phase==BBS_DONE&&r.rate==250&&r.lowerings==1&&r.dropped>0&&r.dropped<=50);}
  if(status_out)assert(!fclose(status_out));
- printf("PASS blackbox throughput model @ %u Hz requested: realistic-card drop matrix over 1000/1, 8000/2, 8000/1 (schema 3 frames, ring peak <= 32 KiB, gyro lateness <= 25 us%s); one threshold-card halving per loop with the header patched; harsh foreground; very slow card floors at 125 Hz; status api 2 contract\n",
+ printf("PASS blackbox throughput model @ %u Hz requested: realistic-card drop matrix over 1000/1, 8000/2, 8000/1 (schema 3 frames, ring peak <= 32 KiB, gyro lateness <= 25 us%s); one threshold-card halving per loop with the header patched; harsh foreground; very slow card floors at 125 Hz; due-slot auto-rate trigger (500 Hz build); status api 2 contract\n",
   (unsigned)REQ,REQ==1000u?"; 8000/1 honestly auto-lowers to 500 Hz":"");
  return 0;
 }

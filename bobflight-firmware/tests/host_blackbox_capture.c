@@ -47,6 +47,15 @@ int main(void){
  while(recorder_pop(&s));
  bb_capture_observe_ex(136000,raw,gyro,setpoint,&out,motor,NULL,false,1,1,true,false,true,&ctx);
  assert(recorder_pop(&s)&&s.events==lost&&s.dropped==1&&bb_capture_pending_events()==0);
+ /* Failsafe stage going DOWN is a transition too (BB1 QA M31): 1 -> 0, then 0 -> 2 -> 1. */
+ bb_capture_observe_ex(138000,raw,gyro,setpoint,&out,motor,NULL,false,1,0,true,false,true,&ctx);
+ assert(recorder_pop(&s)&&s.failsafe==0&&s.events==BB_EVENT_FAILSAFE_STAGE);
+ bb_capture_observe_ex(140000,raw,gyro,setpoint,&out,motor,NULL,false,1,2,true,false,true,&ctx);
+ assert(recorder_pop(&s)&&s.failsafe==2&&s.events==BB_EVENT_FAILSAFE_STAGE);
+ bb_capture_observe_ex(142000,raw,gyro,setpoint,&out,motor,NULL,false,1,1,true,false,true,&ctx);
+ assert(recorder_pop(&s)&&s.failsafe==1&&s.events==BB_EVENT_FAILSAFE_STAGE);
+ bb_capture_observe_ex(144000,raw,gyro,setpoint,&out,motor,NULL,false,1,1,true,false,true,&ctx);
+ assert(recorder_pop(&s)&&s.events==0); /* steady stage: no event */
  bb_capture_end();
  /* ctx NULL (legacy wrapper): schema 3 extras and loop code stay 0, arm/mode events still latch. */
  assert(bb_capture_begin(500,0));bb_capture_observe(0,raw,gyro,setpoint,&out,motor,rc,false,1,0,true,true,true);

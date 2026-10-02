@@ -65,7 +65,12 @@ size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
  }
  snprintf(t,sizeof t,"H looptime:%lu\n",(unsigned long)(1000000u/m->loop_hz));n=add(b,n,sizeof b,t);
  n=add(b,n,sizeof b,"H gyro.scale:30efe050\nH minthrottle:1000\nH maxthrottle:2000\nH motorOutput:48,2047\n"); snprintf(t,sizeof t,"H motor_pwm_protocol:%u\n",m->dshot_kbps==300?6:7);n=add(b,n,sizeof b,t);
- const bf_config_t *c=m->config; const float values[]={c->rate_max_roll,c->rate_max_pitch,c->rate_max_yaw,c->rate_expo,c->pid_roll_p,c->pid_roll_i,c->pid_roll_d,c->pid_pitch_p,c->pid_pitch_i,c->pid_pitch_d,c->pid_yaw_p,c->pid_yaw_i,c->pid_yaw_d}; const char *keys[]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo","pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d","pid_yaw_p","pid_yaw_i","pid_yaw_d"};
+ const bf_config_t *c=m->config;
+ /* Standard `H motor_poles:` (as Betaflight writes it): stock Explorer turns eRPM[] into RPM with
+  * value*200/motor_poles and assumes 1 pole without it (14x too high). Same frozen value as
+  * `H BobFlight motor_poles`; written only for a valid pole count (config rule), never blocks a log. */
+ if(config_rpm_value_valid("motor_poles",c->motor_poles)){snprintf(t,sizeof t,"H motor_poles:%u\n",(unsigned)c->motor_poles);n=add(b,n,sizeof b,t);}
+ const float values[]={c->rate_max_roll,c->rate_max_pitch,c->rate_max_yaw,c->rate_expo,c->pid_roll_p,c->pid_roll_i,c->pid_roll_d,c->pid_pitch_p,c->pid_pitch_i,c->pid_pitch_d,c->pid_yaw_p,c->pid_yaw_i,c->pid_yaw_d}; const char *keys[]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_expo","pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d","pid_yaw_p","pid_yaw_i","pid_yaw_d"};
  for(unsigned k=0;k<13;k++){if(!isfinite(values[k]))return 0;snprintf(t,sizeof t,"H BobFlight %s:%.9g\n",keys[k],(double)values[k]);n=add(b,n,sizeof b,t);}
  /* Schema 3 context. Configuration is frozen while recording (blackbox_cli.h),
   * so these stay true for the whole file; a loop-rate change mid-session is
