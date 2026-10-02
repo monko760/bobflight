@@ -111,3 +111,13 @@ real client allowlist with mock serial; passing a host firmware executable to
 `ui/scripts/test-receiver.cjs` additionally verifies actual firmware CLI readback.
 
 Public protocol reference: https://github.com/tbs-fpv/tbs-crsf-spec/blob/main/crsf.md
+
+## Report keys contract on main (after S1)
+
+S1 added `report_keys_contract`, which pins the `receiver` keys and order to the
+b77b845 capture. That golden is kept as the reference and is not re-captured: the
+contract now expects exactly `rx_link_stats`, `rx_link_lq`, `rx_loss_reason`, in
+that order, immediately before `receiver_end`, and nothing else new. Any other
+receiver key or order change still fails. (`receiver` is not part of
+`report_bytes_contract`; the values are locked by `test-receiver.cjs` against the
+real host build.)

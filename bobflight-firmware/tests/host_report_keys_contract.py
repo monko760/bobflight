@@ -16,6 +16,21 @@ REPORTS = ['status', 'filters', 'loop_rate', 'receiver', 'rpm_filter']
 SEP = 'zz_report_sep'                       # unknown command -> "unknown — try help"
 UNKNOWN = 'unknown \u2014 try help'
 GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'golden', 'report_keys_b77b845.json')
+# S2 (fix/crsf-link-loss, frozen spec): `receiver` gains exactly three keys,
+# rx_link_stats, rx_link_lq, rx_loss_reason, in that order, immediately before
+# receiver_end. The b77b845 golden is NOT re-captured: the expected key list is
+# the golden with exactly these three keys inserted at exactly that place, so
+# any other receiver key/order change still fails.
+S2_RECEIVER_LINK_KEYS = ['rx_link_stats', 'rx_link_lq', 'rx_loss_reason']
+
+def s2_expected_receiver(golden):
+    keys = golden.get('receiver')
+    if keys is None:
+        return golden
+    assert keys.count('receiver_end') == 1 and keys[-1] == 'receiver_end', keys
+    assert not set(S2_RECEIVER_LINK_KEYS) & set(keys), 'golden already has S2 keys'
+    print('NOTE receiver: expected = b77b845 keys + S2 rx_link_stats, rx_link_lq, rx_loss_reason right before receiver_end')
+    return dict(golden, receiver=keys[:-1] + S2_RECEIVER_LINK_KEYS + ['receiver_end'])
 
 def capture(exe):
     cmds = []
@@ -58,6 +73,7 @@ def main():
         return
     exe, board = sys.argv[1], sys.argv[2]
     golden = json.load(open(GOLDEN))[board]
+    golden = s2_expected_receiver(golden)
     got = capture(exe)
     notes = []
     for r in REPORTS:
