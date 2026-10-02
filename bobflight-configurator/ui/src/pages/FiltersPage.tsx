@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
 import { SETTINGS_KEYS, type SettingsKey } from "../protocol";
 import { ensureMockConnected } from "../protocol/ensureConnected";
@@ -26,6 +26,21 @@ import {
   type NotchDraft,
   type NotchSnapshot,
 } from "../filters/gyroNotch";
+import { isGateBusy } from "../protocol/commandGate";
+import {
+  RpmCancelled,
+  applyRpmSetting,
+  gated,
+  emptyRpmSnapshot,
+  readRpm,
+  rpmDirtyKeys,
+  rpmDraftFromView,
+  rpmDraftProblem,
+  rpmDraftValues,
+  rpmView,
+  type RpmDraft,
+  type RpmSnapshot,
+} from "../filters/rpmFilter";
 
 const FILTER_LABELS: Record<FilterKey, string> = {
   gyro_lpf_hz: "Gyro LPF (Hz)",
@@ -96,6 +111,38 @@ export function FiltersPage() {
     2: { enabled: false, center: "", cutoff: "" },
   });
   const [notchFcLine, setNotchFcLine] = useState<string | null>(null);
+  const [rpmSnap, setRpmSnap] = useState<RpmSnapshot>(emptyRpmSnapshot);
+  const [rpmDraft, setRpmDraft] = useState<RpmDraft>({ harmonics: "", minHz: "", q: "" });
+  const [rpmFcLine, setRpmFcLine] = useState<string | null>(null);
+  /**
+   * `getAllSettings` refused by the busy command gate (QA #60): the gate's message, shown verbatim.
+   * Not `final` while it is still being retried; `final` once every try was refused. Nothing was
+   * read from the FC, so values are "unknown" (`ready` stays false); this is never the local
+   * fallback.
+   */
+  const [settingsBusy, setSettingsBusy] = useState<{ message: string; final: boolean } | null>(null);
+  /**
+   * The current load finished reading the notch and RPM state from the FC. "Older firmware" is
+   * only said about that: never before or while reading (empty snapshots look like an older FC),
+   * never while the gate is busy, never behind the local fallback (QA #60).
+   */
+  const [fcRead, setFcRead] = useState(false);
+
+  /** Aborted on unmount: stops the RPM commands' busy-gate retries (QA #60). */
+  const rpmLife = useRef<AbortController | null>(null);
+  useEffect(() => { const c = new AbortController(); rpmLife.current = c; return () => c.abort(); }, []);
+  /** The running load: a newer load, a disconnect or unmount aborts it, which stops its gate retries. */
+  const loadCtl = useRef<AbortController | null>(null);
+  /** A disconnect cut a load short: read the FC again once it reconnects. */
+  const reloadOnConnect = useRef(false);
+
+  /** Re-read the RPM filter (`get` x4 + `rpm_filter`); inputs return to what the FC holds. */
+  const reloadRpm = useCallback(async (schema: number | null, signal?: AbortSignal) => {
+    const snap = await readRpm(host, signal ?? rpmLife.current?.signal);
+    setRpmSnap(snap);
+    setRpmDraft(rpmDraftFromView(rpmView(snap, schema)));
+    return snap;
+  }, [host]);
 
   /** Re-read the notch rows from the FC (`get` x4 + `filters` + `storage`). Never optimistic. */
   const reloadNotches = useCallback(async () => {
@@ -107,23 +154,62 @@ export function FiltersPage() {
   }, [host]);
 
   const load = useCallback(async () => {
+    loadCtl.current?.abort();
+    const life = rpmLife.current?.signal;
+    if (life?.aborted) return; // unmounted
+    const ctl = new AbortController();
+    loadCtl.current = ctl;
+    life?.addEventListener("abort", () => ctl.abort(), { once: true });
+    const signal = ctl.signal;
+    // While the gate refuses getAllSettings nothing is known about the FC: values unknown, no fallback.
+    const unknownFc = (message: string, final: boolean) => {
+      setNotchSnap(emptyNotchSnapshot());
+      setRpmSnap(emptyRpmSnapshot());
+      setRpmDraft({ harmonics: "", minHz: "", q: "" });
+      setUsingFallback(false);
+      setReady(false);
+      setFcRead(false);
+      setSettingsBusy({ message, final });
+    };
     setErr(null);
+    setFcRead(false);
     try {
       await ensureMockConnected(host);
-      const all = await host.getAllSettings();
+      let all: Record<string, string>;
+      try {
+        // Only the gate's own refusal is retried (nothing was sent); FC replies / transport errors are not.
+        all = await gated(() => host.getAllSettings(), signal, (m) => { if (!signal.aborted) unknownFc(m, false); });
+      } catch (e) {
+        if (signal.aborted || e instanceof RpmCancelled) return; // newer load, disconnect or unmount
+        if (!isGateBusy(e)) throw e;
+        unknownFc((e as Error).message, true); // still busy after the last try
+        return;
+      }
+      if (signal.aborted) return;
+      setSettingsBusy(null);
       const mapped = mapFiltersFromAll(all);
       setValues(mapped);
       setLoadedValues(mapped);
       setUsingFallback(false);
       setReady(true);
-      await reloadNotches();
+      const notches = await reloadNotches();
+      if (signal.aborted) return;
+      await reloadRpm(notches.schema, signal);
+      if (signal.aborted) return;
+      setFcRead(true);
+      if (loadCtl.current === ctl) loadCtl.current = null;
     } catch (e) {
+      if (e instanceof RpmCancelled || signal.aborted) return; // unmounted, newer load or disconnect
+      if (loadCtl.current === ctl) loadCtl.current = null;
+      setSettingsBusy(null);
       try {
         const fb = loadFiltersViaFallback();
         setValues(fb);
         setLoadedValues(fb);
         // No FC behind the fallback: notch rows stay unknown (never 0/off).
         setNotchSnap(emptyNotchSnapshot());
+        setRpmSnap(emptyRpmSnapshot());
+        setRpmDraft({ harmonics: "", minHz: "", q: "" });
         setUsingFallback(true);
         setReady(true);
         setErr(
@@ -134,11 +220,31 @@ export function FiltersPage() {
         setReady(false);
       }
     }
-  }, [host, reloadNotches]);
+  }, [host, reloadNotches, reloadRpm]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A disconnect stops a running load (and its gate retries); the FC is read again on reconnect.
+  useEffect(() => {
+    let last = host.getConnectionStatus?.() ?? null;
+    return host.onStatus?.((s) => {
+      if (s === last) return;
+      last = s;
+      if (s === "connected") {
+        if (reloadOnConnect.current) { reloadOnConnect.current = false; void load(); }
+        return;
+      }
+      const running = loadCtl.current;
+      if (running && !running.signal.aborted) {
+        running.abort();
+        loadCtl.current = null;
+        reloadOnConnect.current = true;
+        setSettingsBusy(null);
+      }
+    });
+  }, [host, load]);
 
   function updateField(key: FilterKey, raw: string) {
     const n = Number(raw);
@@ -154,6 +260,7 @@ export function FiltersPage() {
     setErr(null);
     setMsg(null);
     setNotchFcLine(null);
+    setRpmFcLine(null);
     for (const key of FILTER_KEYS) {
       if (!validateFilterHz(values[key])) {
         // Client-side check (not an FC reply), so it must not read like FW text.
@@ -168,6 +275,16 @@ export function FiltersPage() {
       const problem = draftProblem(drafts[r.index]);
       if (problem) {
         setErr(`Notch ${r.index}: ${problem}`);
+        return;
+      }
+    }
+    const rpmNow = rpmView(rpmSnap, notchSnap.schema);
+    const rpmChanges = rpmDirtyKeys(rpmNow, rpmDraft);
+    {
+      // Client-side hint only; the FC re-checks and its line wins.
+      const problem = rpmDraftProblem(rpmNow, rpmDraft);
+      if (problem) {
+        setErr(`RPM filter: ${problem}`);
         return;
       }
     }
@@ -213,12 +330,30 @@ export function FiltersPage() {
           return;
         }
       }
+      // RPM filter: each set is followed by `get <key>` and `rpm_filter` (never optimistic).
+      let rs = rpmSnap;
+      const rpmValues = rpmDraftValues(rpmDraft);
+      for (const k of rpmChanges) {
+        const n = rpmValues[k];
+        if (n === null) continue;
+        const res = await applyRpmSetting(host, rs, k, n, rpmLife.current?.signal);
+        rs = res.snap;
+        setRpmSnap(rs);
+        if (!res.ok) {
+          // Show the FC's refusal exactly; inputs show what the FC holds now.
+          setRpmFcLine(res.fcLine);
+          setRpmDraft(rpmDraftFromView(rpmView(rs, notchSnap.schema)));
+          await reloadNotches();
+          return;
+        }
+      }
       // Re-read after the sets (no optimistic update) before saving.
       await reloadNotches();
       await host.saveSettings();
       setMsg("saved");
       await load();
     } catch (e) {
+      if (e instanceof RpmCancelled) return; // unmounted mid-Save: nothing more is sent
       setErr(settingsErrorMessage(e));
     }
   }
@@ -250,7 +385,17 @@ export function FiltersPage() {
   const rows = notchRows(notchSnap);
   const supported = notchesSupported(notchSnap);
   const lpfDirty = FILTER_KEYS.some((k) => values[k] !== loadedValues[k]);
-  const pageDirty = lpfDirty || rows.some((r) => draftDirty(r, drafts[r.index]));
+  const rpm = rpmView(rpmSnap, notchSnap.schema);
+  const rpmDirty = rpmDirtyKeys(rpm, rpmDraft);
+  const rpmHint = rpmDirty.length ? rpmDraftProblem(rpm, rpmDraft) : null;
+  const pageDirty = lpfDirty || rows.some((r) => draftDirty(r, drafts[r.index])) || rpmDirty.length > 0;
+
+  function updateRpmDraft(patch: Partial<RpmDraft>) {
+    setRpmDraft((prev) => ({ ...prev, ...patch }));
+    setMsg(null);
+    setErr(null);
+    setRpmFcLine(null);
+  }
 
   function updateDraft(i: GyroNotchIndex, patch: Partial<NotchDraft>) {
     setDrafts((prev) => ({ ...prev, [i]: { ...prev[i], ...patch } }));
@@ -277,15 +422,16 @@ export function FiltersPage() {
     <div className="panel">
       <h2>Filters</h2>
       <p className="muted">
-        Gyro and D-term low-pass plus two manual gyro notches (FW schema 8). Protocol{" "}
+        Gyro and D-term low-pass, two manual gyro notches (FW schema 8) and the RPM filter (FW schema 9). Protocol{" "}
         <code>get/set/save/defaults</code>. Keys: {protocolKeys.join(", ") || FILTER_KEYS.join(", ")}.
         Range: <code>0</code> = off; else <code>10..1000</code> Hz. Defaults{" "}
         <code>320</code> / <code>53</code>.
       </p>
 
-      {!ready && !err && (
+      {!ready && !err && !settingsBusy?.final && (
         <p className="muted">Connecting / loading settings…</p>
       )}
+      {settingsBusy && <p className="fail" data-testid="settings-busy">{settingsBusy.message}</p>}
 
       <fieldset className="tuning-axis">
         <legend>Low-pass</legend>
@@ -298,11 +444,12 @@ export function FiltersPage() {
               </label>
               <input
                 id={key}
-                type="number"
+                type={settingsBusy ? "text" : "number"}
                 step="1"
                 min={0}
                 max={1000}
-                value={values[key]}
+                disabled={!!settingsBusy}
+                value={settingsBusy ? "unknown" : values[key]}
                 onChange={(e) => updateField(key, e.target.value)}
               />
             </div>
@@ -316,7 +463,7 @@ export function FiltersPage() {
           Centre <code>0</code> = off, else <code>20..1000</code> Hz; cutoff (lower -3 dB edge) must be
           above 0 and below the centre. The FC checks the centre against the running loop rate and
           reports the result below; its reply is shown as sent.
-          {!supported && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
+          {fcRead && !supported && !usingFallback && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
         </p>
         <table style={{ width: "100%", marginTop: "0.75rem" }}>
           <thead>
@@ -373,8 +520,77 @@ export function FiltersPage() {
         {notchFcLine && <p className="fail" data-testid="notch-fc-line">{notchFcLine}</p>}
       </fieldset>
 
+      <fieldset className="tuning-axis" data-testid="rpm-filter">
+        <legend>RPM filter</legend>
+        <p className="muted">
+          Notches that follow each motor from bidirectional DShot eRPM. Harmonics <code>0</code> = off,
+          else <code>1..3</code>; minimum <code>50..200</code> Hz; Q <code>1..10</code> (sent ×100 as{" "}
+          <code>rpm_filter_q_x100</code>). The FC trims harmonics to the loop rate and reports the state
+          and each motor&apos;s tracked frequency below, exactly as sent.
+          {fcRead && !rpm.supported && !rpm.busy && !usingFallback && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
+        </p>
+        {rpm.busy && <p className="fail" data-testid="rpm-busy">{rpm.busy}</p>}
+        <div className="tuning-grid">
+          <div className="tuning-field">
+            <label htmlFor="rpm_filter_harmonics">Harmonics <span className="muted">(rpm_filter_harmonics)</span></label>
+            <input id="rpm_filter_harmonics" aria-label="rpm_filter_harmonics" type="text" inputMode="numeric"
+              disabled={!rpm.supported} value={rpm.supported ? rpmDraft.harmonics : rpm.harmonics}
+              onChange={(e) => updateRpmDraft({ harmonics: e.target.value })} />
+          </div>
+          <div className="tuning-field">
+            <label htmlFor="rpm_filter_min_hz">Minimum (Hz) <span className="muted">(rpm_filter_min_hz)</span></label>
+            <input id="rpm_filter_min_hz" aria-label="rpm_filter_min_hz" type="text" inputMode="numeric"
+              disabled={!rpm.supported} value={rpm.supported ? rpmDraft.minHz : rpm.minHz}
+              onChange={(e) => updateRpmDraft({ minHz: e.target.value })} />
+          </div>
+          <div className="tuning-field">
+            <label htmlFor="rpm_filter_q">Q <span className="muted">(rpm_filter_q_x100 = Q × 100)</span></label>
+            <input id="rpm_filter_q" aria-label="rpm_filter_q" type="text" inputMode="decimal"
+              disabled={!rpm.supported} value={rpm.supported ? rpmDraft.q : rpm.q}
+              onChange={(e) => updateRpmDraft({ q: e.target.value })} />
+          </div>
+          <div className="tuning-field">
+            <span>Motor poles <span className="muted">(motor_poles, set on the Motors tab)</span></span>
+            <code data-rpm="motor_poles">{rpm.motorPoles}</code>
+          </div>
+        </div>
+        <table style={{ width: "100%", marginTop: "0.75rem" }}>
+          <thead>
+            <tr><th>Filter rate (Hz)</th><th>Harmonics running</th><th>Filter active</th><th>Filter reason</th></tr>
+          </thead>
+          <tbody>
+            <tr data-rpm-status="1">
+              <td><code>{rpm.sampleHz}</code></td>
+              <td><code>{rpm.harmonicsActive}</code></td>
+              <td><code>{rpm.active}</code></td>
+              <td><code>{rpm.reason}</code></td>
+            </tr>
+          </tbody>
+        </table>
+        {rpm.bidirOff && (
+          <p className="banner-warn" data-testid="rpm-bidir-off">
+            Bidirectional DShot is off, so no motor is tracked. See the Motors tab to enable it; this page never enables it.
+          </p>
+        )}
+        <table style={{ width: "100%", marginTop: "0.75rem" }}>
+          <thead>
+            <tr><th>Motor</th><th>Tracked (Hz)</th></tr>
+          </thead>
+          <tbody>
+            {rpm.motors.map((m) => (
+              <tr key={m.motor} data-rpm-motor={m.motor}>
+                <td>M{m.motor}</td>
+                <td><code>{m.hz}</code></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rpmHint && <p className="fail" data-testid="rpm-hint">{rpmHint}</p>}
+        {rpmFcLine && <p className="fail" data-testid="rpm-fc-line">{rpmFcLine}</p>}
+      </fieldset>
+
       <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="button" className="primary" onClick={() => void onSave()}>
+        <button type="button" className="primary" disabled={!!settingsBusy} onClick={() => void onSave()}>
           Save
         </button>
         <button type="button" className="ghost" onClick={onReload}>

@@ -25,6 +25,8 @@
 static float g_acc[3], g_latest[3], g_filter[3];
 /* Manual gyro notches (2 x 3 axes), in series after the soft gyro LPF. */
 static filter_notch_bank_t g_notch;
+/* Optional post-filter after the notches (RPM filter, registered at init). */
+static gyro_post_filter_fn g_post_filter;
 static void gyro_notch_refresh(void);
 /* Until the first loop_filter() call: the scheduler's fallback PID period. */
 static float g_filter_dt = (float)SCHEDULER_DEFAULT_PID_DENOM / (float)SCHEDULER_DEFAULT_GYRO_HZ;
@@ -492,6 +494,11 @@ float gyro_filter_sample_hz(void)
     return 1.f / g_filter_dt;
 }
 
+float gyro_filter_dt(void)
+{
+    return g_filter_dt;
+}
+
 /* Recompute notch coefficients when a notch setting or the filter dt (PID
  * cadence from the scheduler) changed; otherwise a handful of compares. The
  * settings are never modified here: an invalid/above-nyquist notch is only
@@ -527,12 +534,13 @@ void gyro_filter(const float in_dps[3], float out_dps[3])
     if (!in_dps || !out_dps) {
         return;
     }
-    /* Same point in the chain for both: LPF, then the notches in series.
+    /* Same point in the chain for both: LPF, then the notches in series,
+     * then the registered post-filter (RPM notches).
      * Coefficients follow the loop rate (g_filter_dt) and the settings. */
     gyro_notch_refresh();
 #if BOBFLIGHT_HOST
     /* Host inject/cascade tests expect bit-exact passthrough (the notch DSP
-     * itself is covered by the filter_notch host test). */
+     * and RPM DSP are covered by the filter_notch / rpm_filter host tests). */
     memcpy(out_dps, in_dps, 3 * sizeof(float));
 #else
     {
@@ -543,8 +551,14 @@ void gyro_filter(const float in_dps[3], float out_dps[3])
             out_dps[i] = filter_lpf_step(&g_filter[i], in_dps[i], alpha);
         }
         filter_notch_bank_apply(&g_notch, out_dps);
+        if (g_post_filter) g_post_filter(out_dps, g_filter_dt);
     }
 #endif
+}
+
+void gyro_set_post_filter(gyro_post_filter_fn fn)
+{
+    g_post_filter = fn;
 }
 
 #if BOBFLIGHT_HOST

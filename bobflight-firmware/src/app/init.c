@@ -10,6 +10,7 @@
 #include "board/pins_generated.h"
 #include "drivers/dshot.h"
 #include "drivers/gyro.h"
+#include "drivers/rpm_filter_gyro.h"
 #include "drivers/rx.h"
 #include "drivers/cli.h"
 #include "drivers/persist.h"
@@ -257,6 +258,7 @@ bool app_init(void)
 
     /* 5 SPI/EXTI/TIM objects — drivers no-op if invalid pins */
     gyro_init();
+    rpm_filter_gyro_install(); /* RPM notches after the manual notches */
     rx_init();
 
     persist_init();

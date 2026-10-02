@@ -6,6 +6,7 @@ import { BenchController, benchBlockReason, MOTOR_POSITIONS, MAX_PULSE_PERCENT, 
 import { storageBlocked } from "../motors/motorsStorage";
 
 import { browserPoleStorage, readMotorPoles, storeMotorPoles, validMotorPoles } from "../motors/motorPoles";
+import { MotorPolesPanel } from "../motors/MotorPolesPanel";
 
 export function MotorsPage() {
   const { host, postFlashGate } = useHost();
@@ -103,16 +104,18 @@ export function MotorsPage() {
           <p className="muted">Choose only a rate your ESC supports. Changes are read back from the controller then retained after reboot with Save to controller. Motors must be stationary before switching.</p>
           {capability && !capability.dshot && <p className="banner-warn">Rate selection is unavailable on this firmware. No rate is assumed.</p>}
         </section>
-        <section className="motor-option-panel"><h3>Motor pole count</h3>
-          <label htmlFor="motor-poles">Magnetic poles · all four motors</label>
-          <div className="row"><input id="motor-poles" type="number" min="2" max="60" step="2" value={poleDraft}
-            onChange={e => setPoleDraft(e.target.value)} aria-invalid={!validMotorPoles(Number(poleDraft))} />
-            <button disabled={!validMotorPoles(Number(poleDraft))} onClick={savePoles}>Save pole count</button></div>
-          <p>Current: <strong>{poleCount} poles · {poleCount / 2} pole pairs</strong></p>
-          {!validMotorPoles(Number(poleDraft)) && <p className="banner-warn">Enter an even whole number from 2 to 60.</p>}
-          <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
-          {poleMessage && <p role="status">{poleMessage}</p>}
-        </section>
+        <MotorPolesPanel host={host} blocked={storageBlocked(state) || postFlashGate} fallback={
+          <section className="motor-option-panel"><h3>Motor pole count</h3>
+            <label htmlFor="motor-poles">Magnetic poles · all four motors</label>
+            <div className="row"><input id="motor-poles" type="number" min="2" max="60" step="2" value={poleDraft}
+              onChange={e => setPoleDraft(e.target.value)} aria-invalid={!validMotorPoles(Number(poleDraft))} />
+              <button disabled={!validMotorPoles(Number(poleDraft))} onClick={savePoles}>Save pole count</button></div>
+            <p>Current: <strong>{poleCount} poles · {poleCount / 2} pole pairs</strong></p>
+            {!validMotorPoles(Number(poleDraft)) && <p className="banner-warn">Enter an even whole number from 2 to 60.</p>}
+            <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This firmware has no <code>motor_poles</code> setting, so the preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
+            {poleMessage && <p role="status">{poleMessage}</p>}
+          </section>
+        } />
         <section className="motor-option-panel"><h3>eRPM & bidirectional DShot</h3>
           <p><strong>M1–M4 eRPM telemetry (R0c).</strong> When bidirectional DShot is enabled on the controller and a motor's telem is OK, that cell shows live electrical RPM. Otherwise the cell stays unavailable (<code>erpm_mN=none</code>) — never an invented zero.</p>
           <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Poll <code>get erpm_m1</code>…<code>m4</code> and <code>get dshot_telem_mN</code> only.</p>
