@@ -9,8 +9,11 @@
  * Noise: roll A*sin(183 Hz) + A/2*sin(291 Hz), pitch A*sin(197 Hz) +
  * A/2*sin(305 Hz), yaw A/2*sin(211 Hz), A = 15 / 30 dps; 1 s per case,
  * first 100 ms skipped. Pass criteria per case (1000/1, 8000/2, 8000/1 x
- * throttle 0.10 / 0.20 x A 15 / 30):
- *   |mean motor command - noiseless mean| <= 0.005  (b77b845: +0.04..+0.17)
+ * throttle 0.10 / 0.20 / 0.95 x A 15 / 30):
+ *   mean motor command == thr - (step-3 shift) within 1.5 DShot LSB
+ *   thr 0.10/0.20: |mean - noiseless mean| <= 0.005  (b77b845: +0.04..+0.17)
+ *   thr 0.95 (QA F2): mean <= noiseless mean + 1 LSB (no climb), and the
+ *     drop <= 4 x the b77b845 clamp's top loss on the same PID outputs
  *   cycles where the motors are not thr + s*u (hard clipping) <= 0.5 %
  *   motor samples at a rail <= the old per-motor clamp on the same PID output
  *   every gyro sample filtered, at dt = 1/gyro_hz; still armed.
@@ -108,12 +111,12 @@ static void setup(uint32_t g,uint32_t d,bool pt2){
  controls(0,-1);run_us(2000);controls(0,1);run_us(2000);REQUIRE(arming_state()==ARM_ARMED);
 }
 static double dec(unsigned a){return a?(a-48)/1999.0:0;}
-typedef struct {double mean,mean_sq,rail,legacy_rail,hard,legacy_hard,scale;unsigned long filt,samp;bool armed,dt_ok;} stats_t;
+typedef struct {double mean,mean_sq,rail,legacy_rail,hard,legacy_hard,scale,pred_mean,legacy_hi_loss;unsigned long filt,samp;bool armed,dt_ok;} stats_t;
 static const float TWO_PI=6.28318531f;
 static stats_t run_case(uint32_t g,uint32_t d,float amp,float thr,bool pt2){
  setup(g,d,pt2);
  const double mt=config_get()->min_throttle,lsb=1.0/1999.0;
- double sum=0,sq=0,scale=0;unsigned long n=0,rail=0,lrail=0,cyc=0,hard=0,lhard=0,scn=0;
+ double sum=0,sq=0,scale=0,pred=0,lhi=0;unsigned long n=0,rail=0,lrail=0,cyc=0,hard=0,lhard=0,scn=0;
  unsigned long last=scheduler_stats()->pid_runs;uint64_t t0=now;pid_trace_enable(true);
  unsigned long g0=0,f0=0;bool dt_ok=true;
  while(now-t0<1000000){
@@ -146,9 +149,14 @@ static stats_t run_case(uint32_t g,uint32_t d,float amp,float thr,bool pt2){
   if(res>2.5*lsb)hard++;
   if(lclip)lhard++;
   if(uu>1e-12){scale+=s;scn++;}
+  /* Step 3 model: the common level is thr minus the shift that brings the
+   * highest (already scaled) motor down to 1, nothing else (airmode off). */
+  {double umax=u[0];for(unsigned i=1;i<4;i++)if(u[i]>umax)umax=u[i];
+   const double ex=T+s*umax-1;pred+=T-(ex>0?ex:0);
+   for(unsigned i=0;i<4;i++){const double e=T+u[i]-1;if(e>0)lhi+=e/4;}}   /* b77b845 clamp: top loss */
   cyc++;
  }
- stats_t st={sum/n,sq/n,(double)rail/n,(double)lrail/n,(double)hard/cyc,(double)lhard/cyc,scn?scale/scn:1,
+ stats_t st={sum/n,sq/n,(double)rail/n,(double)lrail/n,(double)hard/cyc,(double)lhard/cyc,scn?scale/scn:1,pred/cyc,lhi/cyc,
   filtered-f0,samples-g0,arming_state()==ARM_ARMED,dt_ok};
  return st;
 }
@@ -188,26 +196,39 @@ int main(int argc,char **argv){
 #endif
  }
  const uint32_t rates[3][2]={{1000,1},{8000,2},{8000,1}};
- const float amps[2]={15.f,30.f},thrs[2]={0.10f,0.20f};
+ const float amps[2]={15.f,30.f},thrs[3]={0.10f,0.20f,0.95f};
 #ifdef NOISE_BASELINE
  const bool modes[1]={false};const unsigned nmodes=1;
 #else
  const bool modes[2]={true,false};const unsigned nmodes=table?2:1;   /* shipped Kakute: D-term 2nd order */
 #endif
- if(table)puts("rate     dterm thr  amp | mean    d_mean  mean^2  | rail%  old-clamp-rail% | hardclip% old-clamp% | authority | filtered/samples");
- for(unsigned md=0;md<nmodes;md++)for(unsigned ri=0;ri<3;ri++)for(unsigned ti=0;ti<2;ti++){
+ if(table)puts("rate     dterm thr  amp | mean    d_mean  mean^2  | rail%  old-clamp-rail% | hardclip% old-clamp% | authority | step3-model old-top-loss | filtered/samples");
+ for(unsigned md=0;md<nmodes;md++)for(unsigned ri=0;ri<3;ri++)for(unsigned ti=0;ti<3;ti++){
   const uint32_t g=rates[ri][0],d=rates[ri][1];
   const stats_t q=run_case(g,d,0.f,thrs[ti],modes[md]);
   for(unsigned ai=0;ai<2;ai++){
    const stats_t s=run_case(g,d,amps[ai],thrs[ti],modes[md]);
-   if(table)printf("%4u/%u   %s  %.2f %2.0f  | %.4f %+.4f %.4f  | %5.1f  %5.1f           | %5.1f    %5.1f      | %.3f     | %lu/%lu\n",
-     g,d,modes[md]?"PT2":"PT1",thrs[ti],amps[ai],s.mean,s.mean-q.mean,s.mean_sq,100*s.rail,100*s.legacy_rail,100*s.hard,100*s.legacy_hard,s.scale,s.filt,s.samp);
+   if(table)printf("%4u/%u   %s  %.2f %2.0f  | %.4f %+.4f %.4f  | %5.1f  %5.1f           | %5.1f    %5.1f      | %.3f     | %.4f      %.4f       | %lu/%lu\n",
+     g,d,modes[md]?"PT2":"PT1",thrs[ti],amps[ai],s.mean,s.mean-q.mean,s.mean_sq,100*s.rail,100*s.legacy_rail,100*s.hard,100*s.legacy_hard,s.scale,s.pred_mean,s.legacy_hi_loss,s.filt,s.samp);
 #ifndef NOISE_BASELINE
+   const double LSB=1.0/1999.0;      /* one DShot throttle step */
    REQUIRE(s.armed);
-   REQUIRE(fabs(s.mean-q.mean)<=0.005);
    REQUIRE(s.hard<=0.005);
    REQUIRE(s.rail<=s.legacy_rail);
    REQUIRE(s.filt==s.samp&&s.dt_ok);   /* every gyro sample filtered at 1/gyro_hz */
+   /* The mean is exactly the documented rule: thr minus the step-3 shift
+    * (1.5 LSB: DShot quantisation of the decoded commands and of the fit). */
+   REQUIRE(fabs(s.mean-s.pred_mean)<=1.5*LSB);
+   if(thrs[ti]<0.5f){
+    REQUIRE(fabs(s.mean-q.mean)<=0.005);   /* low throttle: no climb, no sag */
+   }else{
+    /* High throttle (QA F2): noise may only LOWER the mean (never a climb),
+     * and by at most 4x what the b77b845 per-motor clamp lost at the top on
+     * the same PID outputs: the shift is the largest motor excess, the old
+     * loss was the average of the four excesses, and max <= sum = 4 x mean. */
+    REQUIRE(s.mean<=q.mean+LSB);
+    REQUIRE(thrs[ti]-s.mean<=4.0*s.legacy_hi_loss+LSB);
+   }
 #endif
   }
  }
@@ -216,7 +237,7 @@ int main(int argc,char **argv){
  if(table)printf("I term after 300 ms: saturated (thr 0.10, 100 dps) %.6f, unsaturated (thr 0.50, 2 dps) %.6f\n",i_sat,i_free);
  REQUIRE(fabsf(i_sat)<0.00005f);   /* frozen: accumulator < 0.05 (~2 cycles of 100 dps * 250 us); unfrozen it would reach 0.05 (I_LIMIT 50) */
  REQUIRE(i_free>0.0004f);          /* integrates normally: accumulator ~ 2..4 dps * 0.3 s */
- puts("PASS noise_saturation: 15/30 dps HF noise at throttle 0.10/0.20 on 1000/1, 8000/2, 8000/1 keeps the mean motor command within 0.005 of noiseless, no hard clipping, rail time <= old clamp, every gyro sample filtered; I-term frozen while saturated");
+ puts("PASS noise_saturation: 15/30 dps HF noise at throttle 0.10/0.20 on 1000/1, 8000/2, 8000/1 keeps the mean motor command within 0.005 of noiseless; at 0.95 it only lowers it (step-3 shift, <= 4x old top loss); mean == rule within 1.5 LSB; no hard clipping, rail time <= old clamp, every gyro sample filtered; I-term frozen while saturated");
 #endif
  return 0;
 }

@@ -41,7 +41,7 @@ Also: DT `1/4000`, I limit ±50, output clamp ±0.4 with conditional I anti-wind
 
 AirMode (`airmode` 0/1, default **0**): when off, low throttle (`<0.05`) resets I while armed; when on, I keeps integrating at idle. Always resets on disarm.
 
-Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
+Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). **With airmode off there is no roll/pitch/yaw correction at `min_throttle`** (safety S1 mixer: motors may not go below it and the average may not rise above the throttle), and with `min_throttle` above 0.05 stick between 5 % and `min_throttle` is uncorrected; fly tests with `airmode 1` or the default 0.05 (`docs/SAFETY-NOISE.md`). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
 
 ## Soft LPF (`flight/filter`) — Filters R0 (schema 5)
 

@@ -84,6 +84,44 @@ static int desat_rule(void)
     return 0;
 }
 
+/* Boundary tests (QA N1, mutations M23 top bound 1.0 -> 1.01 and M24 spread
+ * threshold 1 - mt -> 1): exactly at, just below and just above each bound.
+ * Roll r + pitch q gives u = (-r+q, -r-q, r+q, r-q): umax = r+q, span =
+ * 2(r+q), four different motor levels, so a clamp of one motor changes the
+ * shape (pure roll would clamp two motors symmetrically and hide it). */
+static int roll_case(float mt,float thr,float r,float q,float want_s,float want_level,bool want_sat,const char *what)
+{
+    float m[4];pid_axis_out_t p={r,q,0.f};
+    if(!config_set_key("min_throttle",mt)) return fail("boundary: set mt");
+    mixer_update(&p,thr,m);
+    const float s=shape_scale(&p,m,want_level);
+    if(s<0.f||fabsf(s-want_s)>1e-5f){fprintf(stderr,"%s: s=%g want %g m=%g %g %g %g\n",what,(double)s,(double)want_s,(double)m[0],(double)m[1],(double)m[2],(double)m[3]);return fail(what);}
+    if(sat_flag!=want_sat){fprintf(stderr,"%s: sat=%d\n",what,sat_flag);return fail(what);}
+    for(int i=0;i<4;i++)if(m[i]<mt-1e-6f||m[i]>1.f+1e-6f) return fail(what);
+    return 0;
+}
+static int boundary_rules(void)
+{
+    /* Top bound (step 3, thr + umax > 1), mt 0.05, thr 0.75. */
+    if(roll_case(0.05f,0.75f,0.25f,0.f, 1.f,0.75f,false,"top bound exactly at 1.0: no shift, highest motor == 1")) return 1;
+    if(roll_case(0.05f,0.75f,0.249f,0.f,1.f,0.75f,false,"top bound just below (0.999): no shift")) return 1;
+    if(roll_case(0.05f,0.75f,0.251f,0.f,1.f,0.749f,false,"top bound just above (1.001): shift down 0.001, full differential")) return 1;
+    {float m[4];pid_axis_out_t p={0.251f,0.f,0.f};mixer_update(&p,0.75f,m);
+     if(!near(m[2],1.f)||!near(m[3],1.f)||!near(mean4(m),0.749f)) return fail("top bound just above: highest motors exactly 1, mean 0.749");}
+    /* Spread threshold (step 1, span > 1 - mt), mt 0.125 so 1 - mt = 0.875 exactly. */
+    if(roll_case(0.125f,0.5625f,0.3125f,0.125f,1.f,0.5625f,false,"spread exactly 1-mt (0.875): no scale, motors span [mt,1]")) return 1;
+    if(roll_case(0.125f,0.5625f,0.312f, 0.125f,1.f,0.5625f,false,"spread just below 1-mt (0.874): no scale")) return 1;
+    /* Just above (0.876) at thr 0.6: scale 0.875/0.876, then shift down so the
+     * motors span exactly [0.125, 1]. Without step 1 (threshold 1) the shift
+     * would push the low motors to 0.124 and clip them. */
+    {const float s=0.875f/0.876f,lvl=1.f-s*0.438f;
+     if(roll_case(0.125f,0.6f,0.313f,0.125f,s,lvl,true,"spread just above 1-mt (0.876): scale (1-mt)/span, then shift")) return 1;
+     float m[4];pid_axis_out_t p={0.313f,0.125f,0.f};mixer_update(&p,0.6f,m);
+     if(!near(m[1],0.125f)||!near(m[2],1.f)) return fail("spread just above: lowest motor exactly at mt, highest at 1");}
+    if(!config_set_key("min_throttle",0.05f)) return fail("boundary: restore mt");
+    return 0;
+}
+
 int main(void)
 {
     float motors[MIXER_MOTOR_COUNT];
@@ -126,11 +164,12 @@ int main(void)
     }
 
     if (desat_rule()) return 1;
+    if (boundary_rules()) return 1;
 
     /* Range reject */
     if (config_set_key("min_throttle", 0.25f)) return fail("mt>0.2 should fail");
     if (config_set_key("min_throttle", -0.01f)) return fail("mt<0 should fail");
 
-    puts("PASS host_mixer_idle: min_throttle stick+post-mix floor; S1 desaturation (low-side scale, span scale, high-side shift, mean <= commanded, shape kept, airmode shift-up only when enabled) + saturation flag");
+    puts("PASS host_mixer_idle: min_throttle stick+post-mix floor; S1 desaturation (low-side scale, span scale, high-side shift, mean <= commanded, shape kept, airmode shift-up only when enabled) + saturation flag; top-bound and spread-threshold boundaries (at / just below / just above)");
     return 0;
 }

@@ -250,6 +250,17 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_noise_saturation_test m)
   add_test(NAME noise_saturation COMMAND bobflight_noise_saturation_test --table)
   set_tests_properties(noise_saturation PROPERTIES TIMEOUT 120)
+  # QA F3: the RPM post-filter runs inside the gyro chain, per gyro sample (real gyro.c target chain).
+  add_executable(bobflight_gyro_post_filter_chain_test tests/host_gyro_post_filter_chain.c
+    src/drivers/gyro.c src/drivers/sensor_calibration.c
+    src/sched/scheduler.c src/sched/tasks.c
+    src/drivers/rx.c src/drivers/crsf.c src/drivers/dshot.c
+    src/flight/arming.c src/flight/failsafe.c src/flight/attitude.c
+    src/flight/config.c src/flight/pid.c src/flight/filter.c src/flight/rates.c
+    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c)
+  target_compile_definitions(bobflight_gyro_post_filter_chain_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_HOST_GYRO_CHAIN=1)
+  target_link_libraries(bobflight_gyro_post_filter_chain_test m)
+  add_test(NAME gyro_post_filter_chain COMMAND bobflight_gyro_post_filter_chain_test)
   # Real app_init (init.c) picks the D-term filter order from the configured gyro ODR.
   add_executable(bobflight_init_dterm_order_test tests/host_init_dterm_order.c src/app/init.c
     src/flight/pid.c src/flight/filter.c src/flight/config.c src/sched/loop_rate_setting.c)

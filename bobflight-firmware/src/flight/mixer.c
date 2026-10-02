@@ -67,6 +67,9 @@ void mixer_update(const pid_axis_out_t *pid, float throttle, float motor_out[MIX
      *  2. If thr + umin < mt, scale every u[i] by (thr - mt) / -umin. The
      *     low side is never fixed by raising throttle: clipping must not
      *     push the average thrust above the commanded throttle.
+     *     Consequence (airmode off): at thr == mt the scale is 0, i.e. NO
+     *     roll/pitch/yaw correction at min_throttle, and with mt > 0.05 none
+     *     for stick between 5 % and mt (stick is floored to mt above).
      *     Exception, only when the user enabled airmode: shift all four
      *     motors up by mt - (thr + umin) instead (airmode keeps full
      *     authority at idle by design; airmode is off by default).

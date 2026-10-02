@@ -539,9 +539,11 @@ void gyro_filter(const float in_dps[3], float out_dps[3])
      * then the registered post-filter (RPM notches).
      * Coefficients follow the loop rate (g_filter_dt) and the settings. */
     gyro_notch_refresh();
-#if BOBFLIGHT_HOST
+#if BOBFLIGHT_HOST && !BOBFLIGHT_HOST_GYRO_CHAIN
     /* Host inject/cascade tests expect bit-exact passthrough (the notch DSP
-     * and RPM DSP are covered by the filter_notch / rpm_filter host tests). */
+     * and RPM DSP are covered by the filter_notch / rpm_filter host tests).
+     * BOBFLIGHT_HOST_GYRO_CHAIN=1 (test gyro_post_filter_chain only) runs
+     * the target chain below on the host. */
     memcpy(out_dps, in_dps, 3 * sizeof(float));
 #else
     {

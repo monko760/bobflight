@@ -49,10 +49,30 @@ samples reached nothing at all.
    commanded throttle. The 5 % idle rule is unchanged: below 5 % stick with
    airmode off the PID is reset to zero, so the mixer has nothing to scale
    and nothing new happens there.
+
+   **Warning: with airmode off there is NO roll/pitch/yaw correction at
+   `min_throttle`.** At throttle = `min_throttle` no motor may go lower and
+   the average may not go higher, so step 2 scales the correction to zero:
+   all four motors sit at `min_throttle` and nothing corrects the attitude.
+   Above it the correction can grow only as fast as the room below the
+   motors: at throttle t the largest downward correction is
+   t - `min_throttle`. b77b845 still corrected there through the motors that
+   went up (and that is what made it climb on noise). If `min_throttle` is
+   raised above 0.05 (allowed up to 0.2), stick between 5 % and
+   `min_throttle` gets no correction at all: the PID runs, but nothing
+   reaches the motors. QA repro: `min_throttle` 0.15, stick 0.10, constant
+   disturbance: the quad drifts to -49 dps uncorrected (b77b845 held
+   -21 dps, `airmode 1` holds -13 dps). There is no small code fix that keeps
+   the no-climb rule: with every motor at or above `min_throttle` and the
+   average at or below a throttle of `min_throttle`, every motor must equal
+   `min_throttle`. **Fly tests with `airmode 1`, or keep `min_throttle` at
+   the default 0.05.**
 3. **I-term anti-windup on mixer saturation.** When step 1 or 2 had to scale
    the PID down, the mixer tells the PID (`pid_set_mixer_saturated`). On the
    next PID cycle no axis may grow its I accumulator in size; it may still
    shrink toward zero. The flag is cleared on every PID reset (disarm, idle).
+   The freeze applies to all three axes whenever the mixer scaled, even if
+   only one axis caused it (a yaw saturation also holds roll and pitch I).
    The existing freeze at the PID output limit (0.4) is unchanged.
 4. **Second-order D-term filter on 8 kHz gyros.** When the gyro runs wide-band
    (8 kHz output, sensor DLPF 0: Kakute F7 HDV at `loop_rate_hz` 4000 or
@@ -128,12 +148,55 @@ lost). Before = b77b845 sources with the same test (`-DNOISE_BASELINE`).
 
 Noiseless mean cmd^2 is 0.0099 (thr 0.10) and 0.0398 (thr 0.20). On b77b845
 at 8000/2 only 3601 of 7201 gyro samples were filtered; now all are. The
-test asserts, for every row: mean within 0.005 of noiseless, hard clipping
-at most 0.5 %, time at a rail no more than the old clamp would give on the
-same PID output, every gyro sample filtered at 1 / gyro rate, still armed.
+test asserts, for every row: the mean equals the rule (throttle minus the
+step-3 shift, within 1.5 DShot steps), mean within 0.005 of noiseless at
+throttle 0.10 / 0.20, hard clipping at most 0.5 %, time at a rail no more
+than the old clamp would give on the same PID output, every gyro sample
+filtered at 1 / gyro rate, still armed.
 It also checks the I-term freeze (100 dps error the mixer cannot deliver at
 throttle 0.10: I term 0.000015 after 300 ms; normal 2 dps error at 0.50:
 0.0009) and that the shared chain applies a configured notch.
+
+### High throttle (throttle 0.95, QA F2)
+
+Noise now lowers the average motor command at full throttle more than
+b77b845 did. Same test and noise, throttle 0.95 (noiseless mean 0.9496).
+"Drop" is noiseless mean minus mean; "authority" is the share of the
+requested correction the motors deliver (shape kept or not).
+
+| rate, D filter | A dps | drop before | drop after | authority before | after |
+|---|---|---|---|---|---|
+| 8000/2, PT2 (Kakute default) | 15 | 0.077 | 0.125 | 61 %, shape lost | 100 % |
+| 8000/2, PT2 (Kakute default) | 30 | 0.153 | 0.296 | 56 %, shape lost | 99 % |
+| 8000/1, PT2 | 15 | 0.082 | 0.131 | 60 %, shape lost | 100 % |
+| 8000/1, PT2 | 30 | 0.158 | 0.306 | 55 %, shape lost | 99 % |
+| 1000/1, PT1 (tmotor, Kakute at 1000) | 15 | 0.058 | 0.190 | 63 %, shape lost | 100 % |
+| 1000/1, PT1 (tmotor, Kakute at 1000) | 30 | 0.133 | 0.366 | 57 %, shape lost | 91 % |
+
+Before = b77b845 (first-order D everywhere). Why, from the code: step 3
+(`mixer.c`) shifts all four motors down by the largest excess over 1, so the
+full correction is kept. b77b845 cut only the motors above 1, which lowered
+the average by a quarter of each excess but also lost about 40 % of the
+correction and its direction. The shift is the largest of the four excesses
+and the old loss was their average, so the new drop is at most 4 x the old
+loss on the same PID output (measured 3.2-3.6 x). A higher gyro rate passes
+more 150-300 Hz noise into D (a 1 kHz loop's derivative and sampling damp
+it), which is why 8000/x rows drop more than the old 1000/1 row; the
+second-order D filter halves the drop at 8 kHz (8000/2, 15 dps: 0.125 with
+it, 0.255 with first order). On a 1 kHz board the sensor's own 42 Hz DLPF
+removes most of this noise before the firmware sees it, so the 1000/1 rows
+overstate it there.
+
+Acceptable for S1, in our view: it is never a climb, attitude control is kept
+in full, and common flight-controller mixers make the same trade at the top
+(keep the correction, lower the average). The cost is real: with heavy
+high-frequency noise a full-throttle punch-out climbs less (Kakute default,
+15 dps: average 0.83 instead of 0.95; 30 dps: 0.65). Treat it as a noise
+problem showing up as lost thrust: check motor and frame noise before
+high-throttle tests. The test bounds come from the rule, not from these
+numbers: the mean is never above noiseless + 1 DShot step (no climb), it
+equals throttle minus the step-3 shift within 1.5 steps, and the drop is at
+most 4 x b77b845's top loss on the same PID output (+1 step).
 
 No regression in the audit experiments: RX loss still disarms 251 ms after
 the last frame at 1000/1, 8000/2, 8000/1 and with a mid-loss step to 1000/1
@@ -148,8 +211,15 @@ migrated or overwritten.
 
 * **All boards, mixer:** where a correction used to be clipped, it is now
   scaled down (low throttle) or the throttle is lowered (near full
-  throttle). Expect less roll/pitch/yaw authority right at low throttle in
-  hard manoeuvres, and no more throttle-dependent climb from noise.
+  throttle). No more throttle-dependent climb from noise.
+* **All boards, airmode off: NO correction at `min_throttle`.** At
+  throttle = `min_throttle` the motors give no roll/pitch/yaw correction at
+  all, and above it the correction is limited to throttle - `min_throttle`.
+  With `min_throttle` above 0.05, stick between 5 % and `min_throttle` is
+  completely uncorrected (QA: `min_throttle` 0.15, stick 0.10 drifts to
+  -49 dps). Fly tests with `airmode 1` or the default `min_throttle` 0.05.
+* **All boards, full throttle with noise:** the average drops more than
+  before (see "High throttle" above) while the correction is kept.
 * **All boards, I term:** stops growing while the mixer is scaling the PID.
 * **Airmode users (`airmode 1`):** at the low end the four motors are now
   shifted up together, which keeps the full correction; before, only the
@@ -183,11 +253,20 @@ migrated or overwritten.
 
 ## Tests
 
-* `noise_saturation` (host, real cascade): table above, `--table` prints it.
+* `noise_saturation` (host, real cascade): tables above (throttle 0.10,
+  0.20 and 0.95), `--table` prints them.
 * `pid_s1_antiwindup_dterm` (host): I freeze and unwind rules, PT2 off by
   default, -3 dB at `dterm_lpf_hz`, 1.9x / 2.7x quieter at 200 / 300 Hz.
 * `mixer_idle` (host): each desaturation step, mean never above throttle,
-  shape kept, airmode shift-up only when enabled, saturation flag.
+  shape kept, airmode shift-up only when enabled, saturation flag, and the
+  top bound (motor 1.0) and spread threshold (`1 - min_throttle`) exactly
+  at, just below and just above.
+* `gyro_post_filter_chain` (host, real `gyro.c` chain, real scheduler and
+  tasks): the RPM post-filter (#60) runs inside `gyro_filter()` after the
+  low-pass and notches, once per gyro sample, at dt = 1 / gyro rate, and its
+  output is the filtered gyro (8000/2, 8000/1, 1000/1). `gyro.c` gets a
+  test-only switch, `BOBFLIGHT_HOST_GYRO_CHAIN`, that runs the target chain
+  on the host for this test; other builds are unchanged.
 * `loop_dt_follows_rate` (host): one filter update per gyro sample at
   1 / gyro rate; PID dt unchanged.
 * `report_keys_contract` (host, real binary, every board): `status`,
