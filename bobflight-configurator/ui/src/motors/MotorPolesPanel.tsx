@@ -18,7 +18,7 @@
  * retries, so nothing is sent for an unmounted panel.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { rpmValueProblem, type RpmFilterReportResult } from "../protocol";
+import { rpmValueProblem } from "../protocol";
 import { RpmCancelled, applyRpmSetting, emptyRpmSnapshot, readRpmKey, readRpmReport, type RpmHost, type RpmReadResult, type RpmSnapshot } from "../filters/rpmFilter";
 
 export function MotorPolesPanel({ host, fallback, blocked = false }: { host: RpmHost; fallback: ReactNode; blocked?: boolean }) {
@@ -32,7 +32,7 @@ export function MotorPolesPanel({ host, fallback, blocked = false }: { host: Rpm
 
   const reload = useCallback(async (signal: AbortSignal) => {
     let value: RpmReadResult;
-    let report: RpmFilterReportResult | null;
+    let report: RpmSnapshot["report"];
     try {
       value = await readRpmKey(host, "motor_poles", signal);
       report = value.kind === "value" ? await readRpmReport(host, signal) : null;

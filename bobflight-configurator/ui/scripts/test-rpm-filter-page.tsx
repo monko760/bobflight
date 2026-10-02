@@ -491,15 +491,27 @@ async function main() {
    * recorded in `refused` (nothing sent), what reached the FC is in `ops`. `latencyMs` models
    * the serial round trip so a poll burst really holds the gate. `grabAfterSet` makes another
    * command take the gate right after a set completes (before the panel's `get`);
-   * `grabAfterGet` does the same right after `get motor_poles` (before `rpm_filter`). */
-  async function gatedHost(scenario: RpmFilterMockScenario, o: RigOpts & { latencyMs?: number; grabAfterSet?: number; grabAfterGet?: number } = {}) {
+   * `grabAfterGet` does the same right after `get motor_poles` (before `rpm_filter`).
+   * `grabAfter` takes the gate once, right after the named command completes (e.g. `storage`, the
+   * Filters page's last notch read, so only the RPM reads meet the busy gate); held until
+   * `grab.release()` (or `ms`). */
+  async function gatedHost(scenario: RpmFilterMockScenario, o: RigOpts & { latencyMs?: number; grabAfterSet?: number; grabAfterGet?: number;
+    grabAfter?: { op: string; ms?: number } } = {}) {
     const h = await mockHost(scenario, o);
     const gate = new CommandGate(() => 1);
     const refused: string[] = [];
     const inner = h.host;
+    const grab: { release: () => void; done: Promise<unknown> } = { release: () => {}, done: Promise.resolve() };
+    let grabbed = false;
     const g = <T,>(label: string, work: () => Promise<T>, stop = false): Promise<T> =>
       gate.run(async () => { if (o.latencyMs) await sleep(o.latencyMs); return work(); }, stop)
-        .catch((e: unknown) => { if (isGateBusy(e)) refused.push(label); throw e; });
+        .then((r) => {
+          if (o.grabAfter && !grabbed && label === o.grabAfter.op) {
+            grabbed = true; const held = holdGate("get erpm_m4"); Object.assign(grab, held);
+            if (o.grabAfter.ms !== undefined) setTimeout(held.release, o.grabAfter.ms);
+          }
+          return r;
+        }, (e: unknown) => { if (isGateBusy(e)) refused.push(label); throw e; });
     /** Hold the gate like an in-flight poll command; returns release + the command's promise. */
     const holdGate = (label = "get erpm_m1") => { const release = h.hold(label); const done = inner.sendCommand(label as CliCommand).catch(() => "");
       const p = g(label, () => done); return { release, done: p }; };
@@ -528,8 +540,21 @@ async function main() {
         return typeof v === "function" ? v.bind(target) : v;
       },
     }) as unknown as MockBobFlightHost;
-    return { ...h, host, gate, refused, holdGate };
+    return { ...h, host, gate, refused, holdGate, grab };
   }
+  /** The real FiltersPage on a (gated) host. */
+  function mountFilters(host: MockBobFlightHost): Root {
+    (globalThis as Record<string, unknown>).__setupTestHost = {
+      host, connectionStatus: "connected", version: "BobFlight test", status: null,
+      refreshStatus: async () => {}, pollAfterConnect: async () => {}, setLastError: () => {}, postFlashGate: false,
+    };
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<FiltersPage />));
+    return root;
+  }
+  const rpmSection = () => visibleText(byAttr("data-testid", "rpm-filter")[0]);
+  const rpmInputs = ["rpm_filter_harmonics", "rpm_filter_min_hz", "rpm_filter_q"];
+  const rpmOps = (ops: string[]) => ops.filter((op) => /rpm_filter|motor_poles/.test(op));
   const fallbackEl = <p data-testid="browser-poles">browser preference</p>;
   const count = (xs: string[], x: string) => xs.filter((y) => y === x).length;
 
@@ -693,7 +718,97 @@ async function main() {
     await t.mock.disconnect();
   });
 
+  await test("real gate: disconnect stops the panel's retries; reconnect reads the FC (QA #60)", async () => {
+    const t = await gatedHost("ok");
+    const poll = t.holdGate("get erpm_m1");
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
+    assert.ok(await waitFor(() => count(t.refused, "get motor_poles") >= 2, 1000));
+    await t.mock.disconnect();
+    const tries = count(t.refused, "get motor_poles");
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.ok(count(t.refused, "get motor_poles") <= tries, `no retry after disconnect: ${tries} -> ${count(t.refused, "get motor_poles")}`);
+    poll.release(); await poll.done;
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.ok(!t.ops.includes("get motor_poles") && !t.ops.includes("rpm_filter"), `nothing sent after disconnect: ${JSON.stringify(t.ops)}`);
+    assert.equal(poles(), "reading…", "no value, no busy line, no fallback while disconnected");
+    assert.equal(testId("motor-poles-busy"), null);
+    assert.equal(testId("browser-poles"), null);
+    await t.mock.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+    assert.ok(await waitFor(() => poles() === "14", 1500), `re-read after reconnect: ${poles()} ops=${JSON.stringify(t.ops)}`);
+    assert.deepEqual(rpmOps(t.ops), ["get motor_poles", "rpm_filter"], "only the reconnect's read reached the FC");
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: Filters RPM reads busy for every try -> 'unknown' + the gate's message, not 'older firmware' (QA #60)", async () => {
+    const t = await gatedHost("ok", { grabAfter: { op: "storage" } });
+    const root = mountFilters(t.host);
+    const budget = RPM_GATE_ATTEMPTS * RPM_GATE_DELAY_MS + 1500;
+    assert.ok(await waitFor(() => testId("rpm-busy") !== null, budget), `busy line shown: refused=${t.refused.length} ${rpmSection()}`);
+    assert.equal(testId("rpm-busy"), GATE_BUSY_MESSAGE);
+    assert.ok(!/older firmware/.test(rpmSection()), `not reported as an older FC: ${rpmSection()}`);
+    for (const k of rpmInputs) { assert.equal(input(k).value, "unknown", k); assert.ok(isDisabled(input(k)), `${k} read-only`); }
+    assert.equal(count(t.refused, "get rpm_filter_harmonics"), RPM_GATE_ATTEMPTS, "bounded: exactly RPM_GATE_ATTEMPTS tries");
+    assert.deepEqual(t.refused.filter((r) => r !== "get rpm_filter_harmonics"), [], "the other RPM reads are not tried once one stayed busy");
+    assert.deepEqual(rpmOps(t.ops), [], "no RPM read reached the FC");
+    t.grab.release(); await t.grab.done;
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: Filters rpm_filter report busy for every try -> busy line, not 'older firmware' (QA #60)", async () => {
+    const t = await gatedHost("ok", { grabAfter: { op: "get motor_poles" } });
+    const root = mountFilters(t.host);
+    const budget = RPM_GATE_ATTEMPTS * RPM_GATE_DELAY_MS + 1500;
+    assert.ok(await waitFor(() => testId("rpm-busy") !== null, budget), `busy line shown: refused=${t.refused.length} ${rpmSection()}`);
+    assert.equal(testId("rpm-busy"), GATE_BUSY_MESSAGE);
+    assert.ok(!/older firmware/.test(rpmSection()), `not reported as an older FC: ${rpmSection()}`);
+    assert.equal(count(t.refused, "rpm_filter"), RPM_GATE_ATTEMPTS);
+    assert.ok(!t.ops.includes("rpm_filter"), "the report never reached the FC");
+    for (const k of rpmInputs) assert.ok(isDisabled(input(k)), `${k} read-only`);
+    t.grab.release(); await t.grab.done;
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: a real older FC behind a briefly busy gate still says 'older firmware', no busy line (QA #60)", async () => {
+    const t = await gatedHost("old-fc", { grabAfter: { op: "storage", ms: 300 } });
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => t.ops.includes("rpm_filter"), 2500), `RPM reads finished: ${JSON.stringify(t.ops)}`);
+    await sleep(50);
+    assert.ok(t.refused.includes("get rpm_filter_harmonics"), `the RPM read met the busy gate: ${JSON.stringify(t.refused)}`);
+    assert.ok(/This FC does not report the RPM filter \(older firmware\)/.test(rpmSection()), rpmSection());
+    assert.equal(testId("rpm-busy"), null);
+    for (const k of rpmInputs) { assert.equal(input(k).value, "unknown", k); assert.ok(isDisabled(input(k)), `${k} read-only`); }
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: a real older FC whose RPM reads stay busy still says 'older firmware', no busy line (QA #60)", async () => {
+    const t = await gatedHost("old-fc", { grabAfter: { op: "storage" } });
+    const root = mountFilters(t.host);
+    const budget = RPM_GATE_ATTEMPTS * RPM_GATE_DELAY_MS + 1500;
+    assert.ok(await waitFor(() => count(t.refused, "get rpm_filter_harmonics") >= RPM_GATE_ATTEMPTS, budget), `RPM reads exhausted: ${t.refused.length}`);
+    await sleep(100);
+    assert.ok(/This FC does not report the RPM filter \(older firmware\)/.test(rpmSection()), `schema 8 from storage wins over the busy gate: ${rpmSection()}`);
+    assert.equal(testId("rpm-busy"), null);
+    for (const k of rpmInputs) { assert.equal(input(k).value, "unknown", k); assert.ok(isDisabled(input(k)), `${k} read-only`); }
+    t.grab.release(); await t.grab.done;
+    root.unmount(); await t.mock.disconnect();
+  });
+
+  await test("real gate: Filters unmount stops the RPM retries (nothing sent afterwards) (QA #60)", async () => {
+    const t = await gatedHost("ok", { grabAfter: { op: "storage" } });
+    const root = mountFilters(t.host);
+    assert.ok(await waitFor(() => count(t.refused, "get rpm_filter_harmonics") >= 2, 2500), `RPM read refused: ${JSON.stringify(t.refused)}`);
+    root.unmount();
+    const tries = t.refused.length;
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.ok(t.refused.length <= tries, `no retry after unmount: ${tries} -> ${t.refused.length}`);
+    t.grab.release(); await t.grab.done;
+    await sleep(3 * RPM_GATE_DELAY_MS);
+    assert.deepEqual(rpmOps(t.ops), [], `nothing sent after unmount: ${JSON.stringify(t.ops)}`);
+    await t.mock.disconnect();
+  });
+
   console.log(`PASS RPM filter render: ${passed} tests`);
 }
-const guard = setTimeout(() => { console.error("timeout"); process.exit(1); }, 60000);
+const guard = setTimeout(() => { console.error("timeout"); process.exit(1); }, 120000);
 main().then(() => clearTimeout(guard)).catch((e) => { clearTimeout(guard); console.error(e); process.exitCode = 1; });

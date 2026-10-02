@@ -17,7 +17,9 @@
  * line, a malformed value, "unknown key") or any other error is never retried,
  * so an accepted set is never sent again. Still refused after the last try:
  * a read is `busy` (shown "unknown" with the gate's message, never malformed
- * or "older FC"); a set returns the gate's message like any other error. An
+ * or "older FC"; the report too, and the view carries it as `busy` so the
+ * Filters tab never calls a busy FC "older firmware"); a set returns the
+ * gate's message like any other error. An
  * aborted `signal` (unmount, newer read) stops the retries: RpmCancelled is
  * thrown and nothing more is sent.
  */
@@ -37,11 +39,13 @@ export interface RpmHost {
   getConnectionStatus?(): string;
 }
 
-/** A `get` result, or `busy`: the command gate stayed busy for every try, so nothing was read. */
-export type RpmReadResult = RpmGetResult | { kind: "busy"; message: string };
+/** The command gate stayed busy for every try, so nothing was read. */
+export type RpmBusy = { kind: "busy"; message: string };
+/** A `get` result, or `busy`. */
+export type RpmReadResult = RpmGetResult | RpmBusy;
 export interface RpmSnapshot {
   values: Record<RpmFilterKey, RpmReadResult | null>;
-  report: RpmFilterReportResult | null;
+  report: RpmFilterReportResult | RpmBusy | null;
 }
 export function emptyRpmSnapshot(): RpmSnapshot {
   return { values: { rpm_filter_harmonics: null, rpm_filter_min_hz: null, rpm_filter_q_x100: null, motor_poles: null }, report: null };
@@ -84,29 +88,43 @@ export async function readRpmKey(host: RpmHost, key: RpmFilterKey, signal?: Abor
     return /unknown key/.test(msg) ? { kind: "unsupported" } : { kind: "malformed", raw: msg };
   }
 }
-/** The parsed report; null when missing (older FC) or the gate stayed busy (shown "unknown"). */
-export async function readRpmReport(host: RpmHost, signal?: AbortSignal): Promise<RpmFilterReportResult | null> {
+/** The parsed report; `busy` when the gate stayed busy; null when the FC gave no report (older FC). */
+export async function readRpmReport(host: RpmHost, signal?: AbortSignal): Promise<RpmFilterReportResult | RpmBusy | null> {
   try { return parseRpmFilterReport(await gated(() => host.sendCommand("rpm_filter"), signal)); } catch (e) {
     if (e instanceof RpmCancelled) throw e;
-    return null;
+    return isGateBusy(e) ? { kind: "busy", message: e instanceof Error ? e.message : String(e) } : null;
   }
 }
-/** `get` for the four keys, then the `rpm_filter` report. */
+/** The gate's message when any key or the report was not read because the gate stayed busy. */
+export function rpmBusyMessage(snap: RpmSnapshot): string | null {
+  for (const k of RPM_FILTER_KEYS) { const r = snap.values[k]; if (r?.kind === "busy") return r.message; }
+  return snap.report?.kind === "busy" ? snap.report.message : null;
+}
+/** `get` for the four keys, then the `rpm_filter` report. Once one read stays gate-busy the
+ * rest are marked busy without being sent (the FC was not read; no 5 x retry budget). */
 export async function readRpm(host: RpmHost, signal?: AbortSignal): Promise<RpmSnapshot> {
   const snap = emptyRpmSnapshot();
-  for (const k of RPM_FILTER_KEYS) snap.values[k] = await readRpmKey(host, k, signal);
-  snap.report = await readRpmReport(host, signal);
+  for (const k of RPM_FILTER_KEYS) {
+    const busy = rpmBusyMessage(snap);
+    snap.values[k] = busy !== null ? { kind: "busy", message: busy } : await readRpmKey(host, k, signal);
+  }
+  const busy = rpmBusyMessage(snap);
+  snap.report = busy !== null ? { kind: "busy", message: busy } : await readRpmReport(host, signal);
   return snap;
 }
 
+/** Section view plus `busy`: the gate's message when the FC was not read (values "unknown",
+ * read-only; never shown as "older firmware"). */
+export type RpmView = RpmFilterView & { busy: string | null };
 /** Older FC (schema < 9, a key or the report missing) makes the section read-only and unknown. */
-export function rpmView(snap: RpmSnapshot, schema: number | null): RpmFilterView {
-  // A `busy` key was not read: the view treats it as missing, so the section shows "unknown".
+export function rpmView(snap: RpmSnapshot, schema: number | null): RpmView {
+  // schema < 9 (from `storage`) is an older FC whatever the RPM reads did.
+  if (schema !== null && schema < 9) return { ...rpmFilterView({}, null), busy: null };
+  // A `busy` key / report was not read: missing for the values ("unknown"), carried as `busy`.
   const read: Partial<Record<RpmFilterKey, RpmGetResult | null>> = {};
   for (const k of RPM_FILTER_KEYS) { const r = snap.values[k]; read[k] = r?.kind === "busy" ? null : r; }
-  const v = rpmFilterView(read, snap.report);
-  if (schema !== null && schema < 9 && v.supported) return rpmFilterView({}, null);
-  return v;
+  const report = snap.report?.kind === "busy" ? null : snap.report;
+  return { ...rpmFilterView(read, report), busy: rpmBusyMessage(snap) };
 }
 
 /** Editable Filters-tab inputs (motor_poles is edited on the Motors tab). */

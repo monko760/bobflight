@@ -451,8 +451,9 @@ export function FiltersPage() {
           else <code>1..3</code>; minimum <code>50..200</code> Hz; Q <code>1..10</code> (sent ×100 as{" "}
           <code>rpm_filter_q_x100</code>). The FC trims harmonics to the loop rate and reports the state
           and each motor&apos;s tracked frequency below, exactly as sent.
-          {!rpm.supported && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
+          {!rpm.supported && !rpm.busy && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
         </p>
+        {rpm.busy && <p className="fail" data-testid="rpm-busy">{rpm.busy}</p>}
         <div className="tuning-grid">
           <div className="tuning-field">
             <label htmlFor="rpm_filter_harmonics">Harmonics <span className="muted">(rpm_filter_harmonics)</span></label>
