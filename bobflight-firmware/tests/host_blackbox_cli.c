@@ -5,6 +5,7 @@
 #include "flight/arming.h"
 #include "sched/tasks.h"
 #include "sched/scheduler.h"
+#include "board/board.h"
 #include "drivers/gyro.h"
 #include "drivers/dshot.h"
 #include "flight/config.h"
@@ -23,6 +24,7 @@ uint64_t hal_micros(void){return now++;}
 bool persist_dirty(void){return dirty;}
 unsigned dshot_speed_kbps(void){return 300;}
 const scheduler_stats_t *scheduler_stats(void){static scheduler_stats_t s={.gyro_hz=1000,.pid_process_denom=1};return &s;}
+const board_t *board_get(void){static board_t b={.board_id="bbtest"};return &b;}
 uint32_t scheduler_bg_budget_us(uint64_t t){(void)t;return 50u;}
 bool sd_spi_hw_bind(sd_spi_io_t *io){binds++;*io=create_mock_io();return true;}
 void sd_spi_hw_cancel(void){cancels++;g_mock.cs_asserted=false;g_mock.io_pending=false;}

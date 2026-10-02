@@ -59,8 +59,10 @@ void bb_session_stop(bb_session_t *s){
 static void rate_policy(bb_session_t *s,uint64_t now){
  if(now-s->window_start_us<BB_RATE_WINDOW_US)return;
  const flight_recorder_stats_t *st=recorder_stats();uint32_t lost=bb_session_queue_full_drops();
- uint32_t lost_w=lost-s->window_lost0,attempted_w=st->total_attempted-s->window_attempted0;
- s->window_start_us=now;s->window_lost0=lost;s->window_attempted0=st->total_attempted;
+ /* Due slots only: decimated calls (total_skipped) are not logging attempts. */
+ uint32_t due=st->total_attempted-st->total_skipped;
+ uint32_t lost_w=lost-s->window_lost0,attempted_w=due-s->window_attempted0;
+ s->window_start_us=now;s->window_lost0=lost;s->window_attempted0=due;
  /* One settle window after a halving: the backlog built at the old rate is
   * still draining, so its tail losses must not trigger a second halving. */
  if(s->settle_windows){s->settle_windows--;return;}

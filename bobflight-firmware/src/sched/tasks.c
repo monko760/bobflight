@@ -14,6 +14,7 @@
 #if defined(BOBFLIGHT_MCU) || defined(BOBFLIGHT_CAPTURE_TASK_TEST)
 #include "flight/blackbox_capture.h"
 #include "flight/flight_recorder.h"
+#include "drivers/blackbox_inputs.h"
 #endif
 #include "flight/pid_diag.h"
 #include "flight/mixer.h"
@@ -290,9 +291,13 @@ void loop_mixer_dshot(void)
     if(switch_was_enabled)for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)g_motors[i]=switch_output;
     dshot_write(g_motors);
 #if defined(BOBFLIGHT_MCU) || defined(BOBFLIGHT_CAPTURE_TASK_TEST)
-    if(recorder_active())bb_capture_observe(last_pid_us,g_gyro_raw,g_gyro_filt,g_setpoint,&g_pid,g_motors,rc,
-        arming_state()==ARM_ARMED,(uint8_t)g_effective_mode,(uint8_t)failsafe_stage(),
-        sample_ok,rx_frame_fresh(),dshot_is_healthy());
+    if(recorder_active()){
+        /* Cheap context every PID loop (events); eRPM/filter flags only for logged samples. */
+        bb_capture_ctx_t bb_ctx;bb_inputs_context(&bb_ctx);
+        bb_capture_observe_ex(last_pid_us,g_gyro_raw,g_gyro_filt,g_setpoint,&g_pid,g_motors,rc,
+            arming_state()==ARM_ARMED,(uint8_t)g_effective_mode,(uint8_t)failsafe_stage(),
+            sample_ok,rx_frame_fresh(),dshot_is_healthy(),&bb_ctx);
+    }
 #endif
     bench_output_pending=false;
     for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)

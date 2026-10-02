@@ -53,11 +53,10 @@ void rpm_filter_gyro_process(float v[3], float dt)
     rpm_filter_apply(&g_rpm, v);
 }
 
-void rpm_filter_gyro_status(rpm_filter_status_t *st, float dt)
+static void report(rpm_filter_status_t *st)
 {
-    refresh(dt);
-    if (!st) return;
     memset(st, 0, sizeof *st);
+    if (!g_rpm_ready) { st->reason = RPM_FILTER_OFF; return; }
     st->reason = g_rpm.reason;
     st->harmonics = g_rpm.set.harmonics;
     st->harmonics_active = g_rpm.harmonics_active;
@@ -65,6 +64,18 @@ void rpm_filter_gyro_status(rpm_filter_status_t *st, float dt)
         st->motor_valid[m] = g_rpm.reason == RPM_FILTER_OK && g_rpm.motor_valid[m];
         st->motor_hz[m] = st->motor_valid[m] ? g_rpm.fund_hz[m] : 0.f;
     }
+}
+
+void rpm_filter_gyro_status(rpm_filter_status_t *st, float dt)
+{
+    refresh(dt);
+    if (!st) return;
+    report(st);
+}
+
+void rpm_filter_gyro_snapshot(rpm_filter_status_t *st)
+{
+    if (st) report(st);
 }
 
 void rpm_filter_gyro_install(void)

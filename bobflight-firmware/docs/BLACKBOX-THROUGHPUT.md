@@ -36,7 +36,9 @@ The same host byte-level card model run against the unchanged legacy code:
 - **Honest auto-rate.** The rate is evaluated over 1 s windows. If queue-full drops exceed 1 % of that window's capture attempts, the rate halves (500 → 250 → 125, floor 125 Hz). After a halving, one settle window is skipped. The rate is never raised mid-session. Invalid or clock-regressed samples do not count toward the trigger.
 - **Effective rate in the log.** The header has a fixed-width 128 B rate block in sector 0: `H I interval`, `H P interval`, `H BobFlight log_rate_hz:<hz> requested_hz:<hz> reason:<reason>`. When the rate was lowered, sector 0 is rewritten in place (with readback) at close to the effective rate. The rewrite happens only if the re-encoded header has the same length and the rest of the header is unchanged. Otherwise the log closes without the patch, and `blackbox status` still reports the effective rate.
 
-## Host model results (`bobflight_blackbox_throughput_test`)
+## Host model results (`bobflight_blackbox_throughput_test`, bbl2, schema 2)
+
+_Historical (schema 2 frames, 60 µs cascade). The current matrix is in **Schema 3 drop matrix (BB1)** below._
 
 This is a byte-level SPI SD emulator on a virtual clock that drives the real CLI → session → FAT32 → `sd_spi` path. It uses a 1 kHz loop with 60 µs of task cost and a FAT32 volume with 20,000 used clusters.
 
@@ -48,3 +50,63 @@ This is a byte-level SPI SD emulator on a virtual clock that drives the real CLI
 | very slow: 70 ms busy per write | floors at **125 Hz** after 2 lowerings, 28.4 % dropped, reported, not hidden |
 
 The model parameters are assumptions. Only a physical re-log on the Kakute confirms real-card behavior and the actual per-byte CPU cost.
+
+## Schema 3 drop matrix (BB1)
+
+Log schema 3 (`docs/BLACKBOX-FIELDS.md`) grows the typical frame from about 70.7 B to **about 81 B**: four eRPM fields, five state fields, and `bobflightIteration` removed. The session's encode buffer is now the proven 271 B worst case instead of a fixed 256 B. `host_blackbox_throughput.c` is now table-driven over three loop configurations, with separate gyro-only and PID slot costs (structural estimates from `LOOP-RATE.md`, not measurements). Capture goes through the production schema 3 path (`bb_capture_observe_ex`, decimate first). The test is built twice:
+
+- `blackbox_sd_throughput_model`: default 500 Hz (`BLACKBOX_RATE_DEFAULT_HZ 500u`)
+- `blackbox_sd_throughput_model_1k`: the same source with `-DBLACKBOX_RATE_DEFAULT_HZ=1000u`
+
+| Loop config | gyro-only slot | PID slot | fg per bg call |
+|---|---|---|---|
+| 1000/1 | – | 80 µs | 12 µs |
+| 8000/2 (4 kHz PID) | 30 µs | 80 µs | 8 µs |
+| 8000/1 (8 kHz PID) | – | 80 µs | 8 µs |
+
+For each loop configuration, the realistic card (0.8 ms busy, 0.4 ms read, 80 ms stall every 128 writes, 20 s, 20,000 clusters already used) must give: effective rate = requested, reason `default`, `dropped == 0`, `drop_pct` exactly `0.0`, frames == recorder accepted, ring peak ≤ 32 KiB and gyro slot lateness ≤ 25 µs. The one exception is described below.
+
+Results (virtual clock, deterministic):
+
+| Requested | Loop | Frames | Dropped | Rate | B/frame | Ring peak | Gyro late max |
+|---|---|---|---|---|---|---|---|
+| 500 Hz | 1000/1 | 9,841 | **0** (0.0 %) | 500/500 default | 81.0 | 3.8 KiB | 24 µs |
+| 500 Hz | 8000/2 | 9,697 | **0** (0.0 %) | 500/500 default | 81.7 | 4.4 KiB | 14 µs |
+| 500 Hz | 8000/1 | 9,331 | **0** (0.0 %) | 500/500 default | 81.0 | 5.6 KiB | 13 µs |
+| 1000 Hz | 1000/1 | 15,980 | **0** (0.0 %) | 1000/1000 default | 80.9 | 7.6 KiB | 23 µs |
+| 1000 Hz | 8000/2 | 19,393 | **0** (0.0 %) | 1000/1000 default | 81.7 | 8.9 KiB | 14 µs |
+| 1000 Hz | 8000/1 | 10,518 | **312 (2.9 %)** | **500**/1000 auto-lowered-card-slow | 81.5 | 64 KiB (ring full) | 13 µs |
+
+**8 kHz PID with 1000 Hz logging cannot reach zero drops on the realistic card in this model.** Each 125 µs slot leaves only about 25 µs of background budget after the 80 µs PID slot and the 20 µs guard. That is not enough to carry about 80 KiB/s through 80 ms card stalls. The test asserts the honest behaviour instead: exactly one halving to 500 Hz, the drops reported in `blackbox status`, and the header patched to `log_rate_hz:500 requested_hz:1000 reason:auto-lowered-card-slow`. The firmware default stays 500 Hz.
+
+**Jitter-missed slots at 1000/1 with 1000 Hz logging.** When the log period equals the PID period, a PID loop that lands a few µs before its deadline is decimated, and the following deadline is counted as `missed`. The cause is the recorder's strict deadline. The behaviour predates schema 3: the decimate-first path counts exactly as `recorder_capture()` did. In the model, 3,703 of about 19,700 slots were missed (`blackbox_missed`). They are not `dropped` and they are reported. A small early-acceptance tolerance in the recorder would fix this, but it is a separate change.
+
+Threshold cards: per loop configuration, a card that is just too slow for the requested rate must halve **exactly once**, report its drops, and get the header patched in place (12 s runs):
+
+| Requested | Loop | Card busy | Result |
+|---|---|---|---|
+| 500 Hz | 1000/1 | 15 ms | 250 Hz, 1 lowering, 103 dropped (2.3 %) |
+| 500 Hz | 8000/2 | 12 ms | 250 Hz, 1 lowering, 81 dropped (1.8 %) |
+| 500 Hz | 8000/1 | 8 ms | 250 Hz, 1 lowering, 17 dropped (0.4 %) |
+| 1000 Hz | 1000/1 | 6 ms | 500 Hz, 1 lowering, 117 dropped (1.5 %) |
+| 1000 Hz | 8000/2 | 5 ms | 500 Hz, 1 lowering, 96 dropped (1.3 %) |
+| 1000 Hz | 8000/1 | 2 ms | 500 Hz, 1 lowering, 414 dropped (6.1 %) |
+
+Card-busy sweeps (12 s) give the largest per-block busy time that still records with zero drops:
+
+| Requested | 1000/1 | 8000/2 | 8000/1 |
+|---|---|---|---|
+| 500 Hz | 10 ms | 8 ms | 5 ms |
+| 1000 Hz | 4 ms | 2 ms | none (the realistic card already halves) |
+
+These results are also asserted:
+
+- 1000/1 with 60 µs of foreground work per background call: 0 drops at the requested rate. Gyro lateness is not asserted in this case; the model shows up to 120 µs, which is 2 × the injected foreground.
+- A 70 ms card floors at 125 Hz (2 lowerings at 500 Hz requested, 3 at 1000 Hz).
+- The four `blackbox status` replies from the 500 Hz build that the Configurator contract reads: idle, realistic 1000/1, 15 ms threshold, 70 ms floor.
+
+**Model gyro lateness:** the background slice adds its foreground cost twice (CLI slice and main-loop poll) without re-checking the gyro deadline. Lateness is therefore bounded by about 2 × that cost (24 µs at 12 µs). It is not a scheduler measurement.
+
+**Auto-rate change in this commit:** the 1 % trigger now counts against due logging slots (`total_attempted − total_skipped`), not every PID loop. Before, at 8 kHz PID / 500 Hz logging, the trigger was effectively about 16 % of frames.
+
+All of this is a host model. Physical-card throughput, real per-byte CPU cost and real cascade cost at 4/8 kHz are still unmeasured.
