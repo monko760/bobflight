@@ -395,6 +395,8 @@ export class SdDownloadController {
       const st = parseSdStatusReply(raw);
       return st.kind === 'refused' ? ` Sent sd cancel; the controller replied: ${st.line}` : ' Sent sd cancel.';
     } catch (e) {
+      // A timeout only happens after the line was written: it went out, the reply did not come back.
+      if (e instanceof TimeoutAbort) return ' Sent sd cancel (no reply from the FC).';
       return e instanceof GateBusyAbort
         ? ' sd cancel could not be sent: another command was using the connection.'
         : ` sd cancel could not be sent: ${errText(e)}.`;

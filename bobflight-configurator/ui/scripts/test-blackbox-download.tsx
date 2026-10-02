@@ -719,11 +719,65 @@ async function main() {
     const during = r.fw.log.slice(m);
     assert.ok(during.includes("sd status"), `SD check polled: ${during.join(", ")}`);
     assert.ok(!during.includes("status"), `no status refresh while the SD check runs: ${during.join(", ")}`);
+    // Hold the first status refresh after the check (before it reaches the gate) so "after the check, before a good refresh" is observable.
+    const host = r.ctx.host as { sendCommand(c: CliCommand): Promise<string> };
+    const send = host.sendCommand;
+    let release = () => {}; const held = new Promise<void>((res) => { release = res; });
+    let refreshAsked = false;
+    host.sendCommand = (cmd: CliCommand) => (cmd === "status" ? (refreshAsked = true, held.then(() => send(cmd))) : send(cmd));
     assert.ok(await waitFor(() => shown("bb-download-blocked") === null, 6000), "SD check done");
+    assert.match(shown("bb-fc-counters-stale") ?? "", /^Last read before the SD card check/, "still marked right after the check ends");
+    assert.ok(await waitFor(() => refreshAsked, 3000), "status refresh resumed after the check");
+    await sleep(1200);
+    assert.match(shown("bb-fc-counters-stale") ?? "", /^Last read before the SD card check/, "still marked while the first refresh after the check has not completed");
+    assert.equal(byTestId("bb-fc-counters")?.getAttribute("data-stale"), "true");
     const after = r.mark();
-    assert.ok(await waitFor(() => r.fw.log.slice(after).includes("status"), 5000), "status refresh resumed");
-    assert.ok(await waitFor(() => shown("bb-fc-counters-stale") === null, 5000), "marker cleared by the next good refresh");
+    release();
+    assert.ok(await waitFor(() => r.fw.log.slice(after).includes("status"), 3000), "the held refresh went out");
+    assert.ok(await waitFor(() => shown("bb-fc-counters-stale") === null, 5000), "marker cleared by that good refresh");
+    host.sendCommand = send;
     await r.done();
+  });
+
+  await test("Cancel while the gate stays held > 2.5 s: the closing sd cancel gives up after ~2.5 s, 'sd cancel could not be sent' is visible and no sd cancel reaches the FC", async () => {
+    const r = await rig();
+    const host = r.ctx.host as { sendCommand(c: CliCommand): Promise<string> };
+    const send = host.sendCommand;
+    let armHold = false; let heldUntil = 0;
+    host.sendCommand = (cmd: CliCommand) => {
+      if (armHold && cmd === "blackbox status") { armHold = false; heldUntil = Date.now() + 4500; void r.holdGate(4500); }
+      return send(cmd);
+    };
+    const m = r.mark();
+    click("Probe card and list logs");
+    armHold = true;
+    assert.ok(await waitFor(() => heldUntil > 0, 8000), "gate held at the pre-read `blackbox status`");
+    await sleep(300);
+    const cancelAt = Date.now();
+    assert.ok(heldUntil - cancelAt >= 4000, "gate held >= 4 s after Cancel");
+    click("Cancel download");
+    assert.ok(await waitFor(() => shown("bb-download-phase") === IDLE && !!shown("bb-download-message"), 6000), "settled");
+    const took = Date.now() - cancelAt;
+    assert.ok(took >= 2400 && took < 3600, `bounded wait for the gate: ${took} ms`);
+    assert.equal(shown("bb-download-message"), "Listing cancelled. Partial data was discarded. sd cancel could not be sent: another command was using the connection.");
+    assert.ok(pageText().includes("sd cancel could not be sent"), "visible");
+    assert.ok(!pageText().includes("Sent sd cancel"), "never claimed");
+    await sleep(Math.max(0, heldUntil - Date.now()) + 300);
+    const sd = r.sdSince(m);
+    assert.ok(sd.includes("sd probe"), `the probe went out: ${sd.join(", ")}`);
+    assert.ok(!sd.includes("sd cancel"), `no sd cancel on the wire: ${sd.join(", ")}`);
+    assert.ok(!sd.some((l) => l.startsWith("sd read")));
+    host.sendCommand = send;
+    await r.done();
+  });
+
+  await test("closing sd cancel sent but its reply times out: 'Sent sd cancel (no reply from the FC).', never 'could not be sent'", async () => {
+    const lr = await lowRig();
+    lr.fw.noReplyOnce.push("sd cancel");
+    assert.equal(await lr.ctl.list(), true);
+    assert.equal(lr.ctl.message?.text, "Found 3 log files in the card root. Sent sd cancel (no reply from the FC).");
+    assert.equal(lr.fw.sdCommands().at(-1), "sd cancel", "it went on the wire");
+    await lr.client.disconnect();
   });
 
   await test("real gate held 3 s between sector reads: plain mid-read text, raw detail, sd cancel sent (reads went out), nothing saved; a 1 s hold is ridden out", async () => {
