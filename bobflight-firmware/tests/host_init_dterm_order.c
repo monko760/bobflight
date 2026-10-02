@@ -52,6 +52,7 @@ void arming_set_gyro_healthy(bool h){(void)h;}
 bool gyro_is_healthy(void){return true;}
 bool persist_load(void){if(saved_loop_rate)REQUIRE(loop_rate_setting_set(saved_loop_rate));return true;}
 void loop_rate_init(void){}
+void rpm_filter_gyro_install(void){} /* #60: RPM post-filter registration */
 /* Gyro ODR bookkeeping as in drivers/gyro.c. */
 static bool kakute(void){return strcmp(board.board_id,"kakute_f7_hdv")==0;}
 void gyro_init(void){memset(&diag,0,sizeof diag);diag.config_ok=true;diag.odr_hz=kakute()?8000u:1000u;}

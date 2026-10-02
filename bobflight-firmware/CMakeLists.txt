@@ -114,7 +114,7 @@ set(BF_COMMON_SOURCES
   src/sched/loop_rate.c
   src/sched/loop_rate_setting.c
   src/sched/tasks.c
-  src/flight/pid.c src/flight/filter.c
+  src/flight/pid.c src/flight/filter.c src/flight/rpm_filter.c
   src/flight/flight_recorder.c src/flight/blackbox_encode.c src/flight/blackbox_capture.c src/flight/blackbox_session.c
   src/drivers/sd_spi.c src/drivers/sd_probe.c src/drivers/fat32_log.c
   src/flight/pid_diag.c src/flight/pid_diag_core.c
@@ -129,7 +129,7 @@ set(BF_COMMON_SOURCES
   src/drivers/gyro.c src/drivers/sensor_calibration.c
   src/drivers/dshot.c
   src/drivers/dshot_gcr.c
-  src/drivers/dshot_telem.c
+  src/drivers/dshot_telem.c src/drivers/rpm_filter_gyro.c
   src/drivers/rx.c
   src/drivers/crsf.c
   src/drivers/cli.c
@@ -336,6 +336,17 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_filter_notch_test m)
   add_test(NAME filter_notch COMMAND bobflight_filter_notch_test)
 
+  add_executable(bobflight_rpm_filter_test
+    src/flight/filter.c
+    src/flight/rpm_filter.c
+    tests/host_rpm_filter.c)
+  target_include_directories(bobflight_rpm_filter_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(bobflight_rpm_filter_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_rpm_filter_test m)
+  add_test(NAME rpm_filter COMMAND bobflight_rpm_filter_test)
+
   add_executable(bobflight_rates_math_test
     src/flight/rates.c
     src/flight/config.c
@@ -483,6 +494,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/tests/host_loop_rate_setting_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   add_test(NAME gyro_notch_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_gyro_notch_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
+  add_test(NAME rpm_filter_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_rpm_filter_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
 
   foreach(task_test pid_elapsed loop_dt bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)

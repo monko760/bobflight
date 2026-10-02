@@ -28,8 +28,11 @@ config_store_result_t config_store_save_v6(uint32_t board_id,const void *payload
 /* v7 is 192 bytes; accepts schema1..6 with zero extension. Adds loop_rate_hz. */
 config_store_result_t config_store_load_v7(uint32_t board_id,void *payload,size_t bytes);
 config_store_result_t config_store_save_v7(uint32_t board_id,const void *payload,size_t bytes);
-/* v8 is 208 bytes (MAX_PAYLOAD); accepts schema1..7 with zero extension. Adds the two manual gyro notches. */
+/* v8 is 208 bytes; accepts schema1..7 with zero extension. Adds the two manual gyro notches. */
 config_store_result_t config_store_load_v8(uint32_t board_id,void *payload,size_t bytes);
 config_store_result_t config_store_save_v8(uint32_t board_id,const void *payload,size_t bytes);
+/* v9 is 224 bytes (MAX_PAYLOAD); accepts schema1..8 with zero extension. Adds the RPM notch filter. */
+config_store_result_t config_store_load_v9(uint32_t board_id,void *payload,size_t bytes);
+config_store_result_t config_store_save_v9(uint32_t board_id,const void *payload,size_t bytes);
 uint32_t config_store_loaded_schema(void);
 #endif
