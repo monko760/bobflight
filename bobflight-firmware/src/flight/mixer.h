@@ -19,6 +19,11 @@ extern "C" {
 void mixer_init(void);
 /** Fill motor[4] in [0,1]. QUADX; clamps each channel. */
 void mixer_update(const pid_axis_out_t *pid, float throttle, float motor_out[MIXER_MOTOR_COUNT]);
+/** +1 for motor_direction props-out (yaw signs unchanged), -1 for props-in (yaw term negated). */
+float mixer_yaw_direction(void);
+/** Sign (+1/-1) the mixer applies to the PID yaw output on motor 0..3 right now
+ *  (the `mixer` CLI report); 0 for an invalid motor index. */
+int mixer_yaw_sign(unsigned motor);
 
 #ifdef __cplusplus
 }

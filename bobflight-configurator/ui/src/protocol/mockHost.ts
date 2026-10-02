@@ -26,6 +26,8 @@ import {
   isRpmFilterKey,
   isRpmFilterCliCommand,
   type RpmFilterMockScenario,
+  MockMotorDirection,
+  type MotorDirectionMockScenario,
   type LoopRateMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
@@ -90,7 +92,11 @@ export class MockBobFlightHost implements BobFlightHost {
   /** RPM scenario given by the test/demo (seeds dshotBidir on connect); undefined = loop-rate default. */
   private rpmFilterScenario: RpmFilterMockScenario | undefined;
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario }) {
+  /** motor_direction + `mixer` (schema 10; same wire as protocol MockSerial). A running bench test refuses sets. */
+  private readonly motorDirection: MockMotorDirection;
+
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario }) {
+    this.motorDirection = new MockMotorDirection(opts?.motorDirectionScenario ?? "props-out");
     this.gyroNotch = new MockGyroNotch(opts?.gyroNotchScenario ?? "off");
     this.rpmFilter = new MockRpmFilter(opts?.rpmFilterScenario ?? "off", () => this.dshotBidir);
     this.rpmFilterScenario = opts?.rpmFilterScenario;
@@ -287,6 +293,7 @@ export class MockBobFlightHost implements BobFlightHost {
     this.loopRateSetting.defaults();
     this.gyroNotch.defaults();
     this.rpmFilter.defaults();
+    this.motorDirection.defaults();
     return this.getAllSettings();
   }
 
@@ -343,6 +350,7 @@ export class MockBobFlightHost implements BobFlightHost {
     {const lr=this.loopRateSetting.handle(cmd,this.armed);if(lr!==null)return lr;}
     {const gn=this.gyroNotch.handle(cmd,this.armed);if(gn!==null)return gn;}
     {const rf=this.rpmFilter.handle(cmd,this.armed);if(rf!==null)return rf;}
+    {const md=this.motorDirection.handle(cmd,this.armed,this.bench.active);if(md!==null)return md;}
     const sensorReply = mockSensorReply(cmd, this.armed);
     if (sensorReply !== null) return sensorReply;
     if(cmd==="reboot") this.receiver.reset();
@@ -421,7 +429,9 @@ export class MockBobFlightHost implements BobFlightHost {
     loopRateScenario?: LoopRateMockScenario;
     gyroNotchScenario?: GyroNotchMockScenario;
     rpmFilterScenario?: RpmFilterMockScenario;
+    motorDirectionScenario?: MotorDirectionMockScenario;
   }): void {
+    if (opts.motorDirectionScenario !== undefined) this.motorDirection.setScenario(opts.motorDirectionScenario);
     if (opts.loopRateScenario !== undefined) {
       this.loopRateScenario = opts.loopRateScenario;
       this.dshotBidir = mockLoopRateBidir(opts.loopRateScenario);

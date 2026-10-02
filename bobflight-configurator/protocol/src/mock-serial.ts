@@ -22,6 +22,7 @@ import {
 import { MockGyroNotch, type GyroNotchMockScenario } from "./gyro-notch-mock";
 import { isGyroNotchKey } from "./gyro-notch";
 import { MockRpmFilter, type RpmFilterMockScenario } from "./rpm-filter-mock";
+import { MockMotorDirection, type MotorDirectionMockScenario } from "./motor-direction-mock";
 import { isRpmFilterKey } from "./rpm-filter";
 
 /** Path prefix for MockSerial ports (enumerate + connect). */
@@ -71,6 +72,8 @@ export interface MockSerialOptions {
   gyroNotchScenario?: GyroNotchMockScenario;
   /** RPM notch filter (schema 9): off (default) | ok | bidir-off | erpm-unavailable | trimmed-1k | old-fc | off-erpm-live. */
   rpmFilterScenario?: RpmFilterMockScenario;
+  /** motor_direction (schema 10): props-out (default) | props-in | refused-armed | refused-motor-test | unknown-token | old-fc. */
+  motorDirectionScenario?: MotorDirectionMockScenario;
 }
 
 /**
@@ -101,6 +104,8 @@ export class MockSerial extends EventEmitter {
   /** `get/set rpm_filter_* / motor_poles` + `rpm_filter` (schema 9; old-fc = older firmware). */
   private readonly rpmFilter: MockRpmFilter;
   private readonly rpmFilterScenario: RpmFilterMockScenario | undefined;
+  /** `get/set motor_direction` + `mixer` (schema 10; old-fc = older firmware). */
+  private readonly motorDirection: MockMotorDirection;
   /** dshot_bidir after power-up (RAM-only): the RPM scenario's when one is given, else the loop-rate scenario's. */
   private bootBidir(): boolean {
     return this.rpmFilterScenario !== undefined ? MockRpmFilter.scenarioBidir(this.rpmFilterScenario) : mockLoopRateBidir(this.loopRateScenario);
@@ -132,6 +137,7 @@ export class MockSerial extends EventEmitter {
     // The RPM mock reads this transport's dshot_bidir, so the report and `get dshot_bidir` never disagree.
     this.rpmFilter = new MockRpmFilter(opts.rpmFilterScenario ?? "off", () => this.dshotBidir);
     this.rpmFilterScenario = opts.rpmFilterScenario;
+    this.motorDirection = new MockMotorDirection(opts.motorDirectionScenario ?? "props-out");
     this.modesPorts.reset();
     this.dshotBidir = this.bootBidir();
     this.settings = cloneDefaultSettingValues();
@@ -235,6 +241,7 @@ export class MockSerial extends EventEmitter {
     {const lr=this.loopRateSetting.handle(line,this.armed);if(lr!==null){this.emitData(lr);return;}}
     {const gn=this.gyroNotch.handle(line,this.armed);if(gn!==null){this.emitData(gn);return;}}
     {const rf=this.rpmFilter.handle(line,this.armed);if(rf!==null){this.emitData(rf);return;}}
+    {const md=this.motorDirection.handle(line,this.armed,this.bench.active);if(md!==null){this.emitData(md);return;}}
     const pm = this.modesPorts.handle(line,this.armed,this.bench.active);
     if(pm!==null){this.emitData(pm);return;}
     const sensorReply = mockSensorReply(line, this.armed);
@@ -306,6 +313,7 @@ export class MockSerial extends EventEmitter {
       this.loopRateSetting.defaults();
       this.gyroNotch.defaults();
       this.rpmFilter.defaults();
+      this.motorDirection.defaults();
       this.emitData("defaults restored\r\n");
     } else if (line.startsWith("get ") || line === "get") {
       const key = line === "get" ? "" : line.slice(4).trim();

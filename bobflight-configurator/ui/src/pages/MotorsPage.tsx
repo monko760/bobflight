@@ -7,6 +7,7 @@ import { storageBlocked } from "../motors/motorsStorage";
 
 import { browserPoleStorage, readMotorPoles, storeMotorPoles, validMotorPoles } from "../motors/motorPoles";
 import { MotorPolesPanel } from "../motors/MotorPolesPanel";
+import { MotorDirectionPanel } from "../motors/MotorDirectionPanel";
 
 export function MotorsPage() {
   const { host, postFlashGate } = useHost();
@@ -95,7 +96,7 @@ export function MotorsPage() {
             : <button disabled={disabled || !capability?.individual} onClick={() => void controller.start(motor)}>Test M{motor} · fixed 8% · 1s</button>}
           <span className="muted">Changing the slider does not spin the motor.</span>
         </div>)}
-        <div className="motor-map-caption">Expected wiring layout—not detected motor positions. Observe CW / CCW yourself; no direction reversal command is provided.</div>
+        <div className="motor-map-caption">Expected wiring layout—not detected motor positions. Observe CW / CCW yourself; no ESC direction reversal command is provided (Motor direction only tells the mixer which way the props spin).</div>
       </div>
       <div className="motor-options">
         <section className="motor-option-panel"><h3>DShot bit rate</h3>
@@ -116,6 +117,7 @@ export function MotorsPage() {
             {poleMessage && <p role="status">{poleMessage}</p>}
           </section>
         } />
+        <MotorDirectionPanel host={host} blocked={storageBlocked(state) || postFlashGate} />
         <section className="motor-option-panel"><h3>eRPM & bidirectional DShot</h3>
           <p><strong>M1–M4 eRPM telemetry (R0c).</strong> When bidirectional DShot is enabled on the controller and a motor's telem is OK, that cell shows live electrical RPM. Otherwise the cell stays unavailable (<code>erpm_mN=none</code>) — never an invented zero.</p>
           <p className="muted">Cells never invent zeros or slider estimates. Enable bidir explicitly via CLI (<code>set dshot_bidir on</code>) — this page does not auto-enable it. Mechanical RPM still needs a confirmed motor pole count. Poll <code>get erpm_m1</code>…<code>m4</code> and <code>get dshot_telem_mN</code> only.</p>

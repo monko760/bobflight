@@ -44,6 +44,8 @@ export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "get loop_rate_hz", "set loop_rate_hz 1000", "set loop_rate_hz 4000", "set loop_rate_hz 8000", "loop_rate",
   "filters", "get gyro_notch1_hz", "get gyro_notch1_cutoff_hz", "get gyro_notch2_hz", "get gyro_notch2_cutoff_hz",
   "rpm_filter", "get rpm_filter_harmonics", "get rpm_filter_min_hz", "get rpm_filter_q_x100", "get motor_poles",
+  // Schema 10 motor_direction: exactly the two known tokens (an unknown token is never sent).
+  "get motor_direction", "set motor_direction props-out", "set motor_direction props-in", "mixer",
 ] as const;
 
 /** Exact single-line UI input; preserve complete arguments, never just a verb. */

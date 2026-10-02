@@ -86,7 +86,12 @@ export type CliCommand =
   // RPM notch filter (FW config schema 9; see rpm-filter.ts isRpmFilterCliCommand)
   | "rpm_filter"
   | `get ${"rpm_filter_harmonics" | "rpm_filter_min_hz" | "rpm_filter_q_x100" | "motor_poles"}`
-  | `set ${"rpm_filter_harmonics" | "rpm_filter_min_hz" | "rpm_filter_q_x100" | "motor_poles"} ${number}`;
+  | `set ${"rpm_filter_harmonics" | "rpm_filter_min_hz" | "rpm_filter_q_x100" | "motor_poles"} ${number}`
+  // Motor direction (FW config schema 10; see motor-direction.ts). Only the two known tokens.
+  | "get motor_direction"
+  | "set motor_direction props-out"
+  | "set motor_direction props-in"
+  | "mixer";
 
 export interface ConnectOptions {
   path: string;
