@@ -67,16 +67,25 @@ const float *gyro_latest_dps(void);
 bool gyro_sample(float dps[3]);
 bool gyro_is_healthy(void);
 void gyro_filter(const float in_dps[3], float out_dps[3]);
-/** Sample period for soft gyro LPF (seconds); set every PID cycle from the
- * scheduler's gyro_hz / pid_process_denom. */
+/** Sample period for the soft gyro LPF + notches (seconds); set on every
+ * gyro sample from the scheduler's 1 / gyro_hz (safety S1). */
 void gyro_filter_set_dt(float dt);
-/** Actual gyro-filter sample rate (1 / filter dt = PID cadence), Hz. */
+/** Actual gyro-filter sample rate (1 / filter dt = gyro rate), Hz. */
 float gyro_filter_sample_hz(void);
+/** Filter sample period in seconds (the exact dt the filters run with). */
+float gyro_filter_dt(void);
 /** Runtime state of manual notch idx (1|2): active and reason token
  * ("off" | "ok" | "above-nyquist" | "invalid"). False for a bad idx. */
 bool gyro_notch_status(unsigned idx, bool *active, const char **reason);
+/** Read-only: whether manual notch idx (1|2) was running at the last filter
+ * update. No refresh/recompute (Blackbox logger); false for a bad idx. */
+bool gyro_notch_active_snapshot(unsigned idx);
 /** Notch coefficient recomputations since boot (diagnostics/tests). */
 uint32_t gyro_notch_recomputes(void);
+/* Post-filter applied in place after the manual notches (target builds; the
+ * host gyro path stays a bit-exact passthrough). dt = filter period [s]. */
+typedef void (*gyro_post_filter_fn)(float v[3], float dt);
+void gyro_set_post_filter(gyro_post_filter_fn fn);
 /** "dummy" | "no-cs" | "no-spi" | "unbound" | "bf-derived" | "ok" */
 const char *gyro_bind_state(void);
 

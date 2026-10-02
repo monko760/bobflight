@@ -31,7 +31,9 @@
     "test:pid-diagnostics": "tsc && node tests/pid-diagnostics.cjs",
     "test:sd": "tsc && node tests/sd-probe.cjs",
     "test:blackbox": "tsc && node tests/blackbox-recording.cjs",
-    "test:gyro-notch": "tsc && node tests/gyro-notch.cjs"
+    "test:gyro-notch": "tsc && node tests/gyro-notch.cjs",
+    "test:rpm-filter": "tsc && node tests/rpm-filter.cjs",
+    "test:motor-direction": "tsc && node tests/motor-direction.cjs"
   },
   "engines": {
     "node": ">=18"

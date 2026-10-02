@@ -14,6 +14,7 @@
 #if defined(BOBFLIGHT_MCU) || defined(BOBFLIGHT_CAPTURE_TASK_TEST)
 #include "flight/blackbox_capture.h"
 #include "flight/flight_recorder.h"
+#include "drivers/blackbox_inputs.h"
 #endif
 #include "flight/pid_diag.h"
 #include "flight/mixer.h"
@@ -147,7 +148,7 @@ static float g_setpoint[3];
 static float g_motors[MIXER_MOTOR_COUNT];
 static pid_axis_out_t g_pid;
 
-/* Nominal gyro slot / PID period from the running scheduler (never a fixed
+/* Nominal gyro slot period from the running scheduler (never a fixed
  * 1 kHz or 4 kHz constant). Before scheduler_init only host unit tests call
  * tasks; they get the scheduler's own fallback rate. */
 static float nominal_gyro_dt(void)
@@ -155,13 +156,6 @@ static float nominal_gyro_dt(void)
     const scheduler_stats_t *st = scheduler_stats();
     const uint32_t hz = st && st->gyro_hz ? st->gyro_hz : SCHEDULER_DEFAULT_GYRO_HZ;
     return 1.f / (float)hz;
-}
-static float nominal_pid_dt(void)
-{
-    const scheduler_stats_t *st = scheduler_stats();
-    if (st && st->gyro_hz > 0u && st->pid_process_denom > 0u)
-        return (float)st->pid_process_denom / (float)st->gyro_hz;
-    return (float)SCHEDULER_DEFAULT_PID_DENOM / (float)SCHEDULER_DEFAULT_GYRO_HZ;
 }
 
 void loop_gyro(void)
@@ -176,8 +170,10 @@ void loop_gyro(void)
 
 void loop_filter(void)
 {
-    /* Soft gyro LPF runs at PID cadence (gyro_hz / pid_process_denom). */
-    gyro_filter_set_dt(nominal_pid_dt());
+    /* Safety S1: the scheduler calls this on every gyro sample, so the soft
+     * gyro LPF + notches see every sample at the gyro period (1 / gyro_hz,
+     * follows runtime rate changes). The PID reads the latest output. */
+    gyro_filter_set_dt(nominal_gyro_dt());
     gyro_filter(g_gyro_raw, g_gyro_filt);
 }
 
@@ -295,9 +291,13 @@ void loop_mixer_dshot(void)
     if(switch_was_enabled)for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)g_motors[i]=switch_output;
     dshot_write(g_motors);
 #if defined(BOBFLIGHT_MCU) || defined(BOBFLIGHT_CAPTURE_TASK_TEST)
-    if(recorder_active())bb_capture_observe(last_pid_us,g_gyro_raw,g_gyro_filt,g_setpoint,&g_pid,g_motors,rc,
-        arming_state()==ARM_ARMED,(uint8_t)g_effective_mode,(uint8_t)failsafe_stage(),
-        sample_ok,rx_frame_fresh(),dshot_is_healthy());
+    if(recorder_active()){
+        /* Cheap context every PID loop (events); eRPM/filter flags only for logged samples. */
+        bb_capture_ctx_t bb_ctx;bb_inputs_context(&bb_ctx);
+        bb_capture_observe_ex(last_pid_us,g_gyro_raw,g_gyro_filt,g_setpoint,&g_pid,g_motors,rc,
+            arming_state()==ARM_ARMED,(uint8_t)g_effective_mode,(uint8_t)failsafe_stage(),
+            sample_ok,rx_frame_fresh(),dshot_is_healthy(),&bb_ctx);
+    }
 #endif
     bench_output_pending=false;
     for(unsigned i=0;i<MIXER_MOTOR_COUNT;i++)

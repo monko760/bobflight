@@ -17,6 +17,8 @@ This branch adds a real recording path: production PID/mixer observer -> bounded
 
 ## Recorded data and Explorer
 
+**Log schema 3** (54 fields): per-motor `eRPM[0..3]` (eRPM/100), telemetry-OK mask, filter flags, latched events, loop code and session overruns, plus board, firmware version, schema, loop and filter settings in the header. Field units, bit orders, the event latch/clear rules, the byte budget and the schema 2 → 3 upgrade note are in [bobflight-firmware/docs/BLACKBOX-FIELDS.md](bobflight-firmware/docs/BLACKBOX-FIELDS.md).
+
 The file keeps honest BobFlight firmware headers. Frames contain filtered gyro, pre-filter board-aligned/calibrated gyro, commanded setpoint, real P/I/D terms, clamped controller output, requested logical mixer motor commands, receiver input, mode/failsafe state, timing and validity flags.
 
 - Plot recorded `setpoint[0..2]` and `bobflightError[0..2]`. Stock Explorer's legacy-computed `rcCommands` and `axisError` do not implement BobFlight's rates and must not be used as its control targets/errors.
@@ -33,9 +35,11 @@ The file keeps honest BobFlight firmware headers. Frames contain filtered gyro, 
 - Actual production task capture hook tested with existing control-routing regression, low-throttle/reset/disarm behavior and real PID terms. Existing bit-exact PID trace regression remains unchanged.
 - End-to-end simulated-card test creates a 39,205-byte file containing 600 samples through the real FAT32 implementation, extracts it independently using its directory entry/cluster chain, and compares the complete output byte-for-byte. Existing file contents, exact final size, EOC, mirrored FAT and clean close are checked. Reads are delayed; pending write buffers are checked for immutability.
 - Ten independent malformed-volume cases reject before any write, including bounds, mirror mismatch in a later allocation sector, cyclic root, backup FSInfo and unsupported FAT version. Other tests cover full cards, duplicate names, deleted slot reuse, fragmentation and injected I/O failure.
-- Stock `betaflight/blackbox-log-viewer` commit `a84755c5e897c1a3a580424b64c0df066c12c6b4` actually decoded the generated file: 600 valid I frames, 46 fields, one EOF event, zero corrupt frames, correct timestamps and selected P/I/D/output values at zero-based samples 0, 1, 299, 599. Its gyro and DShot physical-percent conversions and trailing-padding handling were checked. The proposed min/max throttle header change was NOT needed. This is parser/conversion testing, not a graphical-app or physical-aircraft test.
+- (Schema 2, earlier work.) Stock `betaflight/blackbox-log-viewer` commit `a84755c5e897c1a3a580424b64c0df066c12c6b4` actually decoded the generated file: 600 valid I frames, 46 fields, one EOF event, zero corrupt frames, correct timestamps and selected P/I/D/output values at zero-based samples 0, 1, 299, 599. Its gyro and DShot physical-percent conversions and trailing-padding handling were checked. The proposed min/max throttle header change was NOT needed. This is parser/conversion testing, not a graphical-app or physical-aircraft test.
 - Kakute MCU build and bootloader-image bounds/vector/version checks passed. Image size: 175,776 programmed bytes; RAM data plus BSS: 27,652 bytes (not a measured stack high-water mark). The real-card simulated end-to-end test also passed AddressSanitizer and UndefinedBehaviorSanitizer.
 - Configurator typecheck/build and focused recording, protocol, SD-panel and USB bench-recorder tests passed.
+
+- Schema 3: the oracle script below now expects 54 fields and `bobflightSchema` 3, but it has **not** been re-run against the pinned viewer for schema 3. On-box schema 3 checks are the clean-room decoder CTest `blackbox_schema3_decode` and the host encode, capture, task and throughput tests.
 
 The independent oracle script is `bobflight-firmware/tests/verify_blackbox_explorer.cjs`. It takes an external checkout of the pinned viewer and the output from `bobflight_blackbox_card_test`. It requires Node, esbuild and semver (for example via `NODE_PATH`). No GPL viewer code is included in firmware or this repository.
 

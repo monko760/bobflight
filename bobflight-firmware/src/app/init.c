@@ -10,6 +10,7 @@
 #include "board/pins_generated.h"
 #include "drivers/dshot.h"
 #include "drivers/gyro.h"
+#include "drivers/rpm_filter_gyro.h"
 #include "drivers/rx.h"
 #include "drivers/cli.h"
 #include "drivers/persist.h"
@@ -257,6 +258,7 @@ bool app_init(void)
 
     /* 5 SPI/EXTI/TIM objects — drivers no-op if invalid pins */
     gyro_init();
+    rpm_filter_gyro_install(); /* RPM notches after the manual notches */
     rx_init();
 
     persist_init();
@@ -280,6 +282,14 @@ bool app_init(void)
      * allow it. Fallbacks are reported by `loop_rate` and status
      * loop_target_hz. A setting change applies after save + reboot. */
     (void)gyro_select_output_rate(loop_rate_setting_wants_8k_gyro(loop_rate_setting_get()));
+    /* Safety S1: with the sensor wide-band (8 kHz ODR, DLPF 0) the D-term
+     * gets a second LPF stage at the same dterm_lpf_hz; it stays on after a
+     * runtime fall-back to 1000/1 because the DLPF stays 0. 1 kHz-ODR gyros
+     * (DLPF 42 Hz) keep the first-order D-term filter unchanged. */
+    {
+        const gyro_diagnostics_t *gd = gyro_diagnostics();
+        pid_set_dterm_lpf_pt2(gd && gd->odr_hz >= 8000u);
+    }
     loop_rate_init();
     return true;
 }

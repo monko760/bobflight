@@ -48,9 +48,17 @@ export const SCHEMA8_FLOAT_KEYS = ["gyro_notch1_hz", "gyro_notch1_cutoff_hz", "g
 
 export type Schema8FloatKey = (typeof SCHEMA8_FLOAT_KEYS)[number];
 
+/**
+ * Schema 9 RPM notch filter keys (whole numbers; frozen FW contract, see rpm-filter.ts).
+ * Defaults 0 / 100 / 500 / 14. An older FC answers "unknown key" (omitted, shown unknown).
+ */
+export const SCHEMA9_INT_KEYS = ["rpm_filter_harmonics", "rpm_filter_min_hz", "rpm_filter_q_x100", "motor_poles"] as const;
+
+export type Schema9IntKey = (typeof SCHEMA9_INT_KEYS)[number];
+
 /** Keys an older FC may not have; a missing one is omitted, never defaulted. */
-export function isOptionalSettingsKey(k: string): k is Schema8FloatKey {
-  return (SCHEMA8_FLOAT_KEYS as readonly string[]).includes(k);
+export function isOptionalSettingsKey(k: string): k is Schema8FloatKey | Schema9IntKey {
+  return (SCHEMA8_FLOAT_KEYS as readonly string[]).includes(k) || (SCHEMA9_INT_KEYS as readonly string[]).includes(k);
 }
 
 /**
@@ -74,6 +82,7 @@ export const SETTINGS_KEYS = [
   "airmode",
   ...SCHEMA5_FLOAT_KEYS,
   ...SCHEMA8_FLOAT_KEYS,
+  ...SCHEMA9_INT_KEYS,
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -118,12 +127,14 @@ export const DEFAULT_SETTING_VALUES: Readonly<Record<SettingsKey, number>> = {
   pid_yaw_p: 0.002, pid_yaw_i: 0.001, pid_yaw_d: 0.00005,
   min_throttle: 0.05, airmode: 0, gyro_lpf_hz: 320, dterm_lpf_hz: 53,
   gyro_notch1_hz: 0, gyro_notch1_cutoff_hz: 0, gyro_notch2_hz: 0, gyro_notch2_cutoff_hz: 0,
+  rpm_filter_harmonics: 0, rpm_filter_min_hz: 100, rpm_filter_q_x100: 500, motor_poles: 14,
 };
 
 export const DEFAULT_SETTINGS: Readonly<Record<SettingsKey, string>> = {
   rate_max_roll: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_roll), rate_max_pitch: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_pitch), rate_max_yaw: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_yaw), rate_expo: formatFwFloat(DEFAULT_SETTING_VALUES.rate_expo),
   pid_roll_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_p), pid_roll_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_i), pid_roll_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_d), pid_pitch_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_p), pid_pitch_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_i), pid_pitch_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_d), pid_yaw_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_p), pid_yaw_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_i), pid_yaw_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_d), min_throttle: formatFwFloat(DEFAULT_SETTING_VALUES.min_throttle), airmode: formatFwFloat(DEFAULT_SETTING_VALUES.airmode), gyro_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.gyro_lpf_hz), dterm_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.dterm_lpf_hz),
   gyro_notch1_hz: "0", gyro_notch1_cutoff_hz: "0", gyro_notch2_hz: "0", gyro_notch2_cutoff_hz: "0",
+  rpm_filter_harmonics: "0", rpm_filter_min_hz: "100", rpm_filter_q_x100: "500", motor_poles: "14",
 };
 export function cloneDefaultSettings(): Record<SettingsKey,string> { return { ...DEFAULT_SETTINGS }; }
 export function cloneDefaultSettingValues(): Record<SettingsKey,number> { return { ...DEFAULT_SETTING_VALUES }; }
@@ -137,6 +148,11 @@ export function validateSettingValue(key: SettingsKey, value: number): boolean {
   // Single-value domain only; the pair rule (cutoff < centre) is notchPairProblem in gyro-notch.ts.
   if (key === "gyro_notch1_hz" || key === "gyro_notch2_hz") return value === 0 || (value >= 20 && value <= 1000);
   if (key === "gyro_notch1_cutoff_hz" || key === "gyro_notch2_cutoff_hz") return value >= 0 && value < 1000;
+  // Schema 9 RPM filter: whole numbers (FW config_rpm_value_valid).
+  if (key === "rpm_filter_harmonics") return Number.isInteger(value) && value >= 0 && value <= 3;
+  if (key === "rpm_filter_min_hz") return Number.isInteger(value) && value >= 50 && value <= 200;
+  if (key === "rpm_filter_q_x100") return Number.isInteger(value) && value >= 100 && value <= 1000;
+  if (key === "motor_poles") return Number.isInteger(value) && value >= 4 && value <= 36 && value % 2 === 0;
   return value >= 0 && value <= 10;
 }
 export function parseCliFloat(token: string): number | null {

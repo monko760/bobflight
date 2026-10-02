@@ -2,7 +2,8 @@
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
  *
- * Soft first-order low-pass helpers for gyro and D-term paths.
+ * Soft first-order low-pass helpers for gyro and D-term paths (the D-term
+ * runs two of them in series on 8 kHz-sensor builds, see FILTER_PT2_STAGE_SCALE).
  *
  * Formula (documented in docs/FLIGHT.md):
  *   tau   = 1 / (2 * pi * fc)
@@ -38,6 +39,13 @@ float filter_lpf_alpha(float fc_hz, float dt);
  * If alpha >= 1 (off / passthrough), state becomes x and x is returned.
  */
 float filter_lpf_step(float *state, float x, float alpha);
+
+/* Second-order D-term low-pass (safety S1): two identical first-order stages
+ * in series. Each stage runs at fc * FILTER_PT2_STAGE_SCALE so the pair is
+ * still -3 dB at the configured fc: |H1(f)|^2 = 1/sqrt(2) per stage gives
+ * f/fs = sqrt(sqrt(2) - 1) = 0.6436, i.e. scale = 1/0.6436 = 1.5538. */
+#define FILTER_PT2_STAGE_SCALE 1.553774f
+
 
 /* ---- Second-order notch (biquad) -------------------------------------- */
 
@@ -133,6 +141,12 @@ bool filter_notch_bank_update(filter_notch_bank_t *b, const float center_hz[FILT
 
 /** Apply every active notch to the three axes, in place. */
 void filter_notch_bank_apply(filter_notch_bank_t *b, float v[3]);
+
+/* Gyro chain shared by the firmware and the host tests: first-order LPF at
+ * lpf_hz, then the active notches of *notch (may be NULL), at sample period
+ * dt. Runs on every gyro sample (safety S1). lpf_state: one float per axis. */
+void filter_gyro_chain_step(float lpf_state[3], filter_notch_bank_t *notch, float lpf_hz,
+                            float dt, const float in[3], float out[3]);
 
 #ifdef __cplusplus
 }

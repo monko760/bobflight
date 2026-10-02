@@ -44,3 +44,10 @@ export { LOOP_RATE_SETTING_KEY, LOOP_RATE_OPTIONS, LOOP_RATE_OPTION_LABELS, LOOP
 export type { LoopRateOption, LoopRateGetResult, LoopRateSetResult, LoopRateReport, LoopRateSettingView, LoopRateReasonView } from "@bobflight/protocol";
 export { GYRO_NOTCH_KEYS, GYRO_NOTCH_INDEXES, GYRO_NOTCH_UNKNOWN, notchCenterKey, notchCutoffKey, isGyroNotchKey, notchPairProblem, notchWritePlan, parseNotchGetReply, parseFiltersReport, notchRowView, GYRO_NOTCH_MOCK_SCENARIOS } from "@bobflight/protocol";
 export type { GyroNotchKey, GyroNotchIndex, NotchPair, NotchGetResult, FiltersReportResult, NotchRowView, GyroNotchMockScenario } from "@bobflight/protocol";
+export { RPM_FILTER_KEYS, RPM_FILTER_MOTORS, RPM_FILTER_UNKNOWN, isRpmFilterKey, rpmValueProblem, qFromX100, qToX100, parseRpmFilterReport, rpmFilterView, RPM_FILTER_MOCK_SCENARIOS } from "@bobflight/protocol";
+export type { RpmFilterKey, RpmFilterMotor, RpmGetResult, RpmFilterReportResult, RpmFilterView, RpmFilterMockScenario } from "@bobflight/protocol";
+export {
+  MOTOR_DIRECTION_OPTIONS, MOTOR_DIRECTION_UNKNOWN, MOTOR_DIRECTION_COPY, MOTOR_DIRECTION_BENCH_TEST, MOTOR_DIRECTION_MOCK_SCENARIOS,
+  isMotorDirectionOption, motorDirectionSetCommand, parseMotorDirectionGetReply, parseMotorDirectionSetReply, parseMixerReport, motorDirectionView,
+} from "@bobflight/protocol";
+export type { MotorDirectionOption, MotorDirectionGetResult, MixerReport, MotorDirectionView, MotorDirectionMockScenario } from "@bobflight/protocol";

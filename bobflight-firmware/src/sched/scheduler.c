@@ -83,9 +83,12 @@ void scheduler_run(void){
   g_last_gyro_us=now;g_stats.gyro_runs++;g_stats.loop_window_open_gyro++;
   uint64_t gyro_start=hal_micros();loop_gyro();
   maximum(&g_stats.gyro_exec_max_us,hal_micros()-gyro_start);
+  /* Safety S1: gyro LPF + notches on EVERY gyro sample, so a PID divider
+   * (8000/2) never drops a sample unfiltered (no aliasing of HF noise). */
+  loop_filter();
   if(--g_pid_remaining==0){
    g_pid_remaining=g_stats.pid_process_denom;
-   loop_filter();uint64_t pid_start=hal_micros();
+   uint64_t pid_start=hal_micros();
    if(g_stats.pid_runs)interval(pid_start,g_last_pid_us,(uint64_t)g_stats.gyro_period_us*g_stats.pid_process_denom,
     &g_stats.pid_interval_valid,&g_stats.pid_interval_last_us,&g_stats.pid_interval_min_us,
     &g_stats.pid_interval_max_us,&g_stats.pid_jitter_max_us);
