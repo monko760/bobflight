@@ -36,9 +36,9 @@ void rx_stub_set_channels(const float *ch, unsigned n, bool fresh)
     (void)n;
     (void)fresh;
 }
-void rx_link_note_stats(uint8_t uplink_lq)
+void rx_link_note_stats(uint8_t uplink_lq, uint8_t rf_profile)
 {
-    (void)uplink_lq;
+    (void)uplink_lq; (void)rf_profile;
 }
 
 /* LINK_STATISTICS (0x14): addr, len=12, type, 10-byte payload, crc. */
@@ -54,23 +54,30 @@ static int link_stats_checks(void)
 {
     uint8_t f[16], lq = 0xAAu;
     build_link_stats(f, 87u);
-    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 87u) return 1;
+    if (!crsf_parse_link_stats(f, 14u, &lq, NULL) || lq != 87u) return 1;
     build_link_stats(f, 0u); lq = 0xAAu;
-    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 0u) return 2;
+    if (!crsf_parse_link_stats(f, 14u, &lq, NULL) || lq != 0u) return 2;
     build_link_stats(f, 100u);
-    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 100u) return 3;
+    if (!crsf_parse_link_stats(f, 14u, &lq, NULL) || lq != 100u) return 3;
     build_link_stats(f, 101u); lq = 0xAAu;
-    if (crsf_parse_link_stats(f, 14u, &lq) || lq != 0xAAu) return 4; /* not a percentage */
+    if (crsf_parse_link_stats(f, 14u, &lq, NULL) || lq != 0xAAu) return 4; /* not a percentage */
     build_link_stats(f, 50u); f[13] ^= 1u;
-    if (crsf_parse_link_stats(f, 14u, &lq)) return 5;                /* bad CRC */
+    if (crsf_parse_link_stats(f, 14u, &lq, NULL)) return 5;                /* bad CRC */
     build_link_stats(f, 50u);
-    if (crsf_parse_link_stats(f, 13u, &lq)) return 6;                /* truncated */
+    if (crsf_parse_link_stats(f, 13u, &lq, NULL)) return 6;                /* truncated */
     build_link_stats(f, 50u); f[1] = 11u;
-    if (crsf_parse_link_stats(f, 14u, &lq)) return 7;                /* wrong length */
+    if (crsf_parse_link_stats(f, 14u, &lq, NULL)) return 7;                /* wrong length */
     build_link_stats(f, 50u); f[2] = 0x16u; f[13] = crsf_crc8(&f[2], 11u);
-    if (crsf_parse_link_stats(f, 14u, &lq)) return 8;                /* wrong type */
+    if (crsf_parse_link_stats(f, 14u, &lq, NULL)) return 8;                /* wrong type */
     build_link_stats(f, 50u); f[0] = 0xEEu;
-    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 50u) return 9;  /* TX address accepted like RC */
+    if (!crsf_parse_link_stats(f, 14u, &lq, NULL) || lq != 50u) return 9;  /* TX address accepted like RC */
+    /* rf_profile is payload byte 5 (4fps=0, 50fps=1, 150fps=2), passed through verbatim. */
+    for (unsigned rf = 0; rf < 8u; rf++) {
+        uint8_t got = 0xAAu;
+        build_link_stats(f, 66u); f[3 + 5] = (uint8_t)rf; f[13] = crsf_crc8(&f[2], 11u);
+        if (!crsf_parse_link_stats(f, 14u, &lq, &got) || lq != 66u || got != rf) return 10;
+    }
+    if (CRSF_RF_PROFILE_4FPS != 0u) return 11;
     return 0;
 }
 

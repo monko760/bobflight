@@ -4,6 +4,7 @@
  */
 #include "drivers/rx.h"
 #include "drivers/rx_internal.h"
+#include "drivers/crsf.h"
 #include "flight/failsafe.h"
 #include "hal/hal.h"
 #include "board/board.h"
@@ -19,6 +20,7 @@ static const rx_protocol_t *g_proto;
 /* LINK_STATISTICS gate (see rx.h). */
 static bool g_stats_seen;
 static uint8_t g_stats_lq;
+static uint8_t g_stats_rf;
 static uint32_t g_stats_ms;
 /* Last valid RC frame, accepted or held back by the link gate. */
 static bool g_raw_seen;
@@ -29,6 +31,7 @@ static rx_loss_reason_t link_gate(uint32_t now)
     if (!g_stats_seen) return RX_LOSS_NONE; /* absent: frames-only, as before */
     if ((uint32_t)(now - g_stats_ms) > RX_LINK_STATS_STALE_MS) return RX_LOSS_STATS_STALE;
     if (g_stats_lq == 0u) return RX_LOSS_LQ_ZERO;
+    if (g_stats_rf == CRSF_RF_PROFILE_4FPS) return RX_LOSS_RF_MODE_LOW; /* fresh only: stale returned above */
     return RX_LOSS_NONE;
 }
 
@@ -37,7 +40,7 @@ void rx_init(void)
     memset(g_channels, 0, sizeof(g_channels));
     g_fresh = false;
     g_last_frame=0; g_frames=0;
-    g_stats_seen=false; g_stats_lq=0; g_stats_ms=0;
+    g_stats_seen=false; g_stats_lq=0; g_stats_rf=0; g_stats_ms=0;
     g_raw_seen=false; g_last_raw_frame=0;
     g_proto = &rx_crsf;
     if (g_proto->init) {
@@ -114,11 +117,12 @@ const char *rx_protocol_name(void)
 
 uint32_t rx_frame_count(void){return g_frames;}
 
-void rx_link_note_stats(uint8_t uplink_lq)
+void rx_link_note_stats(uint8_t uplink_lq, uint8_t rf_profile)
 {
     if (uplink_lq > 100u) return;
     g_stats_seen = true;
     g_stats_lq = uplink_lq;
+    g_stats_rf = rf_profile;
     g_stats_ms = hal_millis();
 }
 
@@ -143,6 +147,7 @@ const char *rx_loss_reason_name(rx_loss_reason_t reason)
     case RX_LOSS_NO_FRAMES: return "no-frames";
     case RX_LOSS_LQ_ZERO: return "lq-zero";
     case RX_LOSS_STATS_STALE: return "stats-stale";
+    case RX_LOSS_RF_MODE_LOW: return "rf-mode-low";
     default: return "no-frames";
     }
 }

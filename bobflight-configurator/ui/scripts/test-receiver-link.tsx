@@ -9,6 +9,7 @@
  *     StoragePanel `blocked` prop.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -18,6 +19,7 @@ import { ReceiverLinkReadout } from "../src/components/ReceiverLinkReadout";
 import { ReceiverPage } from "../src/pages/ReceiverPage";
 import { parseReceiver, receiverLinkView } from "../src/protocol/receiver";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
+import { parseStatus, shouldDisableArm } from "../src/protocol/parseStatus";
 import type { CliCommand } from "../src/protocol/types";
 
 type Row = [string, string, string];
@@ -27,6 +29,7 @@ const EXPECTED: Record<ReceiverLinkMockScenario, Row> = {
   "present-ok": ["present", "87", "none"],
   "absent": ["absent", "unavailable", "none"],
   "lq-zero": ["present", "0", "lq-zero"],
+  "rf-mode-low": ["present", "64", "rf-mode-low"],
   "stats-stale": ["present", "unavailable", "stats-stale"],
   "no-frames": ["present", "unavailable", "no-frames"],
   "unknown-token": ["partial", "unknown", "rf-jammed"],
@@ -111,6 +114,38 @@ async function main() {
     assert.deepEqual(KEYS.map((k) => staticCells(renderToStaticMarkup(<ReceiverLinkReadout reading={missing} />))[k]), ["present", "87", "unknown"]);
   });
 
+  await test("rx_loss_reason is rendered verbatim with no token allowlist: every FW token (read from rx.c) and unknown ones", () => {
+    const rxC = readFileSync(new URL("../../../bobflight-firmware/src/drivers/rx.c", import.meta.url), "utf8");
+    const fwTokens = [...rxC.matchAll(/case RX_LOSS_[A-Z_]+: return "([a-z-]+)";/g)].map((m) => m[1]);
+    assert.deepEqual([...fwTokens].sort(), ["lq-zero", "no-frames", "none", "rf-mode-low", "stats-stale"], "FW rx_loss_reason tokens");
+    const base = new MockReceiver("present-ok").handle("receiver", false, false)!;
+    for (const tok of [...fwTokens, "rf-mode-lower", "rf_mode_low", "RF-MODE-LOW", "mode-7"]) {
+      const r = parseReceiver(base.replace("rx_loss_reason: none", `rx_loss_reason: ${tok}`));
+      assert.equal(r.rx_loss_reason, tok, "parser keeps the token verbatim");
+      assert.equal(staticCells(renderToStaticMarkup(<ReceiverLinkReadout reading={r} />)).rx_loss_reason, tok, `${tok} rendered verbatim`);
+    }
+  });
+  for (const sc of RECEIVER_LINK_SCENARIOS) {
+    await test(`Arm gate follows the FC failsafe for ${sc} (status failsafe ACTIVE <=> receiver failsafe 1)`, async () => {
+      const m = new MockBobFlightHost({ connectDelayMs: 0, gyroHealthy: true, receiverLinkScenario: sc });
+      await m.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
+      const rx = parseReceiver(String(await m.sendCommand("receiver" as CliCommand)));
+      const st = parseStatus(String(await m.sendCommand("status" as CliCommand)));
+      const lost = rx.failsafe === 1;
+      assert.equal(st.failsafe, lost ? "ACTIVE" : "ok", `${sc}: status failsafe`);
+      assert.equal(shouldDisableArm(st), lost, `${sc}: Arm ${lost ? "blocked" : "open"}`);
+      if (lost) assert.ok(st.failClosedReasons.includes("failsafe:ACTIVE"), `${sc}: fail-closed reason failsafe:ACTIVE`);
+      const armReply = String(await m.sendCommand("arm" as CliCommand));
+      assert.equal(/^armed/.test(armReply), !lost, `${sc}: mock arm ${lost ? "refused" : "accepted"}: ${armReply}`);
+      if (sc === "rf-mode-low") {
+        assert.equal(lost, true, "rf-mode-low is a loss: failsafe 1");
+        assert.deepEqual(KEYS.map((k) => staticCells(renderToStaticMarkup(<ReceiverLinkReadout reading={rx} />))[k]), ["present", "64", "rf-mode-low"]);
+      }
+      if (["lq-zero", "rf-mode-low", "stats-stale", "no-frames"].includes(sc)) assert.equal(lost, true, `${sc}: every loss reason blocks Arm`);
+      await m.disconnect();
+    });
+  }
+
   // ---- real ReceiverPage in the fakeDom harness ----
   const mock = new MockBobFlightHost({ connectDelayMs: 0, receiverLinkScenario: "present-ok" });
   await mock.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
@@ -127,7 +162,7 @@ async function main() {
   const root: Root = createRoot(container as never);
   flushSync(() => root.render(<ReceiverPage />));
   const blockedNote = () => container.textContent.includes("Apply all edits on this page before saving");
-  const order: ReceiverLinkMockScenario[] = ["present-ok", "lq-zero", "stats-stale", "no-frames", "absent", "unknown-token", "old-fc", "present-ok"];
+  const order: ReceiverLinkMockScenario[] = ["present-ok", "lq-zero", "rf-mode-low", "stats-stale", "no-frames", "absent", "unknown-token", "old-fc", "present-ok"];
   for (const sc of order) {
     await test(`ReceiverPage follows each new receiver reply: ${sc}`, async () => {
       mock.setMockGates({ receiverLinkScenario: sc });

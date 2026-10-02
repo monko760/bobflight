@@ -194,7 +194,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
       arm-stale-edge arm-throttle-edge arm-bench-edge arm-calibration-edge arm-health-edge
       arm-middle-range arm-inclusive-boundaries arm-always-active arm-custom-land
       arm-custom-hold arm-config-independent-source arm-tilt-edge arm-uncalibrated-edge
-      link-lq-zero link-stats-stale link-absent link-recovery)
+      link-lq-zero link-stats-stale link-rf-mode-low link-absent link-recovery)
     add_test(NAME failsafe_integration_${fs_case}
       COMMAND bobflight_failsafe_integration_test ${fs_case})
   endforeach()

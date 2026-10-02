@@ -104,7 +104,9 @@ static void rcframe_v(uint8_t f[26],uint16_t thr,uint16_t aux){
  f[25]=crsf_crc8(f+2,23);
 }
 /* CRSF LINK_STATISTICS (0x14), uplink LQ at payload byte 2. */
-static void stats(uint8_t lq){uint8_t s[14]={0xc8,12,0x14,60,62,lq,9,0,7,3,70,98,5,0};s[13]=crsf_crc8(s+2,11);feed(s,14);}
+/* LINK_STATISTICS: uplink LQ at payload byte 2, rf_profile at payload byte 5 (4fps=0, 50fps=1, 150fps=2). */
+static void stats_rf(uint8_t lq,uint8_t rf){uint8_t s[14]={0xc8,12,0x14,60,62,lq,9,0,rf,3,70,98,5,0};s[13]=crsf_crc8(s+2,11);feed(s,14);}
+static void stats(uint8_t lq){stats_rf(lq,2);}
 /* Armed at throttle .8 with a CRSF stream (frames every ms, stats every 20 ms with `lq`). */
 static void start_link(uint8_t f[26],int lq){
  start();rcframe(f);
@@ -267,6 +269,33 @@ int main(int argc,char **argv){
   REQUIRE(rx_loss_reason()==RX_LOSS_STATS_STALE&&rx_link_lq()==-1&&rx_link_stats_present());
   for(unsigned i=0;i<2000;i++){feed(f,26);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active());}
   printf("Stats stale: disarmed %u ms after the last LINK_STATISTICS frame (1000 ms stale + 250 ms failsafe)\n",dt);
+ }else if(!strcmp(name,"link-rf-mode-low")){
+  /* Link drops to CRSF 4 fps (rf_profile 0) mid-flight with LQ still > 0 and valid frames still
+   * arriving -> existing failsafe -> DROP ~250 ms later, exactly like LQ 0. */
+  uint8_t f[26],low[26],arm[26];start_link(f,90);rcframe_v(low,172,172);rcframe_v(arm,172,1811);
+  stats_rf(90,0);uint32_t t0=hal_millis();
+  uint32_t dt=frames_until_disarm(f,t0,1000);
+  REQUIRE(dt>=250&&dt<=252);REQUIRE(all(0)&&failsafe_active()&&failsafe_stage()==FAILSAFE_STAGE_PROCEDURE);
+  REQUIRE(rx_loss_reason()==RX_LOSS_RF_MODE_LOW&&rx_link_lq()==90&&!rx_frame_fresh());
+  REQUIRE(!strcmp(rx_loss_reason_name(rx_loss_reason()),"rf-mode-low"));
+  /* Arm gate: failsafe stays ACTIVE and a deliberate low -> high arm edge does not arm. */
+  for(unsigned i=0;i<20;i++){feed(i<10?low:arm,26);if(i%10==0)stats_rf(90,0);step();
+   REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active()&&rx_loss_reason()==RX_LOSS_RF_MODE_LOW);}
+  /* No shortcut out of failsafe: 2 s more of valid frames at 4 fps keep it ACTIVE. */
+  for(unsigned i=0;i<2000;i++){feed(f,26);if(i%20==0)stats_rf(90,0);step();
+   REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active());}
+  /* rf back to 150 fps but LQ 0: still closed (lq-zero), still ACTIVE. */
+  stats_rf(0,2);feed(f,26);step();REQUIRE(failsafe_active()&&rx_loss_reason()==RX_LOSS_LQ_ZERO&&!rx_frame_fresh());
+  /* rf 1 + LQ 80 with NO RC frame: stats alone clear nothing (existing rule: an accepted frame clears). */
+  stats_rf(80,1);step();step();REQUIRE(failsafe_active()&&failsafe_stage()==FAILSAFE_STAGE_PROCEDURE&&!rx_frame_fresh());
+  /* The first accepted RC frame clears failsafe (existing failsafe_note_rx_frame rule), not earlier. */
+  feed(f,26);step();REQUIRE(!failsafe_active()&&rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE&&rx_link_lq()==80);
+  /* No automatic re-arm: arm switch still high for 2 s stays disarmed. */
+  for(unsigned i=0;i<2000;i++){feed(f,26);if(i%20==0)stats_rf(80,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));}
+  for(unsigned i=0;i<5;i++){feed(low,26);step();}
+  for(unsigned i=0;i<5;i++){feed(arm,26);step();}
+  REQUIRE(arming_state()==ARM_ARMED);
+  printf("rf_profile 0 (4 fps): disarmed %u ms after the stats frame, failsafe ACTIVE, arm edge refused; cleared only by rf!=0+LQ>0 stats AND an accepted frame; explicit low->high re-arms\n",dt);
  }else if(!strcmp(name,"link-absent")){
   /* No stats ever: frames-only exactly as today (frozen frames keep it armed; stopping drops). */
   uint8_t f[26];start_link(f,-1);

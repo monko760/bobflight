@@ -28,10 +28,13 @@ bool crsf_parse_rc_frame(const uint8_t *frame, size_t n, float out[16]);
 
 /**
  * Parse one CRSF LINK_STATISTICS frame (type 0x14, 10-byte payload).
- * Writes the uplink link quality (%, payload byte 2). Rejects wrong sync,
+ * Writes the uplink link quality (%, payload byte 2) and, when rf_profile is
+ * not NULL, the RF profile (payload byte 5; CRSF spec enum 4fps=0, 50fps=1,
+ * 150fps=2; other values are passed through unchanged). Rejects wrong sync,
  * length, type, CRC, or an uplink LQ above 100.
  */
-bool crsf_parse_link_stats(const uint8_t *frame, size_t n, uint8_t *uplink_lq);
+#define CRSF_RF_PROFILE_4FPS 0u
+bool crsf_parse_link_stats(const uint8_t *frame, size_t n, uint8_t *uplink_lq, uint8_t *rf_profile);
 
 #ifdef __cplusplus
 }
