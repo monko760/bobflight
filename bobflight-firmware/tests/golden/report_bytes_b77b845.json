@@ -1,0 +1,14 @@
+{
+ "dummy": {
+  "status": "board: dummy\r\nir: dummy\r\nmcu: STM32F722 hse_mhz=0\r\nusb_clk: host\r\ngyro_ok: no\r\ngyro_bind: dummy\r\ndshot_bound: 0/4\r\nrx: CRSF unbound\r\nmmio: denied\r\narm: disarmed\r\nfailsafe: ACTIVE\r\nloop: gyro=1000 Hz denom=1 cascade=1 bg=0\r\nloop_target_hz: 1000\r\nloop_actual_hz: unavailable\r\nloop_overruns: 0\r\nflight_mode: closed-loop-development\r\ngyro_calibrated: no\r\ngyro_dps: 0.00 0.00 0.00\r\naccel_g: 0.000 0.000 0.000\r\nattitude_deg: 0.00 0.00\r\nrx_uart: 0\r\nrx_fresh: no\r\nrx_frames: 0\r\nchannels: 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000\r\nmotor_output: unavailable\r\n",
+  "filters": "filters_api: 1\r\nfilters_sample_hz: 1000\r\ngyro_notch1_active: no\r\ngyro_notch1_reason: off\r\ngyro_notch2_active: no\r\ngyro_notch2_reason: off\r\nfilters_end: 1\r\n"
+ },
+ "kakute_f7_hdv": {
+  "status": "board: kakute_f7_hdv\r\nir: bf-derived\r\nmcu: STM32F745 hse_mhz=8\r\nusb_clk: host\r\ngyro_ok: no\r\ngyro_bind: bf-derived\r\ndshot_bound: 4/4\r\nrx: CRSF bound\r\nmmio: allowed (bf-derived)\r\narm: disarmed\r\nfailsafe: ACTIVE\r\nloop: gyro=8000 Hz denom=2 cascade=1 bg=0\r\nloop_target_hz: 4000\r\nloop_actual_hz: unavailable\r\nloop_overruns: 0\r\nflight_mode: closed-loop-development\r\ngyro_calibrated: no\r\ngyro_dps: 0.00 0.00 0.00\r\naccel_g: 0.000 0.000 0.000\r\nattitude_deg: 0.00 0.00\r\nrx_uart: 6\r\nrx_fresh: no\r\nrx_frames: 0\r\nchannels: 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000\r\nmotor_output: unavailable\r\n",
+  "filters": "filters_api: 1\r\nfilters_sample_hz: 4000\r\ngyro_notch1_active: no\r\ngyro_notch1_reason: off\r\ngyro_notch2_active: no\r\ngyro_notch2_reason: off\r\nfilters_end: 1\r\n"
+ },
+ "tmotor_f7_v2": {
+  "status": "board: tmotor_f7_v2\r\nir: bf-derived\r\nmcu: STM32F722 hse_mhz=8\r\nusb_clk: host\r\ngyro_ok: no\r\ngyro_bind: bf-derived\r\ndshot_bound: 4/4\r\nrx: CRSF bound\r\nmmio: allowed (bf-derived)\r\narm: disarmed\r\nfailsafe: ACTIVE\r\nloop: gyro=1000 Hz denom=1 cascade=1 bg=0\r\nloop_target_hz: 1000\r\nloop_actual_hz: unavailable\r\nloop_overruns: 0\r\nflight_mode: closed-loop-development\r\ngyro_calibrated: no\r\ngyro_dps: 0.00 0.00 0.00\r\naccel_g: 0.000 0.000 0.000\r\nattitude_deg: 0.00 0.00\r\nrx_uart: 2\r\nrx_fresh: no\r\nrx_frames: 0\r\nchannels: 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000\r\nmotor_output: unavailable\r\n",
+  "filters": "filters_api: 1\r\nfilters_sample_hz: 1000\r\ngyro_notch1_active: no\r\ngyro_notch1_reason: off\r\ngyro_notch2_active: no\r\ngyro_notch2_reason: off\r\nfilters_end: 1\r\n"
+ }
+}

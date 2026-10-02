@@ -98,9 +98,9 @@ async function main(){
  await test('MockRpmFilter: eight scenarios produce the FW report shape',()=>{
   assert.deepEqual([...RPM_FILTER_MOCK_SCENARIOS],['off','ok','bidir-off','erpm-unavailable','trimmed-1k','old-fc','off-erpm-live','active-partial']);
   const U='unavailable',live=['180','182','179','185'];
-  const exp={off:['4000','0','0','no','off',[U,U,U,U]],ok:['4000','3','3','yes','ok',live],'bidir-off':['4000','2','0','no','bidir-off',[U,U,U,U]],
-   'erpm-unavailable':['4000','2','0','no','erpm-unavailable',[U,U,U,U]],'trimmed-1k':['1000','3','1','yes','ok',live],'off-erpm-live':['4000','0','0','no','off',[U,U,U,U]],
-   'active-partial':['4000','3','3','yes','ok',['180',U,'179','185']]};
+  const exp={off:['8000','0','0','no','off',[U,U,U,U]],ok:['8000','3','3','yes','ok',live],'bidir-off':['8000','2','0','no','bidir-off',[U,U,U,U]],
+   'erpm-unavailable':['8000','2','0','no','erpm-unavailable',[U,U,U,U]],'trimmed-1k':['1000','3','1','yes','ok',live],'off-erpm-live':['8000','0','0','no','off',[U,U,U,U]],
+   'active-partial':['8000','3','3','yes','ok',['180',U,'179','185']]};
   for(const [s,[hz,h,run,a,r,m]] of Object.entries(exp)){
    const mock=new MockRpmFilter(s),raw=mock.handle('rpm_filter',false),rep=parseRpmFilterReport(raw).report;
    assert.ok(rpmFilterReportIsExact(raw),`${s}: mock report in the frozen shape`);

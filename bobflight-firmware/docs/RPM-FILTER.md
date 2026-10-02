@@ -46,7 +46,7 @@ Frozen by the Configurator Lead: exactly these lines, in this order.
 rpm_filter_api: 1
 rpm_filter_active: yes
 rpm_filter_reason: ok
-rpm_filter_sample_hz: 4000
+rpm_filter_sample_hz: 8000
 rpm_filter_harmonics_active: 3
 rpm_filter_m1_hz: 180
 rpm_filter_m2_hz: 182
@@ -56,8 +56,10 @@ rpm_filter_end: 1
 ```
 
 * `rpm_filter_active`: `yes` if and only if the reason is `ok`.
-* `rpm_filter_sample_hz`: the filter rate running now (the loop rate).
-* `rpm_filter_harmonics_active`: harmonics that run after the loop-rate trim (0 unless the reason is `ok`).
+* `rpm_filter_sample_hz`: the filter rate running now: the gyro rate, because the RPM notches run
+  inside `gyro_filter()` on every gyro sample (safety S1, [SAFETY-NOISE.md](SAFETY-NOISE.md)).
+  8000 on the default Kakute profile (8000/2), 1000 at 1000/1.
+* `rpm_filter_harmonics_active`: harmonics that run after the filter-rate trim (0 unless the reason is `ok`).
   The setting itself is not in the report; read it with `get rpm_filter_harmonics`.
 * `rpm_filter_reason`, highest precedence first:
   * `off`: harmonics 0.
@@ -95,7 +97,9 @@ rpm_filter_end: 1
 
 * Apply: 36 biquads + crossfade ≈ 540 cycles.
 * One round-robin motor update ≈ 500 cycles.
-* Total ≈ 1100–1300 cycles ≈ 5–6 µs, about 2.4 % of a 4 kHz slot.
+* Total ≈ 1100–1300 cycles ≈ 5–6 µs per gyro sample. Since S1 it runs on every gyro sample, so
+  at 8000/2 it costs about 4.4–4.8 % of the CPU (8000 × 5–6 µs), twice the 2.2–2.4 % it cost
+  when it ran in the 4 kHz PID slot.
 * A dt or setting change recomputes all motors once (≈ 2000-cycle spike).
 * Estimate only. No hardware measurement has been made.
 

@@ -17,7 +17,9 @@ extern "C" {
 #define MIXER_MOTOR_COUNT 4
 
 void mixer_init(void);
-/** Fill motor[4] in [0,1]. QUADX; clamps each channel. */
+/** Fill motor[4] in [min_throttle,1]. QUADX. Desaturates instead of clipping
+ * (rule in mixer.c / docs/SAFETY-NOISE.md) and reports whether the PID part
+ * had to be scaled down via pid_set_mixer_saturated() (I-term anti-windup). */
 void mixer_update(const pid_axis_out_t *pid, float throttle, float motor_out[MIXER_MOTOR_COUNT]);
 /** +1 for motor_direction props-out (yaw signs unchanged), -1 for props-in (yaw term negated). */
 float mixer_yaw_direction(void);
