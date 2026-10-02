@@ -185,13 +185,26 @@ migrated or overwritten.
   `filters`, `loop_rate` and `receiver` keep b77b845's keys in the same order
   (golden `tests/golden/report_keys_b77b845.json`). b77b845 has no
   `rpm_filter` command, so that one is recorded absent and skipped.
+* `report_bytes_contract` (host, real binary, every board): `status` is
+  byte-identical to b77b845 (only the timing counters `cascade=`, `bg=` and
+  `loop_overruns` may differ, and must stay plain integers); `filters` is
+  byte-identical except `filters_sample_hz` on Kakute (4000 -> 8000). Golden
+  `tests/golden/report_bytes_b77b845.json`. Catches value-format changes the
+  key/order contract cannot see.
+* `init_dterm_order` (host): the real `app_init()` turns the second D stage
+  on for Kakute at 8 kHz ODR (`loop_rate_hz` 4000/8000) and off for
+  tmotor_f7_v2 (1 kHz), Kakute at 1000, dummy and a failed rate write,
+  deciding after the gyro rate select. Boot dependencies are stubbed; the
+  gyro stub mirrors the driver's ODR bookkeeping.
 * Configurator `ui/scripts/test-arm-gate-real-status.cjs`: real host `status`
-  output into the Configurator parser; Arm is blocked on `failsafe: ACTIVE`,
-  on `gyro_ok: no`, and on both, and open only when both are clear.
+  output (dummy, kakute_f7_hdv, tmotor_f7_v2) into the Configurator parser;
+  Arm is blocked on `failsafe: ACTIVE`, on `gyro_ok: no`, and on both, and
+  open only when both are clear. The dummy capture's `mmio: denied` with both
+  gating lines clear must NOT block: mmio is display-only.
 
 ## Not verified
 
 Flight behaviour, real motor/ESC thrust (the tables use decoded DShot
-commands), MCU CPU time of the per-sample filter, and the boot-time wiring
-that turns the second-order D filter on (`init.c`, needs a real 8 kHz gyro;
-the host gyro reports no output rate).
+commands), MCU CPU time of the per-sample filter, and the real MPU6000
+reporting 8 kHz ODR on hardware (`init_dterm_order` covers init.c's decision
+with a gyro stub; the host gyro itself reports no output rate).

@@ -250,6 +250,16 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_noise_saturation_test m)
   add_test(NAME noise_saturation COMMAND bobflight_noise_saturation_test --table)
   set_tests_properties(noise_saturation PROPERTIES TIMEOUT 120)
+  # Real app_init (init.c) picks the D-term filter order from the configured gyro ODR.
+  add_executable(bobflight_init_dterm_order_test tests/host_init_dterm_order.c src/app/init.c
+    src/flight/pid.c src/flight/filter.c src/flight/config.c src/sched/loop_rate_setting.c)
+  add_dependencies(bobflight_init_dterm_order_test bobflight_pins_gen)
+  target_compile_definitions(bobflight_init_dterm_order_test PRIVATE BOBFLIGHT_HOST=1)
+  target_link_libraries(bobflight_init_dterm_order_test m)
+  add_test(NAME init_dterm_order COMMAND bobflight_init_dterm_order_test)
+  # Report bytes: status byte-identical to b77b845; filters only filters_sample_hz (Kakute 4000 -> 8000).
+  add_test(NAME report_bytes_contract COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_report_bytes_contract.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   # Report contract: status/filters/loop_rate/receiver keys and order equal b77b845.
   add_test(NAME report_keys_contract COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_report_keys_contract.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
