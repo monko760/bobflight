@@ -96,6 +96,27 @@ static void rcframe(uint8_t f[26]){
  for(unsigned c=0;c<16;c++)for(unsigned b=0;b<11;b++)if(val[c]&(1u<<b))f[3+(c*11+b)/8]|=1u<<((c*11+b)%8);
  f[25]=crsf_crc8(f+2,23);
 }
+/* CRSF RC frame with raw 11-bit throttle (AETR ch3) and AUX1 (ch5). */
+static void rcframe_v(uint8_t f[26],uint16_t thr,uint16_t aux){
+ uint16_t val[16];for(unsigned i=0;i<16;i++)val[i]=992;val[2]=thr;val[4]=aux;
+ memset(f,0,26);f[0]=0xc8;f[1]=24;f[2]=0x16;
+ for(unsigned c=0;c<16;c++)for(unsigned b=0;b<11;b++)if(val[c]&(1u<<b))f[3+(c*11+b)/8]|=1u<<((c*11+b)%8);
+ f[25]=crsf_crc8(f+2,23);
+}
+/* CRSF LINK_STATISTICS (0x14), uplink LQ at payload byte 2. */
+static void stats(uint8_t lq){uint8_t s[14]={0xc8,12,0x14,60,62,lq,9,0,7,3,70,98,5,0};s[13]=crsf_crc8(s+2,11);feed(s,14);}
+/* Armed at throttle .8 with a CRSF stream (frames every ms, stats every 20 ms with `lq`). */
+static void start_link(uint8_t f[26],int lq){
+ start();rcframe(f);
+ for(unsigned i=0;i<200;i++){feed(f,26);if(lq>=0&&i%20==0)stats((uint8_t)lq);step();}
+ REQUIRE(arming_state()==ARM_ARMED&&all(encode(.8f))&&!failsafe_active());
+ REQUIRE(rx_link_stats_present()==(lq>=0)&&rx_loss_reason()==RX_LOSS_NONE);
+}
+/* Frames keep coming (frozen but valid); returns ms from `t0` to the first disarmed step. */
+static uint32_t frames_until_disarm(const uint8_t f[26],uint32_t t0,unsigned max_ms){
+ for(unsigned i=0;i<max_ms;i++){feed(f,26);step();if(arming_state()!=ARM_ARMED)return hal_millis()-t0;}
+ return UINT32_MAX;
+}
 int main(int argc,char **argv){
  REQUIRE(argc==2);const char *name=argv[1];setup(!strcmp(name,"drop-wrap"));
  if(!strcmp(name,"arm-aux12-output")){
@@ -228,6 +249,45 @@ int main(int argc,char **argv){
  }else if(!strcmp(name,"usb-flight-path")){
   start();usb=false;controls(.8f,1);step();REQUIRE(arming_state()==ARM_ARMED);
   puts("USB loss alone is not flight RX loss; current native armed path continues with fresh receiver.");
+ }else if(!strcmp(name,"link-lq-zero")){
+  /* Frozen-but-valid frames + LQ 0 -> existing failsafe -> DROP ~250 ms later. */
+  uint8_t f[26];start_link(f,90);
+  stats(0);uint32_t t0=hal_millis();
+  uint32_t dt=frames_until_disarm(f,t0,1000);
+  REQUIRE(dt>=250&&dt<=252);REQUIRE(all(0)&&failsafe_active()&&failsafe_stage()==FAILSAFE_STAGE_PROCEDURE);
+  REQUIRE(rx_loss_reason()==RX_LOSS_LQ_ZERO&&rx_link_lq()==0&&!rx_frame_fresh());
+  for(unsigned i=0;i<5000;i++){feed(f,26);if(i%20==0)stats(0);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active());}
+  printf("LQ 0 with frozen valid frames: disarmed %u ms after LQ 0, DShot 0, failsafe ACTIVE for 5 s more\n",dt);
+ }else if(!strcmp(name,"link-stats-stale")){
+  /* Stats stop for >1 s while frames continue -> failsafe ~250 ms after the gate closes. */
+  uint8_t f[26];start_link(f,90);
+  stats(90);feed(f,26);step();uint32_t t_stats=hal_millis();
+  uint32_t dt=frames_until_disarm(f,t_stats,3000);
+  REQUIRE(dt>=1250&&dt<=1252);REQUIRE(all(0)&&failsafe_active());
+  REQUIRE(rx_loss_reason()==RX_LOSS_STATS_STALE&&rx_link_lq()==-1&&rx_link_stats_present());
+  for(unsigned i=0;i<2000;i++){feed(f,26);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active());}
+  printf("Stats stale: disarmed %u ms after the last LINK_STATISTICS frame (1000 ms stale + 250 ms failsafe)\n",dt);
+ }else if(!strcmp(name,"link-absent")){
+  /* No stats ever: frames-only exactly as today (frozen frames keep it armed; stopping drops). */
+  uint8_t f[26];start_link(f,-1);
+  for(unsigned i=0;i<5000;i++){feed(f,26);step();}
+  REQUIRE(arming_state()==ARM_ARMED&&all(encode(.8f))&&!failsafe_active());
+  REQUIRE(!rx_link_stats_present()&&rx_link_lq()==-1&&rx_loss_reason()==RX_LOSS_NONE);
+  uint32_t t0=hal_millis();while(arming_state()==ARM_ARMED&&hal_millis()-t0<1000)step();
+  REQUIRE(hal_millis()-t0>=250&&hal_millis()-t0<=252&&all(0)&&failsafe_active()&&rx_loss_reason()==RX_LOSS_NO_FRAMES);
+  puts("Absent stats: 5 s of frozen frames stay armed (frames-only, unchanged); frame stop drops at 251 ms.");
+ }else if(!strcmp(name,"link-recovery")){
+  /* After an LQ-0 failsafe, the link returning with the arm switch still high never re-arms. */
+  uint8_t f[26],low[26],arm[26];start_link(f,90);rcframe_v(low,172,172);rcframe_v(arm,172,1811);
+  stats(0);REQUIRE(frames_until_disarm(f,hal_millis(),1000)<=252);
+  for(unsigned i=0;i<2000;i++){feed(f,26);if(i%20==0)stats(80);step();
+   REQUIRE(arming_state()==ARM_DISARMED&&all(0));}
+  REQUIRE(!failsafe_active()&&rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE&&rx_link_lq()==80);
+  /* The link is genuinely usable again: a deliberate low -> high edge at idle arms. */
+  for(unsigned i=0;i<5;i++){feed(low,26);step();}
+  for(unsigned i=0;i<5;i++){feed(arm,26);step();}
+  REQUIRE(arming_state()==ARM_ARMED);
+  puts("Recovery: link back (LQ 80) with arm switch high stays disarmed for 2 s; explicit low->high re-arms.");
  }else{fprintf(stderr,"Unknown case: %s\n",name);return 2;}
  printf("PASS audit case: %s\n",name);return 0;
 }

@@ -36,6 +36,43 @@ void rx_stub_set_channels(const float *ch, unsigned n, bool fresh)
     (void)n;
     (void)fresh;
 }
+void rx_link_note_stats(uint8_t uplink_lq)
+{
+    (void)uplink_lq;
+}
+
+/* LINK_STATISTICS (0x14): addr, len=12, type, 10-byte payload, crc. */
+static void build_link_stats(uint8_t f[14], uint8_t lq)
+{
+    const uint8_t payload[10] = {60u, 62u, lq, 9u, 0u, 7u, 3u, 70u, 98u, 5u};
+    f[0] = 0xC8u; f[1] = 12u; f[2] = 0x14u;
+    memcpy(&f[3], payload, 10);
+    f[13] = crsf_crc8(&f[2], 11u);
+}
+
+static int link_stats_checks(void)
+{
+    uint8_t f[16], lq = 0xAAu;
+    build_link_stats(f, 87u);
+    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 87u) return 1;
+    build_link_stats(f, 0u); lq = 0xAAu;
+    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 0u) return 2;
+    build_link_stats(f, 100u);
+    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 100u) return 3;
+    build_link_stats(f, 101u); lq = 0xAAu;
+    if (crsf_parse_link_stats(f, 14u, &lq) || lq != 0xAAu) return 4; /* not a percentage */
+    build_link_stats(f, 50u); f[13] ^= 1u;
+    if (crsf_parse_link_stats(f, 14u, &lq)) return 5;                /* bad CRC */
+    build_link_stats(f, 50u);
+    if (crsf_parse_link_stats(f, 13u, &lq)) return 6;                /* truncated */
+    build_link_stats(f, 50u); f[1] = 11u;
+    if (crsf_parse_link_stats(f, 14u, &lq)) return 7;                /* wrong length */
+    build_link_stats(f, 50u); f[2] = 0x16u; f[13] = crsf_crc8(&f[2], 11u);
+    if (crsf_parse_link_stats(f, 14u, &lq)) return 8;                /* wrong type */
+    build_link_stats(f, 50u); f[0] = 0xEEu;
+    if (!crsf_parse_link_stats(f, 14u, &lq) || lq != 50u) return 9;  /* TX address accepted like RC */
+    return 0;
+}
 
 static int fail(const char *msg)
 {
@@ -149,6 +186,14 @@ int main(void)
         (void)crsf_crc8(&t, 1);
     }
 
-    puts("PASS: CRSF CRC8 / RC channel parse");
+    {
+        int rc = link_stats_checks();
+        if (rc) {
+            fprintf(stderr, "FAIL: link stats check %d\n", rc);
+            return 1;
+        }
+    }
+
+    puts("PASS: CRSF CRC8 / RC channel parse / LINK_STATISTICS parse");
     return 0;
 }

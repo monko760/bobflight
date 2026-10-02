@@ -34,6 +34,31 @@ uint32_t rx_frame_age_ms(void);
 bool rx_uart_bound(void);
 const char *rx_protocol_name(void);
 
+/*
+ * CRSF LINK_STATISTICS (frame type 0x14) link gate. No setting.
+ * Until the first valid stats frame since rx_init() (boot, receiver_map or
+ * receiver_uart change) the gate is open: loss detection is frames-only.
+ * Once stats have been seen, an uplink LQ of 0, or no stats frame for more
+ * than RX_LINK_STATS_STALE_MS, closes the gate: valid RC frames are then NOT
+ * accepted (channels, frame count and the failsafe loss timer are left
+ * untouched), so the existing 250 ms failsafe timeout runs exactly as if the
+ * frames had stopped. A stats frame with LQ > 0 reopens the gate; the next
+ * RC frame is accepted again (no automatic re-arm: arming needs a new edge).
+ */
+#define RX_LINK_STATS_STALE_MS 1000u
+typedef enum {
+    RX_LOSS_NONE = 0,
+    RX_LOSS_NO_FRAMES,   /* no valid RC frame (accepted or gated) for >250 ms, or never */
+    RX_LOSS_LQ_ZERO,     /* stats seen, latest uplink LQ is 0 */
+    RX_LOSS_STATS_STALE  /* stats seen, none for >RX_LINK_STATS_STALE_MS */
+} rx_loss_reason_t;
+/** True once a valid LINK_STATISTICS frame arrived since rx_init(). */
+bool rx_link_stats_present(void);
+/** Latest uplink LQ 0..100 while stats are present and not stale; -1 otherwise. */
+int rx_link_lq(void);
+rx_loss_reason_t rx_loss_reason(void);
+const char *rx_loss_reason_name(rx_loss_reason_t reason);
+
 extern const rx_protocol_t rx_crsf;
 
 #ifdef __cplusplus

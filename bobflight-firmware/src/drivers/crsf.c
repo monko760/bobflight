@@ -18,6 +18,9 @@
 #define CRSF_SYNC_FC     0xC8u
 #define CRSF_SYNC_TX     0xEEu
 #define CRSF_TYPE_RC     0x16u
+#define CRSF_TYPE_LINK_STATS 0x14u /* public CRSF_FRAMETYPE_LINK_STATISTICS */
+#define CRSF_LINK_STATS_PAYLOAD 10u /* rssi1, rssi2, uplink LQ %, snr, ant, rf mode, tx pwr, dl rssi, dl LQ, dl snr */
+#define CRSF_LINK_STATS_LQ_OFFSET 2u /* uplink link quality (%) within the payload */
 #define CRSF_MAX_FRAME   64u
 #define CRSF_RC_PAYLOAD  22u /* 16 × 11-bit channels */
 #define CRSF_CH_MID      992u
@@ -122,6 +125,18 @@ bool crsf_parse_rc_frame(const uint8_t *frame, size_t n, float out[16])
     return true;
 }
 
+bool crsf_parse_link_stats(const uint8_t *frame, size_t n, uint8_t *uplink_lq)
+{
+    const unsigned len = 1u + CRSF_LINK_STATS_PAYLOAD + 1u;
+    if (!frame || !uplink_lq || n < len + 2u) return false;
+    if (frame[0] != CRSF_SYNC_FC && frame[0] != CRSF_SYNC_TX) return false;
+    if (frame[1] != len || frame[2] != CRSF_TYPE_LINK_STATS) return false;
+    if (crsf_crc8(&frame[2], len - 1u) != frame[len + 1u]) return false;
+    if (frame[3u + CRSF_LINK_STATS_LQ_OFFSET] > 100u) return false; /* not a percentage */
+    *uplink_lq = frame[3u + CRSF_LINK_STATS_LQ_OFFSET];
+    return true;
+}
+
 static void crsf_consume_frames(void)
 {
     while (g_rxlen >= 3u) {
@@ -168,6 +183,9 @@ static void crsf_consume_frames(void)
             float controls[16];
             crsf_to_controls(ch,controls);
             rx_stub_set_channels(controls,16,true);
+        } else if (type_ptr[0] == CRSF_TYPE_LINK_STATS) {
+            uint8_t lq;
+            if (crsf_parse_link_stats(g_rxbuf, frame_bytes, &lq)) rx_link_note_stats(lq);
         }
 
         if (g_rxlen > frame_bytes) {

@@ -23,6 +23,7 @@ import {
   isGyroNotchCliCommand,
   type GyroNotchMockScenario,
   type LoopRateMockScenario,
+  type ReceiverLinkMockScenario,
   type SettingsKey,
 } from "@bobflight/protocol";
 import type {
@@ -81,7 +82,8 @@ export class MockBobFlightHost implements BobFlightHost {
   /** Manual gyro notches (schema 8; same wire as protocol MockSerial). */
   private readonly gyroNotch: MockGyroNotch;
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario }) {
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario }) {
+    if (opts?.receiverLinkScenario) this.receiver.setScenario(opts.receiverLinkScenario);
     this.gyroNotch = new MockGyroNotch(opts?.gyroNotchScenario ?? "off");
     this.connectDelayMs = opts?.connectDelayMs ?? 180;
     this.gyroHealthy = opts?.gyroHealthy ?? false;
@@ -390,7 +392,9 @@ export class MockBobFlightHost implements BobFlightHost {
     failsafeActive?: boolean;
     loopRateScenario?: LoopRateMockScenario;
     gyroNotchScenario?: GyroNotchMockScenario;
+    receiverLinkScenario?: ReceiverLinkMockScenario;
   }): void {
+    if (opts.receiverLinkScenario !== undefined) this.receiver.setScenario(opts.receiverLinkScenario);
     if (opts.loopRateScenario !== undefined) {
       this.loopRateScenario = opts.loopRateScenario;
       this.dshotBidir = mockLoopRateBidir(opts.loopRateScenario);

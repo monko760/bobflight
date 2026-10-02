@@ -26,6 +26,13 @@ uint8_t crsf_crc8(const uint8_t *data, size_t len);
  */
 bool crsf_parse_rc_frame(const uint8_t *frame, size_t n, float out[16]);
 
+/**
+ * Parse one CRSF LINK_STATISTICS frame (type 0x14, 10-byte payload).
+ * Writes the uplink link quality (%, payload byte 2). Rejects wrong sync,
+ * length, type, CRC, or an uplink LQ above 100.
+ */
+bool crsf_parse_link_stats(const uint8_t *frame, size_t n, uint8_t *uplink_lq);
+
 #ifdef __cplusplus
 }
 #endif
