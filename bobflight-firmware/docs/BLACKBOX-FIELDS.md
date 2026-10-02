@@ -165,7 +165,21 @@ One counting difference is deliberate: a loop that is not due is no longer valid
 
 ## Upgrade note (schema 2 → 3)
 
-- **Field count is 46 → 54.** The duplicate `bobflightIteration` (identical to `loopIteration`) is **removed**. The nine new fields are appended after `bobflightOutputHealthy`, so fields 0–44 keep their names, order, signedness and units. Decoders that look fields up by name (as Explorer does) keep working. Positional decoders must re-read the `H Field I name` list.
+- **Field count is 46 → 54.** The duplicate `bobflightIteration` (schema 2 field 40, identical to `loopIteration`) is **removed**, and the nine new fields are appended after `bobflightOutputHealthy`.
+- **Only fields 0–39 keep their positions.** Removing field 40 moves every later schema 2 field down by one:
+
+  | Field | Schema 2 # | Schema 3 # |
+  |---|---|---|
+  | `loopIteration` … `bobflightDropped` | 0–39 | 0–39 (unchanged) |
+  | `bobflightIteration` | 40 | removed |
+  | `bobflightSchema` | 41 | 40 |
+  | `bobflightPidValid` | 42 | 41 |
+  | `bobflightGyroValid` | 43 | 42 |
+  | `bobflightRxFresh` | 44 | 43 |
+  | `bobflightOutputHealthy` | 45 | 44 |
+  | `eRPM[0..3]` … `bobflightOverruns` (new) | — | 45–53 |
+
+  Names, signedness and units are unchanged for every field that stays. A decoder that reads fields by position breaks from field 40 on: it would read `bobflightSchema` as `bobflightIteration` and every validity flag one slot off. Look fields up by name from the `H Field I name` header list (as Explorer does); such decoders keep working.
 - `bobflightSchema` is now 3, and the header carries `H BobFlight log_schema:3`. Check the header key, or the first frame, before you interpret the new fields.
 - New header keys: board, fw_version, loop/gyro/denom and filter settings (listed above). Existing header lines and the 128-byte rate block are unchanged.
 - **Unchanged**: CLI keys, `blackbox status` (api 2) keys and values, the recorder rates (125/250/500/1000 Hz, default 500), the 64 KiB ring and file naming. The firmware version string is also unchanged in this change: tell builds apart by `H BobFlight log_schema:3`.
