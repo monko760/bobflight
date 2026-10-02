@@ -3,12 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Host unit test: motor_direction (schema 10) in the real QUADX mixer.
- * props-out must reproduce the pre-setting mixer (flight/mixer.c lines 52-56 at
- * 870e601) bit for bit; props-in must be exactly that mixer with the yaw term
- * negated on all four motors. Also: the `mixer` report sign table matches
- * mixer_update, a change applies on the next call, and the real rate PID's
- * response to a yaw rate speeds up the opposite motor pair for props-in.
- * Not flight-qualified: no hardware, no props.
+ * No copy of the mixer is kept here (a copy can silently mirror a bug, #63 QA):
+ *  - symmetry: props-in with PID yaw y gives exactly (bit for bit) the props-out
+ *    output for yaw -y, over a grid that includes saturating inputs, airmode 0/1
+ *    and several min_throttle values; whatever the mixer does (clamp, idle floor,
+ *    desaturation), motor_direction only flips the sign of the yaw input;
+ *  - an independent literal QUADX sign table (M1 RR, M2 FR, M3 RL, M4 FL) in the
+ *    unsaturated range pins roll/pitch/yaw signs for both settings.
+ * Also: the `mixer` report sign table matches mixer_update, a change applies on
+ * the next call, and the real rate PID's response to a yaw rate speeds up the
+ * opposite motor pair for props-in. Not flight-qualified: no hardware, no props.
  */
 #include "flight/mixer.h"
 #include "flight/config.h"
@@ -19,24 +23,6 @@
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL host_mixer_direction line %d: %s\n", __LINE__, #x); return 1; } } while (0)
 
-static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
-
-/* Reference: the mixer body as it was at 870e601 (mixer.c:52-56 plus the clamp/idle floor). */
-static void reference_mix(float roll, float pitch, float yaw, float throttle, float out[4])
-{
-    const float mt = clampf(config_get()->min_throttle, 0.f, 0.2f);
-    float thr = clampf(throttle, 0.f, 1.f);
-    if (thr < mt) thr = mt;
-    out[0] = thr - roll + pitch - yaw; /* rear-right */
-    out[1] = thr - roll - pitch + yaw; /* front-right */
-    out[2] = thr + roll + pitch + yaw; /* rear-left */
-    out[3] = thr + roll - pitch - yaw; /* front-left */
-    for (int i = 0; i < 4; i++) {
-        out[i] = clampf(out[i], 0.f, 1.f);
-        if (mt > 0.f && out[i] < mt) out[i] = mt;
-    }
-}
-
 static int same_bits(const float a[4], const float b[4]) { return memcmp(a, b, 4 * sizeof(float)) == 0; }
 
 int main(void)
@@ -46,25 +32,61 @@ int main(void)
     mixer_init();
     CHECK(config_motor_direction() == MOTOR_DIRECTION_PROPS_OUT); /* default */
 
-    /* 1. Bit-identical to the pre-setting mixer (props-out) / yaw negated (props-in). */
-    static const float v[] = {-0.7f, -0.25f, -0.013f, 0.f, 0.0071f, 0.3f, 0.65f};
-    static const float t[] = {0.f, 0.04f, 0.2f, 0.5f, 0.93f, 1.f};
-    unsigned cases = 0;
-    for (unsigned d = 0; d < 2; d++) {
-        CHECK(config_set_motor_direction(d ? MOTOR_DIRECTION_PROPS_IN : MOTOR_DIRECTION_PROPS_OUT));
-        for (unsigned a = 0; a < 7; a++) for (unsigned b = 0; b < 7; b++) for (unsigned c = 0; c < 7; c++) for (unsigned k = 0; k < 6; k++) {
-            const pid_axis_out_t pid = {v[a], v[b], v[c]};
-            mixer_update(&pid, t[k], m);
-            reference_mix(v[a], v[b], d ? -v[c] : v[c], t[k], ref);
+    /* 1a. Symmetry: props-in(r, p, y) == props-out(r, p, -y), bit for bit, saturating cases included. */
+    static const float v[] = {-0.9f, -0.5f, -0.2f, -0.013f, 0.f, 0.0071f, 0.2f, 0.5f, 0.9f};
+    static const float t[] = {0.f, 0.04f, 0.05f, 0.1f, 0.3f, 0.5f, 0.8f, 0.95f, 1.f};
+    static const float mts[] = {0.f, 0.05f, 0.2f};
+    unsigned cases = 0, saturated = 0;
+    for (unsigned air = 0; air < 2; air++) for (unsigned q = 0; q < 3; q++) {
+        CHECK(config_set_key("airmode", (float)air));
+        CHECK(config_set_key("min_throttle", mts[q]));
+        for (unsigned a = 0; a < 9; a++) for (unsigned b = 0; b < 9; b++) for (unsigned c = 0; c < 9; c++) for (unsigned k = 0; k < 9; k++) {
+            const pid_axis_out_t pin = {v[a], v[b], v[c]}, pout = {v[a], v[b], -v[c]};
+            CHECK(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN));
+            mixer_update(&pin, t[k], m);
+            CHECK(config_set_motor_direction(MOTOR_DIRECTION_PROPS_OUT));
+            mixer_update(&pout, t[k], ref);
             if (!same_bits(m, ref)) {
-                fprintf(stderr, "dir %u roll %g pitch %g yaw %g thr %g: got %g %g %g %g want %g %g %g %g\n", d,
-                        (double)v[a], (double)v[b], (double)v[c], (double)t[k], (double)m[0], (double)m[1], (double)m[2],
-                        (double)m[3], (double)ref[0], (double)ref[1], (double)ref[2], (double)ref[3]);
+                fprintf(stderr, "airmode %u min_throttle %g roll %g pitch %g yaw %g thr %g: props-in %g %g %g %g != props-out(-yaw) %g %g %g %g\n",
+                        air, (double)mts[q], (double)v[a], (double)v[b], (double)v[c], (double)t[k], (double)m[0], (double)m[1],
+                        (double)m[2], (double)m[3], (double)ref[0], (double)ref[1], (double)ref[2], (double)ref[3]);
                 return 1;
             }
+            const float raw = t[k] + fabsf(v[a]) + fabsf(v[b]) + fabsf(v[c]);
+            if (raw > 1.f || t[k] - fabsf(v[a]) - fabsf(v[b]) - fabsf(v[c]) < 0.f) saturated++;
             cases++;
         }
     }
+    CHECK(saturated > cases / 4); /* the grid really exercises clamping / desaturation */
+    config_init();
+    mixer_init();
+
+    /* 1b. Literal QUADX signs (independent of mixer.c), unsaturated range only:
+     *     motor = thr + sr*roll + sp*pitch + d*sy*yaw, d = +1 props-out, -1 props-in. */
+    static const int sr[4] = {-1, -1, +1, +1}, sp[4] = {+1, -1, +1, -1}, sy[4] = {-1, +1, +1, -1};
+    static const float u[] = {-0.1f, -0.03f, 0.f, 0.05f, 0.1f};
+    static const float ut[] = {0.4f, 0.5f, 0.6f};
+    unsigned literal = 0;
+    for (unsigned air = 0; air < 2; air++) for (unsigned d = 0; d < 2; d++) {
+        CHECK(config_set_key("airmode", (float)air));
+        CHECK(config_set_motor_direction(d ? MOTOR_DIRECTION_PROPS_IN : MOTOR_DIRECTION_PROPS_OUT));
+        const float dir = d ? -1.f : 1.f;
+        for (unsigned a = 0; a < 5; a++) for (unsigned b = 0; b < 5; b++) for (unsigned c = 0; c < 5; c++) for (unsigned k = 0; k < 3; k++) {
+            const pid_axis_out_t pid = {u[a], u[b], u[c]};
+            mixer_update(&pid, ut[k], m);
+            for (unsigned i = 0; i < 4; i++) {
+                const float want = ut[k] + (float)sr[i] * u[a] + (float)sp[i] * u[b] + dir * (float)sy[i] * u[c];
+                if (fabsf(m[i] - want) > 1e-5f) {
+                    fprintf(stderr, "literal: airmode %u dir %u M%u roll %g pitch %g yaw %g thr %g: got %g want %g\n", air, d, i + 1,
+                            (double)u[a], (double)u[b], (double)u[c], (double)ut[k], (double)m[i], (double)want);
+                    return 1;
+                }
+            }
+            literal++;
+        }
+    }
+    config_init();
+    mixer_init();
 
     /* 2. Both signs, explicit numbers (thr 0.5, yaw +0.1 only). */
     const pid_axis_out_t yaw_only = {0.f, 0.f, 0.1f};
@@ -121,6 +143,6 @@ int main(void)
     config_defaults();
     CHECK(config_motor_direction() == MOTOR_DIRECTION_PROPS_OUT);
 
-    printf("PASS host_mixer_direction: props-out == 870e601 mixer bit-for-bit, props-in == yaw negated (%u cases), both signs, immediate apply, report table, PID bench analog, parse/refuse/defaults\n", cases);
+    printf("PASS host_mixer_direction: props-in(r,p,y) == props-out(r,p,-y) bit-for-bit (%u cases, %u saturating, airmode 0/1, 3 min_throttle), literal QUADX sign table (%u cases), both signs, immediate apply, report table, PID bench analog, parse/refuse/defaults\n", cases, saturated, literal);
     return 0;
 }

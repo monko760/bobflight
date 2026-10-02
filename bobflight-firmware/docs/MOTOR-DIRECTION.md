@@ -17,7 +17,7 @@ term changes sign (`mixer_yaw_direction()` in `src/flight/mixer.c`).
 
 ## Default `props-out` = today's mixer yaw behaviour (verified)
 
-At the base of this branch (`feat/rpm-filter`, 870e601), `src/flight/mixer.c` lines 52-56 are:
+At the base of this branch (`feat/rpm-filter`, 04769f9), `src/flight/mixer.c` lines 52-56 are:
 
 ```
 motor_out[0] = thr - roll + pitch - yaw; /* rear-right */
@@ -26,11 +26,17 @@ motor_out[2] = thr + roll + pitch + yaw; /* rear-left */
 motor_out[3] = thr + roll - pitch - yaw; /* front-left */
 ```
 
-So today the yaw sign is M1 `-`, M2 `+`, M3 `+`, M4 `-`. With `props-out` the mixer multiplies the
+So today the yaw sign is M1 `-`, M2 `+`, M3 `+`, M4 `-`. With the S1 safety change merged
+(`fix/noise-saturation`, `docs/SAFETY-NOISE.md`) the mixer builds the differential part `u[i]` with
+exactly these signs and then desaturates; `motor_direction` only multiplies the PID yaw input by
+`+1` or `-1` before that, so `props-out` is the S1 mixer unchanged and `props-in` is the S1 mixer
+with the yaw input negated (clamping, idle floor and desaturation included). With `props-out` the mixer multiplies the
 PID yaw output by `+1` and these four lines are unchanged, so the output is bit-identical to the
-base mixer. `host_mixer_direction` checks this for 4116 roll/pitch/yaw/throttle/min_throttle
-cases with `memcmp` against a copy of the base formula, and checks the exact negation for
-`props-in`. Existing quads keep exactly the yaw behaviour they fly with today, and migrated
+base mixer. `host_mixer_direction` does not keep a copy of the mixer (a copy could silently mirror a
+bug): it checks, bit for bit over a roll/pitch/yaw/throttle/min_throttle grid that includes saturating
+cases, that `props-in` with yaw `y` gives exactly the `props-out` output for yaw `-y` (the only
+difference is the sign of the yaw input), and it pins the QUADX signs above with a literal table
+in the unsaturated range. Existing quads keep exactly the yaw behaviour they fly with today, and migrated
 configs get `props-out`.
 
 **Why the name `props-out` (to confirm on hardware).** The repo does not state the gyro z sign.
@@ -45,10 +51,15 @@ z sign, which is not verified here. The bench test below settles it on each quad
 
 ## Props-off yaw bench test (do this after any change)
 
-props off, Acro, armed above 5% throttle: rotate the frame clockwise by hand and the clockwise-spinning motors should speed up
+props off, Acro, armed above 5% throttle: rotate the frame clockwise (viewed from above) by hand and the clockwise-spinning motors (viewed from above) should speed up
 
 If the counter-clockwise-spinning motors speed up instead, `motor_direction` does not match the
 props. Disarm, fix it, and test again. The `mixer` report shows which sign each motor gets.
+
+**Firmware downgrade on a props-in quad reverses yaw.** Firmware older than this change has no
+`motor_direction` and always mixes as `props-out`. Flashing it onto a quad set to `props-in` therefore
+reverses the yaw control (a newer config's `props-in` is not applied by the older firmware). After
+**any** firmware downgrade, do the props-off bench test above before flying.
 
 ## CLI
 
@@ -104,6 +115,10 @@ lists it (after `set motor_poles`). `defaults` resets it to `props-out`.
   until an explicit Save, like the earlier migrations.
 - Storage `scope` and the export `# scope:` end with `,motor_poles,motor_direction`.
 
+**Older Configurators:** a Configurator released before schema 10 (it knows schema 9 at most)
+rejects **every** schema 10 `diff`/`dump`, whatever its size, like the schema 9 note in
+`RPM-FILTER.md`. Upgrade the Configurator before exporting from schema 10 FW.
+
 **If G1 lands first.** G1 (`gyro_rate_hz`, branch `feat/gyro-rate`) also calls itself schema 10
 with the same 256-byte shape and puts `gyro_rate_hz` at 224..227, 228..255 reserved zero. That is
 why `motor_direction` sits at 228 and 224..227 is left reserved here. If G1 merges first, this
@@ -126,8 +141,9 @@ the export reports `config export failed`. With G1 also merged, an estimated ~36
 
 ## Tests
 
-- `mixer_direction` (C): bit-identical props-out, exact props-in negation, applies immediately,
-  `mixer` report table, a PID-yaw bench analog, token parse/defaults.
+- `mixer_direction` (C): props-in(r, p, y) == props-out(r, p, -y) bit for bit (saturating cases
+  included), a literal QUADX sign table in the unsaturated range, applies immediately, `mixer`
+  report table, a PID-yaw bench analog, token parse/defaults.
 - `motor_direction_cli_unit` (C): armed → `set failed: armed`, each motor-test source →
   `set failed: motor test running`, value unchanged after each refusal.
 - `motor_direction_cli` (Python on the real `bobflight_host`): get/set/refusal lines, report,

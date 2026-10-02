@@ -28,7 +28,7 @@ export const MOTOR_DIRECTION_INVALID_LINE = "set failed: motor_direction must be
 export const MOTOR_DIRECTION_UNKNOWN = "unknown";
 /** The Configurator copy (also asserted by the render test and the FW doc). */
 export const MOTOR_DIRECTION_COPY = "This tells the mixer which way the props spin. It does not change ESC spin direction.";
-export const MOTOR_DIRECTION_BENCH_TEST = "props off, Acro, armed above 5% throttle: rotate the frame clockwise by hand and the clockwise-spinning motors should speed up";
+export const MOTOR_DIRECTION_BENCH_TEST = "props off, Acro, armed above 5% throttle: rotate the frame clockwise (viewed from above) by hand and the clockwise-spinning motors (viewed from above) should speed up";
 
 export type MotorDirectionCliCommand = "get motor_direction" | `set motor_direction ${MotorDirectionOption}` | "mixer";
 export const MOTOR_DIRECTION_CLI_COMMANDS: readonly MotorDirectionCliCommand[] = [
@@ -63,14 +63,16 @@ export function parseMotorDirectionGetReply(raw: string): MotorDirectionGetResul
   return { kind: "malformed", raw: String(raw).trim() };
 }
 
-/** `set motor_direction <requested>`: accepted only when the FC echoes exactly the requested token. */
+/** `set motor_direction <requested>`: accepted only when the FC echoes exactly the requested token.
+ * `line` is the FC's reply verbatim; null when the reply had no text at all (that is not an FC
+ * refusal: the UI shows it as an error, never in the refusal slot). */
 export type MotorDirectionSetResult =
   | { ok: true; token: MotorDirectionOption }
-  | { ok: false; unsupported: boolean; line: string };
+  | { ok: false; unsupported: boolean; line: string | null };
 export function parseMotorDirectionSetReply(raw: string, requested: MotorDirectionOption): MotorDirectionSetResult {
   const ls = lines(raw);
   if (ls.length === 1 && ls[0] === `ok motor_direction=${requested}`) return { ok: true, token: requested };
-  return { ok: false, unsupported: ls[0] === "unknown key", line: ls.join(" ") || "no reply" };
+  return { ok: false, unsupported: ls[0] === "unknown key", line: ls.length ? ls.join(" ") : null };
 }
 
 /** Framed `mixer` report. Fields absent, duplicated or malformed are null (shown "unknown"). */
@@ -91,7 +93,8 @@ export function parseMixerReport(raw: string): MixerReport | null {
 }
 
 export interface MotorDirectionView {
-  /** null: no reading yet; false: older FC without the setting. */
+  /** true only for a real `motor_direction=<token>` reply; false: older FC ("unknown key");
+   * null: no reading yet, or a malformed reply (shown "unknown"; nothing can be set). */
   supported: boolean | null;
   /** What the FC holds (`get motor_direction`), verbatim; "unknown" when missing/malformed. */
   held: string;
@@ -105,7 +108,7 @@ export function motorDirectionView(get: MotorDirectionGetResult | null, report: 
   const U = MOTOR_DIRECTION_UNKNOWN;
   const held = get?.kind === "value" ? get.token : U;
   return {
-    supported: get === null ? null : get.kind === "unsupported" ? false : true,
+    supported: get?.kind === "value" ? true : get?.kind === "unsupported" ? false : null,
     held,
     selected: isMotorDirectionOption(held) ? held : null,
     mixerDirection: report?.motorDirection ?? U,

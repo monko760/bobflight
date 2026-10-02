@@ -1,5 +1,6 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
-/** Bundles test-motor-direction.tsx with the useHost of MotorsPage and StoragePanel swapped for the #57 test stub, then runs it. */
+/** Bundles test-motor-direction.tsx with the useHost of MotorsPage and StoragePanel swapped for a test stub (test-owned value, or the
+ * real HostProvider context when the test sets __setupTestHost = "real"), then runs it. import.meta.env selects the mock protocol mode. */
 import { build } from "esbuild";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
@@ -10,6 +11,7 @@ const swapped = new Set();
 await build({
   entryPoints: [path.join(here, "test-motor-direction.tsx")],
   bundle: true, platform: "node", format: "esm", packages: "external", outfile, jsx: "automatic", logLevel: "warning",
+  define: { "import.meta.env": '{"VITE_PROTOCOL_MODE":"mock"}' },
   plugins: [{
     name: "use-host-stub",
     setup(b) {
@@ -17,7 +19,7 @@ await build({
         const who = STUBBED.find((f) => args.importer.endsWith(f));
         if (!who) return undefined;
         swapped.add(who);
-        return { path: path.join(here, "fixtures", "useHostStub.ts") };
+        return { path: path.join(here, "fixtures", "useHostStubOrReal.ts") };
       });
     },
   }],

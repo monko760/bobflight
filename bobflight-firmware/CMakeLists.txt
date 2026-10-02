@@ -237,7 +237,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mixer_direction_test src/flight/mixer.c src/flight/config.c src/flight/pid.c src/flight/filter.c tests/host_mixer_direction.c)
   target_link_libraries(bobflight_mixer_direction_test m)
   add_test(NAME mixer_direction COMMAND bobflight_mixer_direction_test)
-  add_executable(bobflight_motor_direction_cli_test src/flight/mixer.c src/flight/config.c tests/host_motor_direction_cli.c)
+  add_executable(bobflight_motor_direction_cli_test src/flight/mixer.c src/flight/config.c src/flight/pid.c src/flight/filter.c tests/host_motor_direction_cli.c)
   target_link_libraries(bobflight_motor_direction_cli_test m)
   add_test(NAME motor_direction_cli_unit COMMAND bobflight_motor_direction_cli_test)
   # Safety S1 (docs/SAFETY-NOISE.md): PID anti-windup + D-term order unit test,
