@@ -26,9 +26,11 @@ import {
   type NotchDraft,
   type NotchSnapshot,
 } from "../filters/gyroNotch";
+import { isGateBusy } from "../protocol/commandGate";
 import {
   RpmCancelled,
   applyRpmSetting,
+  gated,
   emptyRpmSnapshot,
   readRpm,
   rpmDirtyKeys,
@@ -112,14 +114,31 @@ export function FiltersPage() {
   const [rpmSnap, setRpmSnap] = useState<RpmSnapshot>(emptyRpmSnapshot);
   const [rpmDraft, setRpmDraft] = useState<RpmDraft>({ harmonics: "", minHz: "", q: "" });
   const [rpmFcLine, setRpmFcLine] = useState<string | null>(null);
+  /**
+   * `getAllSettings` refused by the busy command gate (QA #60): the gate's message, shown verbatim.
+   * Not `final` while it is still being retried; `final` once every try was refused. Nothing was
+   * read from the FC, so values are "unknown" (`ready` stays false); this is never the local
+   * fallback.
+   */
+  const [settingsBusy, setSettingsBusy] = useState<{ message: string; final: boolean } | null>(null);
+  /**
+   * The current load finished reading the notch and RPM state from the FC. "Older firmware" is
+   * only said about that: never before or while reading (empty snapshots look like an older FC),
+   * never while the gate is busy, never behind the local fallback (QA #60).
+   */
+  const [fcRead, setFcRead] = useState(false);
 
   /** Aborted on unmount: stops the RPM commands' busy-gate retries (QA #60). */
   const rpmLife = useRef<AbortController | null>(null);
   useEffect(() => { const c = new AbortController(); rpmLife.current = c; return () => c.abort(); }, []);
+  /** The running load: a newer load, a disconnect or unmount aborts it, which stops its gate retries. */
+  const loadCtl = useRef<AbortController | null>(null);
+  /** A disconnect cut a load short: read the FC again once it reconnects. */
+  const reloadOnConnect = useRef(false);
 
   /** Re-read the RPM filter (`get` x4 + `rpm_filter`); inputs return to what the FC holds. */
-  const reloadRpm = useCallback(async (schema: number | null) => {
-    const snap = await readRpm(host, rpmLife.current?.signal);
+  const reloadRpm = useCallback(async (schema: number | null, signal?: AbortSignal) => {
+    const snap = await readRpm(host, signal ?? rpmLife.current?.signal);
     setRpmSnap(snap);
     setRpmDraft(rpmDraftFromView(rpmView(snap, schema)));
     return snap;
@@ -135,19 +154,54 @@ export function FiltersPage() {
   }, [host]);
 
   const load = useCallback(async () => {
+    loadCtl.current?.abort();
+    const life = rpmLife.current?.signal;
+    if (life?.aborted) return; // unmounted
+    const ctl = new AbortController();
+    loadCtl.current = ctl;
+    life?.addEventListener("abort", () => ctl.abort(), { once: true });
+    const signal = ctl.signal;
+    // While the gate refuses getAllSettings nothing is known about the FC: values unknown, no fallback.
+    const unknownFc = (message: string, final: boolean) => {
+      setNotchSnap(emptyNotchSnapshot());
+      setRpmSnap(emptyRpmSnapshot());
+      setRpmDraft({ harmonics: "", minHz: "", q: "" });
+      setUsingFallback(false);
+      setReady(false);
+      setFcRead(false);
+      setSettingsBusy({ message, final });
+    };
     setErr(null);
+    setFcRead(false);
     try {
       await ensureMockConnected(host);
-      const all = await host.getAllSettings();
+      let all: Record<string, string>;
+      try {
+        // Only the gate's own refusal is retried (nothing was sent); FC replies / transport errors are not.
+        all = await gated(() => host.getAllSettings(), signal, (m) => { if (!signal.aborted) unknownFc(m, false); });
+      } catch (e) {
+        if (signal.aborted || e instanceof RpmCancelled) return; // newer load, disconnect or unmount
+        if (!isGateBusy(e)) throw e;
+        unknownFc((e as Error).message, true); // still busy after the last try
+        return;
+      }
+      if (signal.aborted) return;
+      setSettingsBusy(null);
       const mapped = mapFiltersFromAll(all);
       setValues(mapped);
       setLoadedValues(mapped);
       setUsingFallback(false);
       setReady(true);
       const notches = await reloadNotches();
-      await reloadRpm(notches.schema);
+      if (signal.aborted) return;
+      await reloadRpm(notches.schema, signal);
+      if (signal.aborted) return;
+      setFcRead(true);
+      if (loadCtl.current === ctl) loadCtl.current = null;
     } catch (e) {
-      if (e instanceof RpmCancelled) return; // unmounted
+      if (e instanceof RpmCancelled || signal.aborted) return; // unmounted, newer load or disconnect
+      if (loadCtl.current === ctl) loadCtl.current = null;
+      setSettingsBusy(null);
       try {
         const fb = loadFiltersViaFallback();
         setValues(fb);
@@ -171,6 +225,26 @@ export function FiltersPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A disconnect stops a running load (and its gate retries); the FC is read again on reconnect.
+  useEffect(() => {
+    let last = host.getConnectionStatus?.() ?? null;
+    return host.onStatus?.((s) => {
+      if (s === last) return;
+      last = s;
+      if (s === "connected") {
+        if (reloadOnConnect.current) { reloadOnConnect.current = false; void load(); }
+        return;
+      }
+      const running = loadCtl.current;
+      if (running && !running.signal.aborted) {
+        running.abort();
+        loadCtl.current = null;
+        reloadOnConnect.current = true;
+        setSettingsBusy(null);
+      }
+    });
+  }, [host, load]);
 
   function updateField(key: FilterKey, raw: string) {
     const n = Number(raw);
@@ -354,9 +428,10 @@ export function FiltersPage() {
         <code>320</code> / <code>53</code>.
       </p>
 
-      {!ready && !err && (
+      {!ready && !err && !settingsBusy?.final && (
         <p className="muted">Connecting / loading settings…</p>
       )}
+      {settingsBusy && <p className="fail" data-testid="settings-busy">{settingsBusy.message}</p>}
 
       <fieldset className="tuning-axis">
         <legend>Low-pass</legend>
@@ -369,11 +444,12 @@ export function FiltersPage() {
               </label>
               <input
                 id={key}
-                type="number"
+                type={settingsBusy ? "text" : "number"}
                 step="1"
                 min={0}
                 max={1000}
-                value={values[key]}
+                disabled={!!settingsBusy}
+                value={settingsBusy ? "unknown" : values[key]}
                 onChange={(e) => updateField(key, e.target.value)}
               />
             </div>
@@ -387,7 +463,7 @@ export function FiltersPage() {
           Centre <code>0</code> = off, else <code>20..1000</code> Hz; cutoff (lower -3 dB edge) must be
           above 0 and below the centre. The FC checks the centre against the running loop rate and
           reports the result below; its reply is shown as sent.
-          {!supported && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
+          {fcRead && !supported && !usingFallback && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
         </p>
         <table style={{ width: "100%", marginTop: "0.75rem" }}>
           <thead>
@@ -451,7 +527,7 @@ export function FiltersPage() {
           else <code>1..3</code>; minimum <code>50..200</code> Hz; Q <code>1..10</code> (sent ×100 as{" "}
           <code>rpm_filter_q_x100</code>). The FC trims harmonics to the loop rate and reports the state
           and each motor&apos;s tracked frequency below, exactly as sent.
-          {!rpm.supported && !rpm.busy && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
+          {fcRead && !rpm.supported && !rpm.busy && !usingFallback && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
         </p>
         {rpm.busy && <p className="fail" data-testid="rpm-busy">{rpm.busy}</p>}
         <div className="tuning-grid">
@@ -514,7 +590,7 @@ export function FiltersPage() {
       </fieldset>
 
       <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="button" className="primary" onClick={() => void onSave()}>
+        <button type="button" className="primary" disabled={!!settingsBusy} onClick={() => void onSave()}>
           Save
         </button>
         <button type="button" className="ghost" onClick={onReload}>
