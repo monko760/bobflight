@@ -32,7 +32,9 @@ const LIVE_ERPM = [75600, 76440, 75180, 77700] as const;
 export class MockRpmFilter {
   private values: Record<RpmFilterKey, number> = { ...DEFAULTS };
   private bidir = true;
-  private rateHz = 4000;
+  /* The FC's rpm_filter_sample_hz, carried verbatim: the gyro rate since S1
+   * (Kakute default 8000/2 -> 8000); trimmed-1k is a 1000/1 FC. */
+  private rateHz = 8000;
   private erpm: readonly number[] = LIVE_ERPM;
   constructor(private scenario: RpmFilterMockScenario = "off", private readonly bidirSource?: () => boolean) { this.setScenario(scenario); }
   /** dshot_bidir a scenario starts with (a host mock seeds its own state from this). */
@@ -43,7 +45,7 @@ export class MockRpmFilter {
     this.scenario = s;
     this.defaults();
     this.bidir = MockRpmFilter.scenarioBidir(s);
-    this.rateHz = s === "trimmed-1k" ? 1000 : 4000;
+    this.rateHz = s === "trimmed-1k" ? 1000 : 8000;
     this.erpm = s === "erpm-unavailable" || s === "bidir-off" ? [0, 0, 0, 0] : LIVE_ERPM;
     if (s === "ok" || s === "trimmed-1k" || s === "active-partial") this.values.rpm_filter_harmonics = 3;
     if (s === "bidir-off" || s === "erpm-unavailable") this.values.rpm_filter_harmonics = 2;

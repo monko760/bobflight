@@ -3,8 +3,9 @@
 `loop_rate` and `receiver` replies keep exactly the keys, in the same order,
 that b77b845 (main before S1) sends for the same board. Values may differ
 (e.g. filters_sample_hz is the gyro rate since S1); keys and order may not.
-`rpm_filter` is checked too when the b77b845 golden has it; b77b845 has no
-`rpm_filter` command, so it is recorded as absent and skipped.
+`rpm_filter` is not on b77b845; its keys in the golden were captured from
+the #60 tip 04769f9 (feat/rpm-filter, before S1) host builds, and are checked
+the same way. A report recorded as null in the golden would be skipped.
 
 Golden: tests/golden/report_keys_b77b845.json, captured from b77b845 host
 builds of each board with:  python3 host_report_keys_contract.py --capture <bobflight_host> <board>
@@ -61,10 +62,10 @@ def main():
     notes = []
     for r in REPORTS:
         if golden[r] is None:
-            notes.append(f'{r}: absent on b77b845, skipped')
+            notes.append(f'{r}: absent in golden, skipped')
             continue
         assert got[r] == golden[r], f'{board} {r}: keys/order changed vs b77b845\n golden {golden[r]}\n got    {got[r]}'
-    print(f'PASS report keys ({board}): status/filters/loop_rate/receiver keys and order == b77b845'
+    print(f'PASS report keys ({board}): status/filters/loop_rate/receiver keys and order == b77b845, rpm_filter == #60 04769f9'
           + (' (' + '; '.join(notes) + ')' if notes else ''))
 
 if __name__ == '__main__':

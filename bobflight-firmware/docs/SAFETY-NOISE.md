@@ -171,6 +171,15 @@ migrated or overwritten.
   The Configurator Filters-tab mock now mirrors 8000.
 * **CPU:** at 8000/2 the gyro filter runs 8000 times a second instead of
   4000. Not measured on hardware; check `loop_overruns` after flashing.
+* **RPM filter (#60):** its notches run inside the gyro filter, so they
+  also run on every gyro sample. On the default Kakute profile the
+  read-only `rpm_filter` report shows `rpm_filter_sample_hz: 8000` instead
+  of 4000 (same key, same order; 1000/1 and the other boards unchanged), and
+  the RPM filter's CPU cost doubles on the Kakute F7 at 8 kHz (estimate
+  about 4.4-4.8 % of the CPU instead of 2.2-2.4 %; hardware unverified; the loop-rate guard,
+  which falls back on overruns, is the safety net). The Configurator does
+  no math: it shows the FC's value, and its mocks just carry the value the
+  FC now reports (8000; `trimmed-1k` stays 1000).
 
 ## Tests
 
@@ -184,7 +193,8 @@ migrated or overwritten.
 * `report_keys_contract` (host, real binary, every board): `status`,
   `filters`, `loop_rate` and `receiver` keep b77b845's keys in the same order
   (golden `tests/golden/report_keys_b77b845.json`). b77b845 has no
-  `rpm_filter` command, so that one is recorded absent and skipped.
+  `rpm_filter` command; its keys were captured from the #60 tip (04769f9,
+  before S1) and are checked the same way.
 * `report_bytes_contract` (host, real binary, every board): `status` is
   byte-identical to b77b845 (only the timing counters `cascade=`, `bg=` and
   `loop_overruns` may differ, and must stay plain integers); `filters` is
@@ -205,6 +215,7 @@ migrated or overwritten.
 ## Not verified
 
 Flight behaviour, real motor/ESC thrust (the tables use decoded DShot
-commands), MCU CPU time of the per-sample filter, and the real MPU6000
+commands), MCU CPU time of the per-sample filter and of the RPM filter at
+8 kHz, and the real MPU6000
 reporting 8 kHz ODR on hardware (`init_dterm_order` covers init.c's decision
 with a gyro stub; the host gyro itself reports no output rate).

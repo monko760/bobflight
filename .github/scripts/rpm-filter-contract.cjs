@@ -29,7 +29,8 @@ const norm=s=>s.replace(/\r/g,'');
  assert.deepEqual(RPM_FILTER_KEYS.map(k=>get(o,k)),[[{kind:'value',value:'0'}],[{kind:'value',value:'100'}],[{kind:'value',value:'500'}],[{kind:'value',value:'14'}]]);
  const [raw]=reports(o);
  // Frozen report: exactly these lines, in this order (the harmonics setting is read with get).
- assert.deepEqual(norm(raw).trim().split('\n'),['rpm_filter_api: 1','rpm_filter_active: no','rpm_filter_reason: off','rpm_filter_sample_hz: 4000','rpm_filter_harmonics_active: 0',
+ // sample_hz 8000: since S1 the RPM filter runs on every gyro sample (Kakute 8000/2).
+ assert.deepEqual(norm(raw).trim().split('\n'),['rpm_filter_api: 1','rpm_filter_active: no','rpm_filter_reason: off','rpm_filter_sample_hz: 8000','rpm_filter_harmonics_active: 0',
   'rpm_filter_m1_hz: unavailable','rpm_filter_m2_hz: unavailable','rpm_filter_m3_hz: unavailable','rpm_filter_m4_hz: unavailable','rpm_filter_end: 1']);
  const v=rpmFilterView(values(o),parseRpmFilterReport(raw));
  assert.deepEqual([v.supported,v.harmonics,v.minHz,v.q,v.motorPoles,v.reason,v.active,v.bidirOff],[true,'0','100','5','14','off','no',false]);

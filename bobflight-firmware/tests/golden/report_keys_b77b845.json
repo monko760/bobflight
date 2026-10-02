@@ -66,7 +66,18 @@
    "persistence",
    "receiver_end"
   ],
-  "rpm_filter": null
+  "rpm_filter": [
+   "rpm_filter_api",
+   "rpm_filter_active",
+   "rpm_filter_reason",
+   "rpm_filter_sample_hz",
+   "rpm_filter_harmonics_active",
+   "rpm_filter_m1_hz",
+   "rpm_filter_m2_hz",
+   "rpm_filter_m3_hz",
+   "rpm_filter_m4_hz",
+   "rpm_filter_end"
+  ]
  },
  "kakute_f7_hdv": {
   "status": [
@@ -135,7 +146,18 @@
    "persistence",
    "receiver_end"
   ],
-  "rpm_filter": null
+  "rpm_filter": [
+   "rpm_filter_api",
+   "rpm_filter_active",
+   "rpm_filter_reason",
+   "rpm_filter_sample_hz",
+   "rpm_filter_harmonics_active",
+   "rpm_filter_m1_hz",
+   "rpm_filter_m2_hz",
+   "rpm_filter_m3_hz",
+   "rpm_filter_m4_hz",
+   "rpm_filter_end"
+  ]
  },
  "tmotor_f7_v2": {
   "status": [
@@ -204,6 +226,17 @@
    "persistence",
    "receiver_end"
   ],
-  "rpm_filter": null
+  "rpm_filter": [
+   "rpm_filter_api",
+   "rpm_filter_active",
+   "rpm_filter_reason",
+   "rpm_filter_sample_hz",
+   "rpm_filter_harmonics_active",
+   "rpm_filter_m1_hz",
+   "rpm_filter_m2_hz",
+   "rpm_filter_m3_hz",
+   "rpm_filter_m4_hz",
+   "rpm_filter_end"
+  ]
  }
 }
