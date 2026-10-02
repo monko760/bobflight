@@ -64,14 +64,17 @@ function pause(ms: number, signal?: AbortSignal): Promise<void> {
     signal?.addEventListener("abort", done);
   });
 }
-/** Runs `fn`; retries only the gate's own refusal (nothing was sent), at most RPM_GATE_ATTEMPTS tries. */
-async function gated<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+/** Runs `fn`; retries only the gate's own refusal (nothing was sent), at most RPM_GATE_ATTEMPTS tries.
+ * `onBusy` (if given) gets the gate's message after each refusal that will be retried. Also used
+ * by the Filters tab for `getAllSettings` (QA #60). */
+export async function gated<T>(fn: () => Promise<T>, signal?: AbortSignal, onBusy?: (message: string) => void): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     if (signal?.aborted) throw new RpmCancelled();
     try {
       return await fn();
     } catch (e) {
       if (!isGateBusy(e) || attempt >= RPM_GATE_ATTEMPTS) throw e;
+      onBusy?.((e as Error).message);
     }
     await pause(RPM_GATE_DELAY_MS, signal);
   }
