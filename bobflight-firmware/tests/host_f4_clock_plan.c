@@ -68,6 +68,22 @@ static void invalid(bf_f4_part_t part, uint32_t hse, uint32_t vdd)
 }
 int main(void)
 {
+
+    uint16_t psc=1234;
+    assert(bf_f4_timer_prescaler(84000000u,1000000u,&psc) && psc==83);
+    assert(bf_f4_timer_prescaler(168000000u,1000000u,&psc) && psc==167);
+    assert(bf_f4_timer_prescaler(96000000u,1000000u,&psc) && psc==95);
+    assert(bf_f4_timer_prescaler(1000000u,1000000u,&psc) && psc==0);
+    assert(bf_f4_timer_prescaler(65536u,1u,&psc) && psc==65535);
+    assert(bf_f4_timer_prescaler(UINT32_MAX,UINT32_MAX,&psc) && psc==0);
+    psc=1234;
+    assert(!bf_f4_timer_prescaler(65537u,1u,&psc) && psc==1234);
+    assert(!bf_f4_timer_prescaler(84000000u,1000u,&psc) && psc==1234);
+    assert(!bf_f4_timer_prescaler(96000000u,7000000u,&psc) && psc==1234);
+    assert(!bf_f4_timer_prescaler(0,0,&psc) && psc==1234);
+    assert(!bf_f4_timer_prescaler(0,1,&psc) && psc==1234);
+    assert(!bf_f4_timer_prescaler(1,2,&psc) && psc==1234);
+    assert(!bf_f4_timer_prescaler(96000000u,1000000u,NULL));
     unsigned valid_cases=0;
     const bf_f4_part_t parts[]={BF_F4_PART_F405,BF_F4_PART_F411};
     const unsigned volts[]={2700,3300,3600};

@@ -73,3 +73,13 @@ bool bf_f4_make_clock_register_plan(bf_f4_part_t part, uint32_t hse_hz,
     *out = p;
     return true;
 }
+
+bool bf_f4_timer_prescaler(uint32_t timer_hz, uint32_t tick_hz, uint16_t *psc)
+{
+    if (!psc || !tick_hz || timer_hz < tick_hz || timer_hz % tick_hz)
+        return false;
+    const uint32_t divider = timer_hz / tick_hz;
+    if (divider > 65536u) return false;
+    *psc = (uint16_t)(divider - 1u);
+    return true;
+}

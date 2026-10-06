@@ -19,6 +19,12 @@
 
 Accepted inputs are whole-MHz HSE crystals from 4 through 26 MHz and VDD from 2700 through 3600 mV. These are provided parameters, not measurements. Fractional-MHz sources and unknown parts are rejected rather than rounded or mapped to another MCU. Dividing before multiplying avoids 32-bit overflow. F411 uses 96 MHz so its main PLL simultaneously supplies exact 48 MHz USB. Actual oscillator tolerance, temperature, board supply and jitter are not qualified by this calculation.
 
+## Exact timer time-base arithmetic
+
+`bf_f4_timer_prescaler()` calculates a 16-bit PSC only for exact integer division. It rejects fractional requests, zero frequency, faster-than-input ticks and divider overflow without changing output. A 1 MHz time base calculates PSC 83 for 84 MHz, 167 for 168 MHz, and 95 for 96 MHz. ARR and timer programming are not implemented. A requested 1 kHz tick from 84 MHz cannot fit directly into the 16-bit prescaler and is rejected, rather than truncated. This is arithmetic only and does not clear the F411 timer electrical-limit blocker.
+
+A further bounded source search did not locate corrected accessible ST evidence for that blocker. Do not infer that an apparent documentation error is manufacturer confirmation, and do not stall unrelated configurator work on repeated downloads.
+
 ## Register-field safeguards
 
 - PLL mask `0x0f437fff` changes only M/N/P/Q and HSE-source fields. Reserved fields, including reset-state bit 29, are excluded.

@@ -7,7 +7,9 @@
 typedef enum { BF_F4_PART_F405=405, BF_F4_PART_F411=411 } bf_f4_part_t;
 typedef struct {
     uint32_t hse_hz, sysclk_hz, hclk_hz, usb_hz;
-    uint32_t apb1_hz, apb2_hz, apb1_timer_hz, apb2_timer_hz;
+    uint32_t apb1_hz, apb2_hz;
+    /* Prescaler-derived rates, NOT electrical qualification of hardware timers. */
+    uint32_t apb1_timer_hz, apb2_timer_hz;
     uint16_t pll_n;
     uint8_t pll_m, pll_p, pll_q, ahb_div, apb1_div, apb2_div;
     uint8_t flash_wait_states, voltage_scale;
@@ -34,4 +36,8 @@ bool bf_f4_make_clock_register_plan(bf_f4_part_t part, uint32_t hse_hz,
                                     uint32_t vdd_mv,
                                     bf_f4_clock_register_plan_t *out);
 
+/* Compute an exact 16-bit timer PSC value. Never silently round a timing base.
+ * Pure arithmetic, no timer enable or electrical qualification. Failure leaves
+ * *psc unchanged. For a 1 MHz tick use ARR separately for the desired period. */
+bool bf_f4_timer_prescaler(uint32_t timer_hz, uint32_t tick_hz, uint16_t *psc);
 #endif
