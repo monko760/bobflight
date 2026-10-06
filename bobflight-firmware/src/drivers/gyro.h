@@ -38,6 +38,8 @@ typedef struct {
 
 uint32_t gyro_accel_calibration_binding(void);
 bool gyro_accel_restore_valid(const float bias[3],const float scale[3],uint32_t binding);
+/* True only for recognized obsolete orientation calibration; discard, never apply. */
+bool gyro_accel_legacy_orientation_valid(const float bias[3],const float scale[3],uint32_t binding);
 void gyro_restore_accel_calibration(const float bias[3],const float scale[3],bool valid);
 const gyro_diagnostics_t *gyro_diagnostics(void);
 void gyro_calibration_info(gyro_calibration_info_t *info);

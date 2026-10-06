@@ -73,6 +73,8 @@ static gyro_calibration_info_t cal;
 void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
 uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
 bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding){return binding==gyro_accel_calibration_binding()&&sc_accel_coefficients_valid(b,v);}
+static bool legacy_orientation_allowed;
+bool gyro_accel_legacy_orientation_valid(const float b[3],const float v[3],uint32_t binding){return legacy_orientation_allowed&&binding==0x01006811u&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
 uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:image_len==208?8:image_len==224?9:10;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
@@ -210,6 +212,22 @@ int main(void) {
     assert(!persist_dirty());
     assert(strcmp(persist_state(), "saved") == 0);
     assert(strcmp(persist_last_error(), "none") == 0);
+
+    /* Simultaneous frame and control-source migration stays explicit and dirty,
+     * preserving every unrelated byte without writing flash during load. */
+    memcpy(image,legacy,sizeof(legacy));put32(image+100,0x01006811u);
+    uint8_t combined[PAYLOAD_BYTES];memcpy(combined,image,sizeof(combined));
+    legacy_orientation_allowed=true;unsigned combined_saves=saves;
+    memset(&cal,0,sizeof(cal));persist_init();assert(persist_load());
+    assert(!strcmp(persist_last_error(),"migrated_control_source_manual_accel_orientation"));
+    assert(persist_dirty()&&!strcmp(persist_state(),"dirty")&&!cal.accel_valid);
+    assert(control_mode_get()==CONTROL_MODE_ACRO&&!strcmp(control_source_name(),"manual"));
+    assert(saves==combined_saves&&!memcmp(image,combined,sizeof(combined)));
+    assert(encode(restored));combined[54]=0;memset(combined+96,0,32);
+    assert(!memcmp(restored,combined,sizeof(combined)));
+    assert(persist_save()&&!persist_dirty());
+    assert(!memcmp(image,combined,sizeof(combined)));
+    legacy_orientation_allowed=false;
 
     /* Both legacy fallback and ordinary manual-source refusal must report failure. */
     for(unsigned source=0;source<2;source++){
