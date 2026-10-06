@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 PACKABLE = {"bf-derived", "verified", "golden", "ready"}
+IMU_ORIENTATIONS = {"CW0_DEG", "CW90_DEG", "CW180_DEG", "CW270_DEG"}
 
 
 def _pin_pack(token: str) -> str:
@@ -67,6 +68,12 @@ def _channel_pins(text: str) -> list[dict]:
 
 def parse_ir(raw: str, fallback_id: str) -> dict:
     status = _field(raw, "status", "stub").lower()
+    align_fields = re.findall(r"^[ \t]*gyro_align:[ \t]*([^\r\n]*)$", raw, re.M)
+    if len(align_fields) > 1 or (status in PACKABLE and len(align_fields) != 1):
+        raise ValueError("physical board requires exactly one gyro_align")
+    align = align_fields[0].strip().strip("\"'") if align_fields else "CW0_DEG"
+    if align not in IMU_ORIENTATIONS:
+        raise ValueError("unsupported gyro_align: " + repr(align))
     board_id = _field(raw, "board_id", fallback_id)
     mcu = _field(raw, "family", "STM32F722")
     hse = _field(raw, "hse_mhz", "0")
@@ -116,7 +123,7 @@ def parse_ir(raw: str, fallback_id: str) -> dict:
         "sck": _field(raw, "sck_pin"),
         "miso": _field(raw, "miso_pin"),
         "mosi": _field(raw, "mosi_pin"),
-        "align": _field(raw, "gyro_align", "CW0_DEG"),
+        "align": align,
         "motors": _channel_pins(raw),
         "sd_spi": int(_field(raw,"sd_spi_bus","0")),
         "sd_cs": _field(raw,"sd_cs_pin"),

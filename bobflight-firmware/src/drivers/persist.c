@@ -97,6 +97,11 @@ static bool accel_decode_valid(const uint8_t*p) {
  if(p[96]!=1||p[97]||p[98]||p[99])return false;
  float b[3],v[3];accel_values(p,b,v);return gyro_accel_restore_valid(b,v,get32(p+100));
 }
+static bool accel_legacy_orientation_valid(const uint8_t *p) {
+ if(p[96]!=1||p[97]||p[98]||p[99])return false;
+ float b[3],v[3];accel_values(p,b,v);
+ return gyro_accel_legacy_orientation_valid(b,v,get32(p+100));
+}
 static float getfloat(const uint8_t *p){uint32_t bits=get32(p);float f;memcpy(&f,&bits,4);return f;}
 static void putfloat(uint8_t *p,float f){uint32_t bits;memcpy(&bits,&f,4);put32(p,bits);}
 static power_config_t power_decode(const uint8_t *p){return (power_config_t){getfloat(p+128),getfloat(p+132),getfloat(p+136),get32(p+140),getfloat(p+144),getfloat(p+148),get32(p+152)};}
@@ -181,7 +186,15 @@ bool persist_load(void){
  if(config_store_loaded_schema()<9){putfloat(p+208,0.f);putfloat(p+212,100.f);putfloat(p+216,500.f);putfloat(p+220,14.f);}
  /* S4: any older record keeps today's mixer yaw signs (props-out), written explicitly. */
  if(config_store_loaded_schema()<MOTOR_DIRECTION_SCHEMA){put32(p+MOTOR_DIRECTION_OFFSET,MOTOR_DIRECTION_PROPS_OUT);}
- float values[12];mode_config_t modes[MODE_COUNT];if(!decode(p,values,modes)||!accel_decode_valid(p)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
+ float values[12];mode_config_t modes[MODE_COUNT];
+ if(!decode(p,values,modes)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
+ bool orientation_migrated=false;
+ if(!accel_decode_valid(p)) {
+  if(!accel_legacy_orientation_valid(p)){last_error="invalid_settings";load_error=true;return false;}
+  /* Recognized old frame only. Sanitize the RAM copy; keep flash untouched
+   * until explicit save. All other payload validators still apply. */
+  memset(p+96,0,32);orientation_migrated=true;
+ }
  /* Reject unsupported control selection before mutating other settings */
  if(p[55]!=CONTROL_MODE_ANGLE&&p[55]!=CONTROL_MODE_ACRO&&p[55]!=CONTROL_MODE_HORIZON){last_error="invalid_settings";load_error=true;return false;}
  if(get32(p+156)!=dshot_speed_kbps()&&!dshot_set_speed_kbps(get32(p+156))){last_error="dshot_restore_failed";load_error=true;return false;}
@@ -218,9 +231,11 @@ bool persist_load(void){
  }
 #endif
  {float bias[3]={0},scale[3]={1,1,1};if(p[96])accel_values(p,bias,scale);gyro_restore_accel_calibration(bias,scale,p[96]!=0);}
- migration_pending=config_store_loaded_schema()!=PERSIST_SCHEMA||legacy_aux_migrated;
+ migration_pending=config_store_loaded_schema()!=PERSIST_SCHEMA||legacy_aux_migrated||orientation_migrated;
  failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;
- if(legacy_aux_migrated){
+ if(orientation_migrated){
+  last_error=legacy_aux_migrated?"migrated_control_source_manual_accel_orientation":"migrated_accel_orientation";
+ }else if(legacy_aux_migrated){
   last_error="migrated_control_source_manual";
  }else{
   last_error="none";
@@ -242,7 +257,7 @@ const char *persist_backend(void){return config_store_backend();}
 uint32_t persist_generation(void){return config_store_generation();}
 const char *persist_state(void){
  if(!config_store_supported())return "unsupported";
- if(load_error||(strcmp(last_error,"none")&&strcmp(last_error,"empty")&&strcmp(last_error,"migrated_control_source_manual")))return "error";
+ if(load_error||(strcmp(last_error,"none")&&strcmp(last_error,"empty")&&strcmp(last_error,"migrated_control_source_manual")&&strcmp(last_error,"migrated_accel_orientation")&&strcmp(last_error,"migrated_control_source_manual_accel_orientation")))return "error";
  if(!have_saved)return "defaults";
  return persist_dirty()?"dirty":"saved";
 }

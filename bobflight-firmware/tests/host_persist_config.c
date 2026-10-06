@@ -45,6 +45,8 @@ static gyro_calibration_info_t cal;
 void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
 uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
 bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding){return binding==gyro_accel_calibration_binding()&&sc_accel_coefficients_valid(b,v);}
+static bool legacy_orientation_allowed;
+bool gyro_accel_legacy_orientation_valid(const float b[3],const float v[3],uint32_t binding){return legacy_orientation_allowed&&binding==0x01006811u&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
 uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:image_len==208?8:image_len==224?9:10;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
@@ -181,6 +183,41 @@ int main(void){
  }
  memcpy(image,good,PAYLOAD_BYTES);for(unsigned i=0;i<3;i++){float b=.25f;uint32_t bits;memcpy(&bits,&b,4);put32(image+104+i*4,bits);}assert(!persist_load());
  memcpy(image,good,PAYLOAD_BYTES);assert(persist_load());
+ /* Recognized obsolete orientation: restore aircraft settings, discard only
+  * accelerometer correction in RAM, and require explicit save. */
+ legacy_orientation_allowed=true;
+ uint8_t old_orientation[PAYLOAD_BYTES];memcpy(old_orientation,good,PAYLOAD_BYTES);
+ put32(old_orientation+100,0x01006811u);
+ memcpy(image,old_orientation,PAYLOAD_BYTES);before=saves;
+ for(unsigned boot=0;boot<2;boot++) {
+  memset(&cal,0,sizeof(cal));persist_init();assert(persist_load());
+  assert(config_get_key("rate_max_roll",&v)&&v==777&&!strcmp(map,"TAER"));
+  assert(!cal.accel_valid&&!cal.candidate_valid&&cal.faces==0&&cal.gyro_bias[0]==0);
+  for(unsigned axis=0;axis<3;axis++)assert(cal.accel_bias[axis]==0&&cal.accel_scale[axis]==1);
+  assert(!strcmp(persist_last_error(),"migrated_accel_orientation"));
+  assert(persist_dirty()&&!strcmp(persist_state(),"dirty"));
+  assert(!strcmp(persist_accel_storage(),"not-calibrated"));
+  assert(saves==before&&!memcmp(image,old_orientation,PAYLOAD_BYTES));
+ }
+ assert(persist_save());assert(saves==before+1&&!persist_dirty());
+ for(unsigned offset=96;offset<128;offset++)assert(image[offset]==0);
+ assert(!memcmp(image,old_orientation,96)&&!memcmp(image+128,old_orientation+128,PAYLOAD_BYTES-128));
+ memset(&cal,0,sizeof(cal));persist_init();assert(persist_load());
+ assert(!cal.accel_valid&&!persist_dirty()&&!strcmp(persist_last_error(),"none"));
+ /* Recognition is not a blanket escape from record validation. */
+ const unsigned corrupt_legacy[]={97,100,104,116,0,160,208};
+ for(unsigned i=0;i<sizeof(corrupt_legacy)/sizeof(corrupt_legacy[0]);i++) {
+  memcpy(image,old_orientation,PAYLOAD_BYTES);unsigned o=corrupt_legacy[i];
+  if(o==97||o==100)image[o]^=0x80;else put32(image+o,0x7fc00000u);
+  uint8_t untouched[PAYLOAD_BYTES];memcpy(untouched,image,PAYLOAD_BYTES);
+  assert(config_set_key("rate_max_roll",444));gyro_calibration_info_t original_cal=cal;before=saves;
+  assert(!persist_load()&&!strcmp(persist_last_error(),"invalid_settings"));
+  assert(config_get_key("rate_max_roll",&v)&&v==444);
+  assert(!memcmp(&cal,&original_cal,sizeof(cal))&&saves==before&&!memcmp(image,untouched,PAYLOAD_BYTES));
+ }
+ legacy_orientation_allowed=false;
+ memcpy(image,old_orientation,PAYLOAD_BYTES);assert(!persist_load());
+ memcpy(image,good,PAYLOAD_BYTES);persist_init();assert(persist_load());
  /* A valid schema1 record migrates ALL existing settings, but never invents calibration. */
  image_len=128;memset(&cal,0,sizeof(cal));persist_init();assert(persist_load());assert(cal.accel_valid&&cal.accel_bias[2]==solved.accel_bias[2]&&persist_dirty());assert(persist_save());
  image_len=96;persist_init();assert(persist_load());assert(!cal.accel_valid);assert(persist_dirty());

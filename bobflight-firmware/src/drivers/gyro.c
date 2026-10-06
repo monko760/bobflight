@@ -11,6 +11,7 @@
  *   BMI270: CHIP_ID 0x00 → 0x24 (Bosch BST-BMI270-DS000); SPI needs priming read.
  */
 #include "drivers/gyro.h"
+#include "drivers/imu_orientation.h"
 #include "drivers/sensor_calibration.h"
 #include "board/board.h"
 #include "hal/hal.h"
@@ -441,8 +442,11 @@ int gyro_status_lines(char *buf, unsigned len)
     return (n < 0 || (unsigned)n >= len) ? -1 : n;
 }
 
+static imu_orientation_t g_orientation = IMU_CW0;
+
 void gyro_init(void)
 {
+    g_orientation = IMU_CW0;
     const board_t *b = board_get();
     memset(&g_diag,0,sizeof(g_diag));
     g_diag.chip="unavailable";
@@ -472,6 +476,16 @@ void gyro_init(void)
 
     if (!b || !board_pins_live()) {
         g_bind = b && b->is_dummy ? "dummy" : "unbound";
+        arming_set_gyro_healthy(false);
+        return;
+    }
+    const char *alignment = b->gyro_align;
+#if BOBFLIGHT_HOST
+    /* Existing host-only sensor fixtures omit the physical mounting field. */
+    if (!alignment[0]) alignment = "CW0_DEG";
+#endif
+    if (!imu_orientation_parse(alignment, &g_orientation)) {
+        g_bind = "bad-alignment";
         arming_set_gyro_healthy(false);
         return;
     }
@@ -590,10 +604,12 @@ bool gyro_sample(float dps[3])
     dps[0] = (float)x * g_dps_per_lsb;
     dps[1] = (float)y * g_dps_per_lsb;
     dps[2] = (float)z * g_dps_per_lsb;
-    const board_t *b=board_get();
-    if(b && strcmp(b->gyro_align,"CW270_DEG")==0) {
-        float v=dps[0]; dps[0]=-dps[1];dps[1]=v;
-        v=g_acc[0];g_acc[0]=-g_acc[1];g_acc[1]=v;
+    if (!imu_orientation_apply(g_orientation, dps) ||
+        !imu_orientation_apply(g_orientation, g_acc)) {
+        g_healthy = false;
+        memset(dps, 0, 3 * sizeof(*dps));
+        arming_set_gyro_healthy(false);
+        return false;
     }
     if(g_kind==GYRO_CHIP_MPU6K) {
         memcpy(g_diag.raw_acc_g,g_acc,sizeof(g_acc));
@@ -801,8 +817,9 @@ void gyro_calibration_info(gyro_calibration_info_t *info) {
 }
 
 /* Bind persisted correction to the detected sensor ID, configured range and
- * correction model v1. No gyro bias, readiness flags or calibration session is restored. */
-uint32_t gyro_accel_calibration_binding(void) {
+ * versioned aligned-frame correction model. No gyro bias, readiness flags or
+ * calibration session is restored. */
+static uint32_t gyro_accel_binding_for_model(uint32_t model) {
  if(!g_healthy||!g_diag.config_ok||g_kind!=GYRO_CHIP_MPU6K)return 0;
  const board_t *b=board_get();if(!b)return 0;
  uint32_t h=2166136261u;
@@ -810,8 +827,21 @@ uint32_t gyro_accel_calibration_binding(void) {
  for(const unsigned char *p=(const unsigned char*)b->gyro_align;*p;p++)h=(h^*p)*16777619u;
  uint32_t resource[2]={b->gyro_spi_bus,(uint32_t)b->gyro_cs_pin};
  for(unsigned i=0;i<2;i++)for(unsigned shift=0;shift<32;shift+=8)h=(h^((resource[i]>>shift)&255u))*16777619u;
- h=(h^1u)*16777619u;h=(h^g_sensor_id)*16777619u;h=(h^g_diag.accel_config)*16777619u;
+ h=(h^model)*16777619u;h=(h^g_sensor_id)*16777619u;h=(h^g_diag.accel_config)*16777619u;
  return h;
+}
+static bool gyro_has_new_orientation_model(void) {
+ return g_orientation==IMU_CW90||g_orientation==IMU_CW180;
+}
+uint32_t gyro_accel_calibration_binding(void) {
+ /* Preserve existing CW0/CW270 bindings. Old CW90/CW180 meant identity. */
+ return gyro_accel_binding_for_model(gyro_has_new_orientation_model()?2u:1u);
+}
+bool gyro_accel_legacy_orientation_valid(const float bias[3],const float scale[3],uint32_t binding) {
+ /* Migration eligibility only: these coefficients MUST NOT be applied. */
+ return !BOBFLIGHT_ACCEL_BENCH_RELAXED && gyro_has_new_orientation_model() &&
+        binding && binding==gyro_accel_binding_for_model(1u) &&
+        sc_accel_coefficients_valid(bias,scale);
 }
 bool gyro_accel_restore_valid(const float bias[3],const float scale[3],uint32_t binding) {
  return !BOBFLIGHT_ACCEL_BENCH_RELAXED && binding && binding==gyro_accel_calibration_binding() && sc_accel_coefficients_valid(bias,scale);
