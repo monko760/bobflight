@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "stm32f722",
+  "family": "F7",
+  "part": "STM32F722",
+  "core": "cortex-m7",
+  "toolchain": "cmake/stm32f722.cmake",
+  "status": "implemented"
+}

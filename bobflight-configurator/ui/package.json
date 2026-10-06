@@ -25,7 +25,10 @@
     "test:gyro-notch": "esbuild scripts/test-gyro-notch.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-gyro-notch.bundle.mjs && node scripts/test-gyro-notch.bundle.mjs",
     "test:receiver-link": "node scripts/run-receiver-link.mjs",
     "test:gyro-health": "node scripts/run-gyro-health.mjs",
-    "test:blackbox-download": "node scripts/run-blackbox-download.mjs"
+    "test:blackbox-download": "node scripts/run-blackbox-download.mjs",
+    "test:targets": "esbuild scripts/test-target-catalog.tsx --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-target-catalog.bundle.mjs && node scripts/test-target-catalog.bundle.mjs",
+    "prebuild": "node ../scripts/generate-target-catalog.cjs",
+    "predev": "node ../scripts/generate-target-catalog.cjs"
   },
   "dependencies": {
     "@bobflight/protocol": "file:../protocol",

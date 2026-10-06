@@ -77,3 +77,7 @@ __pycache__/
 !/tools/test_download_pipeline.py
 
 !/USB-LOG-EXPORT.md
+
+# Generic target definitions and build tooling.
+!/build-target.ps1
+!/TARGETS.md
