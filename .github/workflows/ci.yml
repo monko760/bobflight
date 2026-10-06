@@ -177,15 +177,22 @@ jobs:
         run: npm run build
 
   target-tooling-windows:
-    name: Target selection and PowerShell guards
+    name: Target selection and publication (${{ matrix.shell }})
     runs-on: windows-latest
+    strategy:
+      matrix:
+        shell: [pwsh, powershell]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Validate registry and atomic artifact publication
+        run: |
+          python bobflight-firmware/tests/test_target_registry.py
+          python bobflight-firmware/tests/test_target_artifact.py
       - name: Parse and exercise target selection without hardware
-        shell: pwsh
+        shell: ${{ matrix.shell }}
         run: |
           $tokens = $null
           $errors = $null
