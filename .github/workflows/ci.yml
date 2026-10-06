@@ -177,11 +177,8 @@ jobs:
         run: npm run build
 
   target-tooling-windows:
-    name: Target selection and publication (${{ matrix.shell }})
+    name: Target selection and publication (Windows)
     runs-on: windows-latest
-    strategy:
-      matrix:
-        shell: [pwsh, powershell]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -191,22 +188,9 @@ jobs:
         run: |
           python bobflight-firmware/tests/test_target_registry.py
           python bobflight-firmware/tests/test_target_artifact.py
-      - name: Parse and exercise target selection without hardware
-        shell: ${{ matrix.shell }}
-        run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'build-target.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count) { throw ($errors | Out-String) }
-          & ./build-target.ps1 -ListTargets
-          & ./build-target.ps1 -Target tmotor_f7_v2 -ValidateOnly
-          foreach ($target in @('dummy', 'does_not_exist')) {
-            $rejected = $false
-            try { & ./build-target.ps1 -Target $target -ValidateOnly }
-            catch {
-              if ($_.Exception.Message -notmatch 'Target selection rejected') { throw }
-              $rejected = $true
-            }
-            if (!$rejected) { throw "Unsafe target accepted: $target" }
-          }
-          $global:LASTEXITCODE = 0
+      - name: PowerShell Core selection guards
+        shell: pwsh
+        run: '& ./bobflight-firmware/tests/test_target_tooling.ps1'
+      - name: Windows PowerShell 5.1 selection guards
+        shell: powershell
+        run: '& ./bobflight-firmware/tests/test_target_tooling.ps1'
