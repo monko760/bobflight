@@ -13,7 +13,8 @@ typedef struct {
     uint8_t flash_wait_states, voltage_scale;
 } bf_f4_clock_plan_t;
 
-/* PROVISIONAL, TEST-ONLY COMPONENT. Device-limit review is not complete.
+/* TEST-ONLY COMPONENT. Static clock/register evidence is documented.
+ * Electrical timer-limit discrepancy and hardware qualification remain open.
  * Pure planning only: no MMIO, clock switching, flash writes or hardware probe.
  * Requires a verified HSE crystal (whole MHz, 4..26 MHz), 2.7..3.6 V supply,
  * and part-specific voltage scale 1. Scale is logical, NOT PWR register bits.
@@ -21,4 +22,16 @@ typedef struct {
  * This component does not enable an F4 hardware backend. */
 bool bf_f4_make_clock_plan(bf_f4_part_t part, uint32_t hse_hz,
                            uint32_t vdd_mv, bf_f4_clock_plan_t *out);
+/* Mask/value descriptions only. Not an ordered hardware initialization program.
+ * In particular: no SYSCLK switch, oscillator/PLL enable, readiness waits,
+ * PWR clock enable or timer-mode writes. Those require a separate backend. */
+typedef struct { uint32_t mask, value; } bf_f4_clock_reg_update_t;
+typedef struct {
+    bf_f4_clock_plan_t clocks;
+    bf_f4_clock_reg_update_t pllcfgr, cfgr, pwr_cr, flash_acr;
+} bf_f4_clock_register_plan_t;
+bool bf_f4_make_clock_register_plan(bf_f4_part_t part, uint32_t hse_hz,
+                                    uint32_t vdd_mv,
+                                    bf_f4_clock_register_plan_t *out);
+
 #endif

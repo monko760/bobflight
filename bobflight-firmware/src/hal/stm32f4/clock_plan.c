@@ -38,3 +38,38 @@ bool bf_f4_make_clock_plan(bf_f4_part_t part, uint32_t hse_hz,
     *out = p;
     return true;
 }
+
+/* Field locations verified against ST CMSIS stm32f405xx/stm32f411xe headers.
+ * Reserved bits, SYSCLK selection, MCO and flash cache controls are excluded. */
+bool bf_f4_make_clock_register_plan(bf_f4_part_t part, uint32_t hse_hz,
+                                    uint32_t vdd_mv,
+                                    bf_f4_clock_register_plan_t *out)
+{
+    bf_f4_clock_register_plan_t p = {0};
+    if (!out || !bf_f4_make_clock_plan(part, hse_hz, vdd_mv, &p.clocks))
+        return false;
+    switch (part) {
+    case BF_F4_PART_F405:
+        p.pwr_cr.mask = 0x00004000u;
+        p.pwr_cr.value = 0x00004000u;
+        p.cfgr.value = (5u << 10) | (4u << 13);
+        break;
+    case BF_F4_PART_F411:
+        p.pwr_cr.mask = 0x0000c000u;
+        p.pwr_cr.value = 0x0000c000u;
+        p.cfgr.value = (4u << 10);
+        break;
+    default:
+        return false; /* A future clock plan must not inherit another part's VOS. */
+    }
+    p.pllcfgr.mask = 0x0f437fffu;
+    p.pllcfgr.value = (uint32_t)p.clocks.pll_m |
+        ((uint32_t)p.clocks.pll_n << 6) |
+        (((uint32_t)p.clocks.pll_p / 2u - 1u) << 16) |
+        (1u << 22) | ((uint32_t)p.clocks.pll_q << 24);
+    p.cfgr.mask = 0x0000fcf0u;
+    p.flash_acr.mask = 0x00000007u;
+    p.flash_acr.value = p.clocks.flash_wait_states;
+    *out = p;
+    return true;
+}
