@@ -12,7 +12,11 @@
     "build": "npm --prefix protocol run build && npm --prefix ui run build",
     "dev": "npm --prefix ui run dev",
     "typecheck": "npm --prefix protocol run typecheck && npm --prefix ui run typecheck",
-    "clean": "npm --prefix protocol run clean && npm --prefix ui run clean"
+    "clean": "npm --prefix protocol run clean && npm --prefix ui run clean",
+    "targets:generate": "node scripts/generate-target-catalog.cjs",
+    "targets:check": "node scripts/generate-target-catalog.cjs --check",
+    "prebuild": "npm run targets:generate",
+    "predev": "npm run targets:generate"
   },
   "engines": {
     "node": ">=18"

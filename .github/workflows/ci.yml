@@ -61,6 +61,10 @@ jobs:
           node-version: 20
       - name: Install
         run: npm ci --no-audit --no-fund
+      - name: Target registry catalog and UI
+        run: |
+          npm run targets:check
+          npm --prefix ui run test:targets
       - name: Typecheck
         run: npm run typecheck
       - name: USB bench blackbox recorder
@@ -171,3 +175,31 @@ jobs:
         run: npm --prefix protocol run smoke:flasher
       - name: Build
         run: npm run build
+
+  target-tooling-windows:
+    name: Target selection and PowerShell guards
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Parse and exercise target selection without hardware
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'build-target.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+          & ./build-target.ps1 -ListTargets
+          & ./build-target.ps1 -Target tmotor_f7_v2 -ValidateOnly
+          foreach ($target in @('dummy', 'does_not_exist')) {
+            $rejected = $false
+            try { & ./build-target.ps1 -Target $target -ValidateOnly }
+            catch {
+              if ($_.Exception.Message -notmatch 'Target selection rejected') { throw }
+              $rejected = $true
+            }
+            if (!$rejected) { throw "Unsafe target accepted: $target" }
+          }
+          $global:LASTEXITCODE = 0

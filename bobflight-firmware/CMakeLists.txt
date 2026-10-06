@@ -16,35 +16,33 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Wextra)
 
-# --- Formal board IR select (default: dummy / fail-closed) ---
-set(BOBFLIGHT_BOARD "dummy" CACHE STRING "Board IR id: dummy | tmotor_f7_v2 | kakute_f7_hdv")
-set_property(CACHE BOBFLIGHT_BOARD PROPERTY STRINGS dummy tmotor_f7_v2 kakute_f7_hdv)
-if(NOT BOBFLIGHT_BOARD STREQUAL "dummy"
-   AND NOT BOBFLIGHT_BOARD STREQUAL "tmotor_f7_v2"
-   AND NOT BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv")
-  message(FATAL_ERROR "BOBFLIGHT_BOARD must be dummy|tmotor_f7_v2|kakute_f7_hdv (got '${BOBFLIGHT_BOARD}')")
+# Target catalog is the source of board/MCU selection, not a hardcoded allowlist.
+option(BOBFLIGHT_HOST_SMOKE "Build host smoke binary (no MCU)" ON)
+set(BOBFLIGHT_BOARD "dummy" CACHE STRING "Board id from scripts/target_registry.py list")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/target_registry.py"
+  resolve "${BOBFLIGHT_BOARD}" --cmake RESULT_VARIABLE _target_rc
+  OUTPUT_VARIABLE _target_cmake ERROR_VARIABLE _target_err)
+if(NOT _target_rc EQUAL 0)
+  message(FATAL_ERROR "Target definition rejected: ${_target_err}")
 endif()
-
-if(BOBFLIGHT_BOARD STREQUAL "dummy")
-  set(BOBFLIGHT_IR_YAML "${CMAKE_SOURCE_DIR}/boards/dummy.yaml")
-elseif(BOBFLIGHT_BOARD STREQUAL "tmotor_f7_v2")
-  set(_bf_ir_local "${CMAKE_SOURCE_DIR}/boards/tmotor-ir/tmotor_f7_v2.yaml")
-  if(EXISTS "${_bf_ir_local}")
-    set(BOBFLIGHT_IR_YAML "${_bf_ir_local}")
-  else()
-    set(BOBFLIGHT_IR_YAML "/workspace/board-defs/tmotor/tmotor_f7_v2.yaml")
+file(WRITE "${CMAKE_BINARY_DIR}/resolved-target.cmake" "${_target_cmake}")
+include("${CMAKE_BINARY_DIR}/resolved-target.cmake")
+set(BOBFLIGHT_IR_YAML "${CMAKE_SOURCE_DIR}/${BOBFLIGHT_IR_RELATIVE}")
+file(GLOB _bf_target_defs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/targets/mcus/*.json" "${CMAKE_SOURCE_DIR}/targets/boards/*.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_bf_target_defs}
+  "${CMAKE_SOURCE_DIR}/scripts/target_registry.py" "${BOBFLIGHT_IR_YAML}")
+if(CMAKE_CROSSCOMPILING)
+  if(BOBFLIGHT_BOARD_SUPPORT STREQUAL "host-only" OR NOT BOBFLIGHT_MCU_STATUS STREQUAL "implemented")
+    message(FATAL_ERROR "This target has no implemented hardware backend")
   endif()
-elseif(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv")
-  set(_bf_ir_local "${CMAKE_SOURCE_DIR}/boards/holybro-ir/kakute_f7_hdv.yaml")
-  if(EXISTS "${_bf_ir_local}")
-    set(BOBFLIGHT_IR_YAML "${_bf_ir_local}")
-  else()
-    set(BOBFLIGHT_IR_YAML "/workspace/board-defs/holybro/kakute_f7_hdv.yaml")
+  if(NOT BOBFLIGHT_TARGET_MCU STREQUAL BOBFLIGHT_EXPECTED_MCU)
+    message(FATAL_ERROR "Board requires ${BOBFLIGHT_EXPECTED_MCU}, not ${BOBFLIGHT_TARGET_MCU}")
   endif()
-endif()
-
-if(NOT EXISTS "${BOBFLIGHT_IR_YAML}")
-  message(FATAL_ERROR "BobFlight IR YAML missing for ${BOBFLIGHT_BOARD}: ${BOBFLIGHT_IR_YAML}")
+  get_filename_component(_bf_selected_toolchain "${CMAKE_TOOLCHAIN_FILE}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
+  get_filename_component(_bf_expected_toolchain "${CMAKE_SOURCE_DIR}/${BOBFLIGHT_EXPECTED_TOOLCHAIN}" REALPATH)
+  if(NOT _bf_selected_toolchain STREQUAL _bf_expected_toolchain)
+    message(FATAL_ERROR "Target toolchain does not match the board definition")
+  endif()
 endif()
 
 # Configure-time codegen into the build tree (never overwrites checked-in src/board/pins_generated.h).
@@ -76,7 +74,6 @@ add_custom_command(
   VERBATIM)
 add_custom_target(bobflight_pins_gen DEPENDS "${BOBFLIGHT_PINS_GEN}")
 
-option(BOBFLIGHT_HOST_SMOKE "Build host smoke binary (no MCU)" ON)
 # One supported image per hardware target. Reject stale build-profile caches
 # rather than silently changing the meaning of a previous bench command.
 if(DEFINED BOBFLIGHT_FLIGHT_ENABLE)
@@ -148,6 +145,8 @@ include_directories(
 )
 
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
+  add_test(NAME target_registry_validation COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_target_registry.py)
+  add_test(NAME target_artifact_publication COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_target_artifact.py)
   add_executable(bobflight_capture_test src/flight/blackbox_capture.c src/flight/flight_recorder.c src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_blackbox_capture.c)
   target_link_libraries(bobflight_capture_test m)
   add_test(NAME blackbox_production_capture COMMAND bobflight_capture_test)

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "tmotor_f7_v2",
+  "mcu": "stm32f722",
+  "ir": "boards/tmotor-ir/tmotor_f7_v2.yaml",
+  "support": "sensor-only",
+  "capabilities": {
+    "motor_output": false,
+    "usb_cdc": true,
+    "sd_logging": false
+  },
+  "display_name": "T-Motor F7 V2"
+}

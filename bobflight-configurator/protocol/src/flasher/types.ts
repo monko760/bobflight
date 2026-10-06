@@ -6,6 +6,7 @@
  */
 
 import type { ParsedHex } from "./intel-hex";
+import { GENERATED_BOARD_MCU } from "./board-targets.generated";
 
 /** Progress phases for a flash session. */
 export type FlashPhase =
@@ -81,10 +82,7 @@ export const FLASH_CAPABILITIES = {
 } as const;
 
 /** Board name → MCU (status board: field after leave → CDC). */
-export const BOARD_MCU: Readonly<Record<string, BobFlightMcu>> = {
-  kakute_f7_hdv: "F745",
-  tmotor_f7_v2: "F722",
-};
+export const BOARD_MCU: Readonly<Record<string, BobFlightMcu>> = GENERATED_BOARD_MCU;
 
 /** Public ST flash sizes used for gating (bytes from 0x08000000). */
 export const MCU_FLASH_SIZE: Readonly<Record<BobFlightMcu, number>> = {

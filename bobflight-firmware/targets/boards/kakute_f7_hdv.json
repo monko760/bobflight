@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "kakute_f7_hdv",
+  "mcu": "stm32f745",
+  "ir": "boards/holybro-ir/kakute_f7_hdv.yaml",
+  "support": "development",
+  "capabilities": {
+    "motor_output": true,
+    "usb_cdc": true,
+    "sd_logging": true
+  },
+  "display_name": "Kakute F7 HDV"
+}

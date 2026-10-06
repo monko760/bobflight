@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "dummy",
+  "mcu": "stm32f722",
+  "ir": "boards/dummy.yaml",
+  "support": "host-only",
+  "capabilities": {
+    "motor_output": false,
+    "usb_cdc": false,
+    "sd_logging": false
+  },
+  "display_name": "Host simulation"
+}

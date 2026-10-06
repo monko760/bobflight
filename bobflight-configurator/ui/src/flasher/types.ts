@@ -1,3 +1,4 @@
+import { catalog, mcuForBoard } from "../targets/catalog";
 /**
  * Firmware flasher types — Protocol shapes + UI board helpers.
  * SPDX-License-Identifier: Apache-2.0
@@ -39,24 +40,13 @@ export interface ParsedHex extends ProtocolParsedHex {
   mcuHint?: string;
 }
 
-export const BOARD_OPTIONS = [
-  {
-    boardId: "kakute_f7_hdv",
-    label: "Kakute F7 HDV",
-    mcu: "F745" as BobFlightMcu,
-    mcuDisplay: "STM32F745",
-    primary: true,
-  },
-  {
-    boardId: "tmotor_f7_v2",
-    label: "T-Motor F7 V2",
-    mcu: "F722" as BobFlightMcu,
-    mcuDisplay: "STM32F722",
-    primary: false,
-  },
-] as const;
-
-export type BoardId = (typeof BOARD_OPTIONS)[number]["boardId"];
+export const BOARD_OPTIONS = catalog.boards.flatMap(board => {
+  const target = mcuForBoard(board.id);
+  const mcu = normalizeMcu(target?.part);
+  if (board.support === 'host-only' || target?.status !== 'implemented' || !mcu) return [];
+  return [{boardId: board.id, label: board.display_name, mcu, mcuDisplay: target.part, primary: false}];
+});
+export type BoardId = string;
 
 export function normalizeMcu(mcu: ExpectedMcu | undefined): BobFlightMcu | null {
   if (!mcu) return null;

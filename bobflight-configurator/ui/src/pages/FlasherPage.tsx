@@ -24,6 +24,7 @@ import {
   type ParsedHex,
 } from "../flasher";
 import { useHost } from "../hooks/useHost";
+import { TargetCatalog } from "../targets/TargetCatalog";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -118,7 +119,7 @@ export function FlasherPage() {
     clearPostFlashGateAfterReconnect,
   } = useHost();
 
-  const [boardId, setBoardId] = useState<BoardId>("kakute_f7_hdv");
+  const [boardId, setBoardId] = useState<BoardId>("");
   /** Demo/mock default OFF — explicit opt-in required. */
   const [useMock, setUseMock] = useState(false);
   const [mockUnderstood, setMockUnderstood] = useState(false);
@@ -142,7 +143,7 @@ export function FlasherPage() {
   const [flasher, setFlasher] = useState<Flasher | null>(null);
 
   const board = useMemo(
-    () => BOARD_OPTIONS.find((b) => b.boardId === boardId) ?? BOARD_OPTIONS[0],
+    () => BOARD_OPTIONS.find((b) => b.boardId === boardId),
     [boardId],
   );
 
@@ -262,7 +263,7 @@ export function FlasherPage() {
   }
 
   async function onFlash() {
-    if (!flasher || !parsed || !propsOff) return;
+    if (!board || !flasher || !parsed || !propsOff) return;
     if (isLive && !stDfuClaimed) {
       setError(
         "No claimed ST DFU device (0483:DF11). Request DFU device before live flash.",
@@ -327,6 +328,7 @@ export function FlasherPage() {
   }
 
   const canFlashLive =
+    !!board &&
     !!flasher &&
     !!parsed &&
     !parseError &&
@@ -336,6 +338,7 @@ export function FlasherPage() {
     stDfuClaimed;
 
   const canFlashMock =
+    !!board &&
     !!flasher &&
     !!parsed &&
     !parseError &&
@@ -364,6 +367,7 @@ export function FlasherPage() {
 
   return (
     <div className="panel flasher-page">
+      <TargetCatalog />
       <div className="flasher-header">
         <h2>Firmware Flasher</h2>
         <span className="muted">Sector erase + readback verification</span>
@@ -394,7 +398,7 @@ export function FlasherPage() {
 
       {demoMode && (
         <div className="banner-warn" role="alert">
-          <strong>This will NOT reflash your Kakute.</strong> Demo/mock path
+          <strong>This will NOT reflash your controller.</strong> Demo/mock path
           performs <em>zero</em> USB writes — board firmware is unchanged.
         </div>
       )}
@@ -411,9 +415,7 @@ export function FlasherPage() {
         <h3>Preflight</h3>
         <ul className="preflight-list">
           <li>
-            <strong>Board / target:</strong> {board.label} · board_id{" "}
-            <code>{board.boardId}</code> · MCU {board.mcuDisplay} (
-            {board.mcu})
+            <strong>Board / target:</strong> {board ? <>{board.label} · board_id <code>{board.boardId}</code> · MCU {board.mcuDisplay}</> : "Select an explicit target below. No target is assumed."}
           </li>
           <li>
             <strong>DFU vs CDC:</strong> flashing needs DFU bootloader mode.
@@ -442,6 +444,7 @@ export function FlasherPage() {
             disabled={flashing}
             onChange={(e) => setBoardId(e.target.value as BoardId)}
           >
+            <option value="" disabled>Select a target</option>
             {BOARD_OPTIONS.map((b) => (
               <option key={b.boardId} value={b.boardId}>
                 {b.label} ({b.mcuDisplay})
@@ -450,7 +453,7 @@ export function FlasherPage() {
             ))}
           </select>
           <p className="muted" style={{ marginTop: "0.35rem" }}>
-            expectedMcu gate: {mcuDisplayName(board.mcu)} · hex must match this
+            expectedMcu gate: {board ? mcuDisplayName(board.mcu) : "no target selected"} · hex must match this
             MCU family
           </p>
         </div>
