@@ -315,6 +315,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME loop_rate_policy_status COMMAND bobflight_loop_rate_test)
   add_executable(bobflight_timing_cli_test tests/host_timing_cli.c)
   add_test(NAME timing_cli COMMAND bobflight_timing_cli_test)
+  add_test(NAME mcu_backend_selection COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/test_mcu_backend_selection.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER})
   add_test(NAME boot_led_modes COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_boot_led_modes.py ${CMAKE_C_COMPILER})
   add_executable(bobflight_receiver_test src/drivers/rx.c src/drivers/crsf.c tests/host_receiver.c)
@@ -627,7 +629,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     BOBFLIGHT_BOARD_ID="${BOBFLIGHT_BOARD}")
   target_link_libraries(bobflight_cascade_inject_test m)
 else()
-  # Cross / MCU skeleton — HAL no-ops until CMSIS audited in
+  # Explicit MCU backend contract. Unsupported parts have no default fallback.
+  include("${CMAKE_SOURCE_DIR}/cmake/select_mcu_backend.cmake")
   # TinyUSB (MIT) — device CDC + DWC2 only; MCU builds only
   set(BF_TUSB_ROOT "${CMAKE_SOURCE_DIR}/third_party/tinyusb")
   set(BF_TUSB_SOURCES
@@ -641,20 +644,7 @@ else()
 
   add_executable(bobflight.elf
     ${BF_COMMON_SOURCES}
-    src/hal/stm32f7/hal_f7_priv.c
-    src/hal/stm32f7/hal_clock.c
-    src/hal/stm32f7/hal_gpio.c
-    src/hal/stm32f7/hal_spi.c
-    src/hal/stm32f7/sd_spi_hw.c
-    src/hal/stm32f7/hal_adc.c
-    src/hal/stm32f7/hal_uart.c
-    src/hal/stm32f7/hal_tim_dma.c
-    src/hal/stm32f7/hal_tim_ic.c
-    src/hal/stm32f7/hal_exti.c
-    src/hal/stm32f7/hal_usb_cdc.c
-    src/hal/stm32f7/hal_flash.c
-    src/hal/stm32f7/hal_bootloader.c
-    src/hal/stm32f7/startup_stm32f722.c
+    ${BF_HAL_SOURCES}
     ${BF_TUSB_SOURCES})
   add_dependencies(bobflight.elf bobflight_pins_gen)
   target_compile_definitions(bobflight.elf PRIVATE
@@ -662,7 +652,7 @@ else()
     BOBFLIGHT_MCU=1
     BOBFLIGHT_HAVE_CMSIS=1
     BOBFLIGHT_BOARD_ID="${BOBFLIGHT_BOARD}"
-    CFG_TUSB_MCU=OPT_MCU_STM32F7)
+    CFG_TUSB_MCU=${BF_USB_MCU})
   if(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv" AND BOBFLIGHT_TARGET_MCU STREQUAL "STM32F745")
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_CONFIG_FLASH_F745=1)
   endif()
@@ -676,23 +666,13 @@ else()
   endif()
   target_include_directories(bobflight.elf PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/cmsis-core/Include
-    ${CMAKE_SOURCE_DIR}/src/hal/stm32f7
+    ${BF_HAL_INCLUDE_DIRS}
     ${BF_TUSB_ROOT}/src
     ${CMAKE_SOURCE_DIR}/src/usb)
   if(DEFINED BOBFLIGHT_TARGET_MCU)
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_TARGET_MCU=${BOBFLIGHT_TARGET_MCU})
   endif()
-  # Prefer toolchain CACHE MCU; fall back to board id for Kakute F745.
-  if(DEFINED BOBFLIGHT_TARGET_MCU AND BOBFLIGHT_TARGET_MCU STREQUAL "STM32F745")
-    set(_BF_LD_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/stm32f745.ld")
-  elseif(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv")
-    set(_BF_LD_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/stm32f745.ld")
-    if(NOT DEFINED BOBFLIGHT_TARGET_MCU)
-      set(BOBFLIGHT_TARGET_MCU "STM32F745" CACHE STRING "MCU family")
-    endif()
-  else()
-    set(_BF_LD_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/stm32f722.ld")
-  endif()
+  set(_BF_LD_SCRIPT "${BF_LINKER_SCRIPT}")
   message(STATUS "BobFlight: linker ${_BF_LD_SCRIPT} MCU=${BOBFLIGHT_TARGET_MCU}")
   target_link_options(bobflight.elf PRIVATE
     -nostartfiles

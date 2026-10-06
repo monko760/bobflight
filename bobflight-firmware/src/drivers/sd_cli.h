@@ -14,7 +14,7 @@ static bool blackbox_cli_busy(void);
 
 #if defined(BOBFLIGHT_MCU) || defined(BOBFLIGHT_SD_CLI_TEST)
 #include "drivers/sd_probe.h"
-#include "hal/stm32f7/sd_spi_hw.h"
+#include "hal/sd_spi_hw.h"
 
 static sd_probe_t cli_sd;
 static uint8_t sd_cli_read_buf[512];

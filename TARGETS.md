@@ -1,14 +1,14 @@
 # Declarative target foundation
 
-This is the first slice of the modern BobFlight target architecture: shared MCU backends, board definitions compiled into firmware defaults, and separate persistent aircraft settings. It is not universal F4/F7/H7 support, hardware qualification, or flight readiness.
+This describes the modern BobFlight target architecture: shared MCU backends, board definitions compiled into firmware defaults, and separate persistent aircraft settings. It is not universal F4/F7/H7 support, hardware qualification, or flight readiness.
 
 ## Scope and compatibility
 
-The registry replaces the CMake board-name selection list and generates both the configurator catalog and protocol board-to-MCU map. Existing hardware drivers, startup, motor routing, arming/failsafe behavior, PID timing, calibration, NVM schema and `diff all` / `save` behavior are unchanged. Existing targets remain for compatibility; this PR does not expand their hardware capabilities. The old `build-main.ps1` helper is unchanged.
+The registry replaces the CMake board-name selection list and generates both the configurator catalog and protocol board-to-MCU map. The original registry foundation did not change firmware runtime. Subsequent [board-defined IMU orientation and calibration migration](bobflight-firmware/docs/imu-orientation.md) preserve unrelated aircraft settings; [explicit MCU backend selection and common HAL contracts](bobflight-firmware/docs/mcu-backends.md) preserve the existing F7 executable behavior. Arming/failsafe policy, PID timing, NVM layout and `diff all` / `save` remain unchanged. Existing targets remain for compatibility; this PR does not expand their hardware capabilities. The old `build-main.ps1` helper is unchanged.
 
 The STM32F722 entry describes the existing sensor-only backend. Its board definition explicitly advertises no motor output or SD logging. STM32F405, STM32F411 and STM32H743 are planning entries with no toolchain and cannot produce hardware builds. Implemented MCU metadata means code exists, not that every peripheral or every board using that MCU is supported. Raspberry Pico is outside this architecture slice.
 
-Runtime receiver-routing refactoring and additional IMU orientation transforms are deferred. Remaining board-specific driver guards and the bounded existing F7 image validator are intentionally retained. Adding a new JSON definition alone does not port its drivers or authorize a hardware build as qualified.
+Runtime receiver-routing refactoring, flipped/arbitrary sensor transforms and additional MCU driver implementations remain deferred. The four board-defined Z-axis quarter turns are implemented. Remaining board-specific driver guards and the bounded existing F7 image validator are intentionally retained. Adding a new JSON definition alone does not port its drivers or authorize a hardware build as qualified.
 
 ## Source of truth
 

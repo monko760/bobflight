@@ -67,8 +67,8 @@ def check(diagnostic, prove):
     assert ("main();" in reset) == (not bool(prove))
     assert ("early_pa2_blink();" in reset) == (bool(diagnostic) and not prove)
     assert (body(startup, "early_pa2_blink", False) is not None) == (bool(diagnostic) and not prove)
-    assert ("boot_pa2_crude_short_pulse();" in entry) == bool(diagnostic)
-    assert (body(startup, "boot_pa2_crude_short_pulse", False) is not None) == bool(diagnostic)
+    assert ("hal_boot_diagnostic_pulse();" in entry) == bool(diagnostic)
+    assert (body(startup, "hal_boot_diagnostic_pulse", False) is not None) == bool(diagnostic)
     for name in ["boot_led_crumb", "boot_led_heartbeat", "boot_led_usb_chirp"]:
         assert (f"{name}();" in app) == bool(diagnostic)
         assert (body(init, name, False) is not None) == bool(diagnostic)
