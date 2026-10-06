@@ -23,5 +23,8 @@ assert startup.index('hal_bootloader_early_check();')<startup.index('0xE000ED88'
 hal=(root/'src/hal/stm32f7/hal_bootloader.c').read_text()
 assert '.noinit' in hal and 'aligned(8)' in hal
 assert '0x400030' not in hal and '0x5555' not in hal # no IWDG timeout manipulation
-assert 'hal_bootloader.c' in (root/'CMakeLists.txt').read_text()
+# Bootloader source now comes from the selected family backend, not the app list.
+cmake=(root/'CMakeLists.txt').read_text()
+assert 'cmake/select_mcu_backend.cmake' in cmake and '${BF_HAL_SOURCES}' in cmake
+assert 'src/hal/stm32f7/hal_bootloader.c' in (root/'cmake/backends/stm32f7.cmake').read_text()
 print('PASS actual host CLI unsupported/unknown/reboot transcript; pending-command fence, USB polling, early startup and no-watchdog-write source bindings')

@@ -78,7 +78,7 @@ static void early_pa2_setup(void)
 
 #if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
 /** Crude PA2 short pulse (main-entry / pre-board diagnostic only). */
-void boot_pa2_crude_short_pulse(void)
+void hal_boot_diagnostic_pulse(void)
 {
     volatile uint32_t *gpioa_odr = (volatile uint32_t *)(EARLY_LED_GPIO_BASE+0x14u); /* GPIOA->ODR */
 

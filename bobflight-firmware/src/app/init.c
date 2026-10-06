@@ -28,7 +28,7 @@
 #include <string.h>
 
 #ifndef BOBFLIGHT_HOST
-#include "hal/stm32f7/boot_crumb.h"
+#include "hal/boot_crumb.h"
 #endif
 
 #ifndef BOBFLIGHT_HOST

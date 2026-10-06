@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #else
-#include "hal/stm32f7/boot_crumb.h"
+#include "hal/boot_crumb.h"
 #endif
 
 #ifndef BOBFLIGHT_HOST
@@ -52,7 +52,7 @@ int main(void)
      */
     boot_crumb_set(BOOT_CRUMB_MAIN);
 #if BOBFLIGHT_BOOT_LED_DIAGNOSTICS
-    boot_pa2_crude_short_pulse();
+    hal_boot_diagnostic_pulse();
 #endif
 #endif
 
