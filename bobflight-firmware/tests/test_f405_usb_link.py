@@ -38,7 +38,7 @@ class F405USBLink(unittest.TestCase):
         cls.dir=Path(cls.tmp.name);cls.images={}
         cls.includes=['-I'+str(p) for p in (ROOT/'src',HAL,TUSB,ROOT/'third_party/cmsis-core/Include')]
         cls.defs=['-DBF_F4_COMPONENT_F405XG','-DCFG_TUSB_MCU=OPT_MCU_STM32F4']
-        sources=[HAL/n for n in ('startup_component.c','clock_plan.c','clock_start.c','clock_mmio.c','timebase.c')]
+        sources=[HAL/n for n in ('startup_component.c','clock_plan.c','clock_start.c','clock_mmio.c','timebase.c','usb_time.c')]
         sources += [ROOT/'tests/fixtures/f405_timebase/entry.c',ROOT/'tests/fixtures/f405_usb_link/hooks.c']
         sources += [TUSB/n for n in ('tusb.c','common/tusb_fifo.c','device/usbd.c','class/cdc/cdc_device.c',
                                     'portable/synopsys/dwc2/dcd_dwc2.c','portable/synopsys/dwc2/dwc2_common.c')]
@@ -96,13 +96,15 @@ class F405USBLink(unittest.TestCase):
         m=Machine(self.images['f405']);self.assertEqual(m.value('fixture_time_ready'),1)
         # No USB register range is mapped: accidental USB access fails the test.
         self.assertEqual(m.call('fixture_usb_stack_init',0),0)
+        self.assertEqual(m.value('SystemCoreClock'),0)
+        self.assertEqual(m.call('fixture_usb_time_bind',mask=1),1)
         m.advance(168000);self.assertEqual(m.call('tusb_time_millis_api'),1)
-        self.assertEqual(m.value('SystemCoreClock'),0) # USB start has not been reached.
+        self.assertEqual(m.value('SystemCoreClock'),168000000)
 
     def test_time_health_failure_stops_instead_of_faking_zero(self):
-        m=Machine(self.images['f405']);m.reg[0xe000e010]=5;hit=[]
+        m=Machine(self.images['f405']);self.assertEqual(m.call('fixture_usb_time_bind',mask=1),1);m.reg[0xe000e010]=5;hit=[]
         def stop(uc,address,size,user):
-            if address==(m.sym['fixture_usb_fault'][0]&~1):hit.append(True);uc.emu_stop()
+            if address==(m.sym['bf_f405_usb_time_fault'][0]&~1):hit.append(True);uc.emu_stop()
         m.uc.hook_add(UC_HOOK_CODE,stop);m.uc.reg_write(UC_ARM_REG_LR,m.sym['fixture_return'][0]|1)
         m.uc.emu_start(m.sym['tusb_time_millis_api'][0]|1,0,count=20000)
         self.assertEqual(hit,[True])
