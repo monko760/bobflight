@@ -85,6 +85,14 @@ jobs:
         run: npm --prefix protocol run smoke
       - name: DFU flash model test
         run: npm --prefix protocol run test:dfu
+      - name: Flash image validation and user journey
+        run: |
+          npm --prefix protocol run test:hex-validation
+          npm --prefix protocol run test:bootloader
+          npm --prefix ui run test:firmware-validation
+          npm --prefix ui run test:flasher-journey
+          npm --prefix ui run test:post-flash
+          npm --prefix ui run test:transport-identity
       - name: Settings smoke
         run: npm --prefix protocol run smoke:settings
       - name: Motor protocol tests

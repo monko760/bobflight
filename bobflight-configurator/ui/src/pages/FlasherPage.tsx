@@ -1,9 +1,9 @@
 /**
- * Firmware Flasher — WebUSB DFU (ST ROM) or mock for CI/demo.
+ * Firmware Flasher: WebUSB DFU (ST ROM) or mock for CI/demo.
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ST_DFU_PID, ST_DFU_VID } from "@bobflight/protocol";
 import {
   BOARD_OPTIONS,
@@ -15,6 +15,7 @@ import {
   parseIntelHex,
   protocolFlasherReady,
   tryBindProtocolFlasher,
+  validateFirmwareForBoard,
   webUsbUnavailableReason,
   type BoardId,
   type FlashPhase,
@@ -34,25 +35,23 @@ function formatBytes(n: number): string {
 
 function phasePercent(p: FlashProgress): number {
   if (p.phase === "done") return 100;
-  if (p.phase === "idle" || p.phase === "cancelled" || p.phase === "error") {
+  if (p.phase === "cancelled" || p.phase === "error" || p.phase === "idle") {
     return p.bytesTotal > 0
-      ? Math.min(100, Math.round((100 * p.bytesWritten) / p.bytesTotal))
+      ? Math.min(99, Math.round((100 * p.bytesWritten) / p.bytesTotal))
       : 0;
   }
-  if (p.bytesTotal > 0) {
-    return Math.min(99, Math.round((100 * p.bytesWritten) / p.bytesTotal));
+  if (p.phase === "opening") return 5;
+  if (p.phase === "erasing") return 15;
+  if (p.phase === "writing") {
+    const frac = p.bytesTotal > 0 ? p.bytesWritten / p.bytesTotal : 0;
+    return Math.min(80, Math.max(25, 25 + Math.round(55 * frac)));
   }
-  const order: FlashPhase[] = [
-    "opening",
-    "erasing",
-    "writing",
-    "verifying",
-    "leaving",
-    "done",
-  ];
-  const i = order.indexOf(p.phase);
-  if (i < 0) return 0;
-  return Math.round(((i + 1) / order.length) * 100);
+  if (p.phase === "verifying") {
+    const frac = p.bytesTotal > 0 ? p.bytesWritten / p.bytesTotal : 1;
+    return Math.min(95, Math.max(80, 80 + Math.round(15 * frac)));
+  }
+  if (p.phase === "leaving") return 97;
+  return 0;
 }
 
 function isStDfuVidPid(vendorId: number, productId: number): boolean {
@@ -61,29 +60,32 @@ function isStDfuVidPid(vendorId: number, productId: number): boolean {
 
 /** Chrome empty picker / NotFoundError guidance (filters stay 0483:DF11 only). */
 const DFU_EMPTY_PICKER_HELP =
-  "No ST ROM DFU (0483:DF11) in Chrome. Device Manager: STM32 BOOTLOADER (0483:DF11) — not COM. If ST DFU shows but Chrome is empty → Zadig WinUSB on that interface, restart Chrome. If COM only → hold BOOT while plugging USB.";
+  "No ST ROM DFU (0483:DF11) found in Chrome. On Windows only, Device Manager: check for STM32 BOOTLOADER (0483:DF11): not COM port. If ST DFU appears in Device Manager but Chrome picker is empty → use Zadig to install WinUSB driver on that interface, then restart Chrome. If only COM port shows → use software CLI 'bl' command or hold BOOT / bridge BOOT pads while plugging USB.";
 
 /** Chrome Access denied on device open (still 0483:DF11 only). */
 const DFU_ACCESS_DENIED_HELP =
-  "Chrome Access denied opening ST DFU (0483:DF11). Close Betaflight Configurator and other STM/DFU tools; Zadig must be WinUSB (not libusbK) on STM32 BOOTLOADER; fully restart Chrome; re-enter DFU (hold BOOT while plugging USB).";
+  "Chrome Access denied opening ST DFU (0483:DF11). Close other STM/DFU software or configurator tabs; on Windows only, verify Zadig driver is set to WinUSB (not libusbK) on STM32 BOOTLOADER; restart Chrome completely; then re-enter DFU.";
 
 function formatDfuUsbError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   const name = err instanceof DOMException ? err.name : "";
   const lower = raw.toLowerCase();
+
+  if (lower.includes("device was disconnected") || lower.includes("device disconnected")) {
+    return `USB device was disconnected (${raw}).`;
+  }
+
   const accessDenied =
-    name === "NetworkError" ||
     name === "SecurityError" ||
-    name === "InvalidStateError" ||
     lower.includes("access denied") ||
     lower.includes("accessdenied") ||
     lower.includes("failed to open") ||
     lower.includes("unable to claim") ||
-    lower.includes("claim interface") ||
-    lower.includes("device was disconnected");
+    lower.includes("claim interface");
   if (accessDenied) {
     return `${DFU_ACCESS_DENIED_HELP} (Chrome: ${raw})`;
   }
+
   const emptyPicker =
     name === "NotFoundError" ||
     lower.includes("no device selected") ||
@@ -91,14 +93,9 @@ function formatDfuUsbError(err: unknown): string {
     lower.includes("no compatible devices") ||
     lower.includes("not found");
   if (emptyPicker) {
-    return `${DFU_EMPTY_PICKER_HELP} (Chrome: ${raw})`;
+    return `No device selected. Cancelling the picker makes no changes. If the list was empty: ${DFU_EMPTY_PICKER_HELP} (${raw})`;
   }
   return raw;
-}
-
-/** @deprecated alias — requestDevice + open share the same formatter */
-function formatDfuRequestError(err: unknown): string {
-  return formatDfuUsbError(err);
 }
 
 const IN_PROGRESS: ReadonlySet<FlashPhase> = new Set([
@@ -110,33 +107,47 @@ const IN_PROGRESS: ReadonlySet<FlashPhase> = new Set([
 ]);
 
 const MOCK_ONLY_DONE =
-  "MOCK ONLY — no firmware written to the board";
+  "MOCK ONLY: no firmware written to the board";
 
-export function FlasherPage() {
+export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) => void } = {}) {
   const {
     connectionStatus,
+    postFlashGate,
     setPostFlashGate,
     clearPostFlashGateAfterReconnect,
   } = useHost();
 
   const [boardId, setBoardId] = useState<BoardId>("");
-  /** Demo/mock default OFF — explicit opt-in required. */
+  /** Demo/mock default OFF: explicit opt-in required. */
   const [useMock, setUseMock] = useState(false);
   const [mockUnderstood, setMockUnderstood] = useState(false);
   const [propsOff, setPropsOff] = useState(false);
+  const [backupTaken, setBackupTaken] = useState(false);
+  const [boardMatchConfirmed, setBoardMatchConfirmed] = useState(false);
+
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
   const [parsed, setParsed] = useState<ParsedHex | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const fileSeqRef = useRef(0);
+
   const [deviceLabel, setDeviceLabel] = useState<string | null>(null);
   const [claimedVid, setClaimedVid] = useState<number | null>(null);
   const [claimedPid, setClaimedPid] = useState<number | null>(null);
+
   const [progress, setProgress] = useState<FlashProgress>({
     phase: "idle",
     bytesWritten: 0,
     bytesTotal: 0,
   });
   const [busy, setBusy] = useState(false);
+  const operationRef = useRef(false);
+  const pickerRef = useRef(false);
+  const previousBoardRef = useRef("");
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [verifyingReconnect, setVerifyingReconnect] = useState(false);
+  const loadingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [showReconnectHint, setShowReconnectHint] = useState(false);
   const [mockFlashComplete, setMockFlashComplete] = useState(false);
@@ -159,17 +170,18 @@ export function FlasherPage() {
       cancelled = true;
     };
   }, []);
+
   const liveDisabledReason = useMemo(() => {
     if (!webUsbOk) return webUsbUnavailableReason();
     if (!protocolReady) {
-      return "Protocol WebUSB DFU API (createFlasher) not exported yet — mock only";
+      return "Protocol WebUSB DFU API (createFlasher) not exported yet: mock available in demo mode";
     }
     return null;
   }, [webUsbOk, protocolReady]);
 
-  const kind: FlasherKind = useMock || liveDisabledReason ? "mock" : "webusb-dfu";
+  const kind: FlasherKind = useMock ? "mock" : "webusb-dfu";
   const isLive = kind === "webusb-dfu";
-  const demoMode = useMock || !!liveDisabledReason;
+  const demoMode = useMock;
 
   const stDfuClaimed =
     claimedVid != null &&
@@ -177,38 +189,67 @@ export function FlasherPage() {
     isStDfuVidPid(claimedVid, claimedPid);
 
   useEffect(() => {
+    setError(null);
     try {
-      const f = createFlasher(useMock || liveDisabledReason ? "mock" : "webusb-dfu");
+      const f = createFlasher(useMock ? "mock" : "webusb-dfu");
       setFlasher(f);
-      setError(null);
     } catch (err) {
-      setFlasher(createFlasher("mock"));
+      setFlasher(null);
       setError(err instanceof Error ? err.message : String(err));
-      setUseMock(true);
     }
-    // Switching flasher backend clears any prior live claim / mock success UI.
     setDeviceLabel(null);
     setClaimedVid(null);
     setClaimedPid(null);
     setShowReconnectHint(false);
     setMockFlashComplete(false);
     setProgress({ phase: "idle", bytesWritten: 0, bytesTotal: 0 });
-  }, [useMock, liveDisabledReason]);
+  }, [useMock]);
 
   useEffect(() => {
     if (!flasher) return;
     return flasher.onProgress((p) => setProgress(p));
   }, [flasher]);
 
-  // Leaving demo clears the mock-understood ack so re-enabling requires re-confirm.
   useEffect(() => {
     if (!demoMode) setMockUnderstood(false);
   }, [demoMode]);
 
+  const validationError = useMemo(
+    () => validateFirmwareForBoard(parsed, boardId, fileName),
+    [parsed, boardId, fileName],
+  );
+
   const flashing = busy || IN_PROGRESS.has(progress.phase);
+  useEffect(() => { setBoardMatchConfirmed(false); }, [boardId, fileName, deviceLabel, useMock]);
+  useEffect(() => {
+    setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null);
+    if (previousBoardRef.current && previousBoardRef.current !== boardId) {
+      setPropsOff(false); setBackupTaken(false);
+    }
+    previousBoardRef.current = boardId;
+  }, [boardId]);
+  useEffect(() => {
+    const usb = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & {usb?: EventTarget}).usb;
+    if (!usb?.addEventListener) return;
+    const disconnected = () => { setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); setBoardMatchConfirmed(false); };
+    usb.addEventListener('disconnect', disconnected);
+    return () => usb.removeEventListener('disconnect', disconnected);
+  }, []);
+  useEffect(() => () => { fileSeqRef.current++; }, []);
+  useEffect(() => () => { flasher?.cancel(); }, [flasher]);
+  useEffect(() => {
+    if (!flashing) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [flashing]);
+  const cdcConnectedLive = isLive && connectionStatus === "connected";
 
   const onPickFile = useCallback(
     async (file: File | null) => {
+      if (flashing || operationRef.current) return;
+      const currentSeq = ++fileSeqRef.current;
+      setBoardMatchConfirmed(false);
       setParseError(null);
       setParsed(null);
       setFileName(null);
@@ -216,27 +257,52 @@ export function FlasherPage() {
       setShowReconnectHint(false);
       setMockFlashComplete(false);
       setProgress({ phase: "idle", bytesWritten: 0, bytesTotal: 0 });
-      if (!file) return;
 
+      if (!file) {
+        loadingRef.current = false;
+        setFileLoading(false);
+        return;
+      }
+
+      if (file.size > 8 * 1024 * 1024) {
+        loadingRef.current = false;
+        setFileLoading(false);
+        setParseError('Firmware file exceeds the 8 MiB input limit.');
+        return;
+      }
+      loadingRef.current = true;
       setFileName(file.name);
       setFileSize(file.size);
+      setFileLoading(true);
+
       try {
         const text = await file.text();
+        if (fileSeqRef.current !== currentSeq) return;
         const hint = mcuHintFromFilename(file.name);
         const hex = parseIntelHex(text, { mcuHint: hint });
         setParsed(hex);
       } catch (err) {
+        if (fileSeqRef.current !== currentSeq) return;
         setParseError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (fileSeqRef.current === currentSeq) {
+          loadingRef.current = false;
+          setFileLoading(false);
+        }
       }
     },
-    [],
+    [flashing],
   );
 
   async function onRequestDevice() {
+    if (flashing || pickerRef.current || operationRef.current || !isLive || liveDisabledReason || cdcConnectedLive) return;
     if (!flasher?.requestDevice) {
       setError("Device picker not available on this flasher");
       return;
     }
+    pickerRef.current = true;
+    setPickerBusy(true);
+    setBoardMatchConfirmed(false);
     setError(null);
     setDeviceLabel(null);
     setClaimedVid(null);
@@ -245,7 +311,7 @@ export function FlasherPage() {
       const info = await flasher.requestDevice();
       if (!isStDfuVidPid(info.vendorId, info.productId)) {
         setError(
-          `Rejected device VID ${info.vendorId.toString(16)} PID ${info.productId.toString(16)} — need ST ROM DFU ${ST_DFU_VID.toString(16)}:${ST_DFU_PID.toString(16)} (0483:DF11)`,
+          `Rejected device VID ${info.vendorId.toString(16)} PID ${info.productId.toString(16)}: need ST ROM DFU ${ST_DFU_VID.toString(16)}:${ST_DFU_PID.toString(16)} (0483:DF11)`,
         );
         return;
       }
@@ -258,31 +324,55 @@ export function FlasherPage() {
         `${name}${info.serialNumber ? ` · ${info.serialNumber}` : ""} · 0483:DF11`,
       );
     } catch (err) {
-      setError(formatDfuRequestError(err));
+      setError(formatDfuUsbError(err));
+    } finally {
+      pickerRef.current = false;
+      setPickerBusy(false);
     }
   }
 
   async function onFlash() {
-    if (!board || !flasher || !parsed || !propsOff) return;
-    if (isLive && !stDfuClaimed) {
-      setError(
-        "No claimed ST DFU device (0483:DF11). Request DFU device before live flash.",
-      );
-      return;
-    }
-    if (demoMode && !mockUnderstood) {
-      setError("Confirm mock understanding before Demo flash.");
+    if (flashing || pickerRef.current || operationRef.current || loadingRef.current) return;
+    if (!board || !flasher || !parsed || !propsOff || !backupTaken) return;
+
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
+    if (isLive) {
+      if (liveDisabledReason) {
+        setError(`Live DFU disabled: ${liveDisabledReason}`);
+        return;
+      }
+      if (cdcConnectedLive) {
+        setError("Configurator is still connected over CDC. Disconnect CDC before flashing in DFU mode.");
+        return;
+      }
+      if (!stDfuClaimed) {
+        setError("No claimed ST DFU device (0483:DF11). Request DFU device before live flash.");
+        return;
+      }
+      if (!boardMatchConfirmed) {
+        setError("Confirm target board match and recovery availability before live flash.");
+        return;
+      }
+    } else {
+      if (!mockUnderstood) {
+        setError("Confirm mock understanding before Demo flash.");
+        return;
+      }
+    }
+
+    operationRef.current = true;
+    onBusyChange?.(true);
     setBusy(true);
     setError(null);
     setShowReconnectHint(false);
     setMockFlashComplete(false);
 
-    // Gate only for live flash — mock must never unlock as if hardware was written.
     if (isLive) {
-      setPostFlashGate(true);
+      setPostFlashGate(true, board.boardId);
     }
 
     try {
@@ -302,29 +392,33 @@ export function FlasherPage() {
         }));
       }
     } catch (err) {
-      if (isLive) {
-        // Do not leave false success / unlock as if flashed.
-        setPostFlashGate(false);
-        setShowReconnectHint(false);
-      }
+      // Conservative recovery gate: DO NOT clear postFlashGate on live flash error!
+      setShowReconnectHint(false);
       if (err instanceof DOMException && err.name === "AbortError") {
         setError("Flash cancelled");
       } else {
         setError(formatDfuUsbError(err));
       }
     } finally {
+      operationRef.current = false;
+      onBusyChange?.(false);
+      if (isLive) { setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); }
       setBusy(false);
     }
   }
 
   function onCancel() {
     flasher?.cancel();
-    setBusy(false);
   }
 
-  function onConfirmReconnect() {
-    clearPostFlashGateAfterReconnect();
-    setShowReconnectHint(false);
+  async function onConfirmReconnect() {
+    if (verifyingReconnect) return;
+    setVerifyingReconnect(true);
+    try {
+      const verified = await clearPostFlashGateAfterReconnect();
+      if (verified) { setShowReconnectHint(false); setError(null); }
+      else setError('Reconnect a live board in Connect and verify the expected target and firmware. Configuration remains locked.');
+    } finally { setVerifyingReconnect(false); }
   }
 
   const canFlashLive =
@@ -332,8 +426,14 @@ export function FlasherPage() {
     !!flasher &&
     !!parsed &&
     !parseError &&
+    !fileLoading &&
+    !validationError &&
     propsOff &&
+    backupTaken &&
+    boardMatchConfirmed &&
     !flashing &&
+    !pickerBusy &&
+    !cdcConnectedLive &&
     !liveDisabledReason &&
     stDfuClaimed;
 
@@ -342,7 +442,10 @@ export function FlasherPage() {
     !!flasher &&
     !!parsed &&
     !parseError &&
+    !fileLoading &&
+    !validationError &&
     propsOff &&
+    backupTaken &&
     !flashing &&
     demoMode &&
     mockUnderstood;
@@ -350,20 +453,30 @@ export function FlasherPage() {
   const canFlash = isLive ? canFlashLive : canFlashMock;
 
   const pct = phasePercent(progress);
-  const cdcConnectedLive =
-    isLive && connectionStatus === "connected";
 
   const flashTitle = !propsOff
-    ? "Confirm props-off first"
-    : !parsed
-      ? "Select a .hex file"
-      : isLive && !stDfuClaimed
-        ? "Claim ST DFU device 0483:DF11 first"
-        : demoMode && !mockUnderstood
-          ? "Confirm mock / will not write firmware"
-          : liveDisabledReason && !useMock
-            ? liveDisabledReason
-            : "Start flash";
+    ? "Confirm props removed & battery unplugged first"
+    : !backupTaken
+      ? "Confirm diff all backup taken and recovery method prepared"
+      : !boardId
+        ? "Select an exact target board"
+        : fileLoading
+          ? "Loading firmware file…"
+          : !parsed
+            ? "Select a valid .hex file"
+            : validationError
+              ? validationError
+              : isLive && liveDisabledReason
+                ? liveDisabledReason
+                : isLive && cdcConnectedLive
+                  ? "Disconnect CDC connection before flashing in DFU"
+                  : isLive && !stDfuClaimed
+                    ? "Claim ST DFU device 0483:DF11 first"
+                    : isLive && !boardMatchConfirmed
+                      ? "Confirm exact board target match"
+                      : demoMode && !mockUnderstood
+                        ? "Confirm demo mock understanding"
+                        : "Start flash process";
 
   return (
     <div className="panel flasher-page">
@@ -372,265 +485,340 @@ export function FlasherPage() {
         <h2>Firmware Flasher</h2>
         <span className="muted">Sector erase + readback verification</span>
         <span className={`pill ${isLive ? "pill-live" : "pill-mock"}`}>
-          {isLive ? "live WebUSB DFU" : "mock"}
+          {isLive ? (liveDisabledReason ? "live DFU unavailable" : "live WebUSB DFU") : "demo / mock"}
         </span>
       </div>
 
       <p className="muted">
-        Flash BobFlight via ST ROM USB DFU (VID 0x0483 / PID 0xDF11). This is{" "}
-        <strong>not</strong> the Configurator CDC CLI link — enter the bootloader
-        (DFU), flash, then reconnect over CDC for version/status.
+        Stepwise firmware flashing via ST ROM USB DFU (VID 0x0483 / PID 0xDF11).
+        Only sectors touched by the image are erased. Saved settings may persist, migrate or reset; back up first and verify them after reconnecting.
       </p>
 
       {!FLASH_CAPABILITIES.supportsCliFlash && (
         <p className="muted" style={{ marginTop: "-0.35rem" }}>
-          CLI flash is permanently disabled (FW lock). Host equiv:{" "}
+          Writing firmware uses DFU, not CLI. The bl command only requests bootloader entry. Alternative command below requires a raw BIN, not the HEX selected here:{" "}
           <code>{FLASH_CAPABILITIES.hostEquivalent}</code>
         </p>
       )}
 
-      {liveDisabledReason && (
+      {liveDisabledReason && !useMock && (
         <div className="banner-warn" role="status">
-          <strong>Live DFU unavailable:</strong> {liveDisabledReason}. Mock
-          flash is available for UI/CI — it does <em>not</em> write hardware.
+          <strong>Live DFU unavailable:</strong> {liveDisabledReason}. You may select
+          Demo mode below for UI simulation (no hardware writes).
         </div>
       )}
 
       {demoMode && (
         <div className="banner-warn" role="alert">
-          <strong>This will NOT reflash your controller.</strong> Demo/mock path
-          performs <em>zero</em> USB writes — board firmware is unchanged.
+          <strong>DEMO / MOCK MODE: This will NOT reflash your flight controller.</strong>{" "}
+          Demo mode performs <em>zero</em> USB writes. Board firmware is unchanged.
         </div>
       )}
 
       {cdcConnectedLive && (
         <div className="banner-warn" role="status">
-          <strong>Leave CDC / put board in ST ROM DFU (BOOT) before live flash.</strong>{" "}
-          Configurator is still connected over CDC — disconnect and enter DFU
-          (0483:DF11) before flashing.
+          <strong>Disconnect Configurator CDC before flashing in DFU mode.</strong>{" "}
+          Configurator is currently connected over CDC. Disconnect CDC and put board into ST ROM DFU mode (0483:DF11) before flashing.
         </div>
       )}
 
-      <section className="preflight" aria-label="Preflight">
-        <h3>Preflight</h3>
+      {/* Stage 1 */}
+      <section className="preflight" aria-label="Stage 1: Safety & Backup">
+        <h3>Stage 1: Safety, Backup & Recovery Setup</h3>
+        <p className="muted" style={{ marginTop: "0.25rem" }}>
+          Prepare recovery before proceeding. This is not a full-chip erase and settings are not guaranteed to reset or survive.
+        </p>
         <ul className="preflight-list">
           <li>
-            <strong>Board / target:</strong> {board ? <>{board.label} · board_id <code>{board.boardId}</code> · MCU {board.mcuDisplay}</> : "Select an explicit target below. No target is assumed."}
-          </li>
-          <li>
-            <strong>DFU vs CDC:</strong> flashing needs DFU bootloader mode.
-            Configurator Connect uses CDC CLI after reboot/leave.
+            <strong>Backup:</strong> If the current firmware is readable, use its configurator to save a <code>diff all</code> backup. If no configuration can be read, acknowledge that it cannot be recovered by this page.
           </li>
           <li className="warn-item">
-            <strong>Safety:</strong> remove props, disconnect battery / use USB
-            power only, keep the craft secured.
+            <strong>Safety:</strong> Remove propellers, disconnect battery (USB power only), keep craft secured.
           </li>
-          <li className="muted">
-            Kakute F745 samples under{" "}
-            <code>firmware/kakute_f7_hdv/</code>: CDC build is{" "}
-            <code>bobflight.hex</code> when present; diagnostic{" "}
-            <code>bobflight-prove-reset.hex</code> is blink-only (no COM) —
-            do not treat it as a CDC sample.
+          <li>
+            <strong>Recovery plan:</strong> Ensure you have an independent recovery method. If the software bootloader CLI command fails, locate the physical BOOT button or BOOT pads on your board.
+          </li>
+        </ul>
+
+        <div className="row" style={{ marginTop: "0.5rem", alignItems: "center" }}>
+          <label
+            htmlFor="props-off"
+            style={{ display: "flex", gap: "0.5rem", color: "#fecaca" }}
+          >
+            <input
+              id="props-off"
+              type="checkbox"
+              checked={propsOff}
+              disabled={flashing}
+              onChange={(e) => setPropsOff(e.target.checked)}
+            />
+            Propellers removed, battery disconnected / craft safe: required
+          </label>
+        </div>
+
+        <div className="row" style={{ marginTop: "0.35rem", alignItems: "center" }}>
+          <label
+            htmlFor="backup-taken"
+            style={{ display: "flex", gap: "0.5rem", color: "#fde68a" }}
+          >
+            <input
+              id="backup-taken"
+              type="checkbox"
+              checked={backupTaken}
+              disabled={flashing}
+              onChange={(e) => setBackupTaken(e.target.checked)}
+            />
+            Saved any readable configuration (or accept that no backup is available) and confirmed independent recovery: required
+          </label>
+        </div>
+      </section>
+
+      {/* Stage 2 */}
+      <section className="preflight" aria-label="Stage 2: Target Selection" style={{ marginTop: "0.75rem" }}>
+        <h3>Stage 2: Select Target Board</h3>
+        <div className="row" style={{ marginTop: "0.5rem" }}>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="board">Target Board</label>
+            <select
+              id="board"
+              value={boardId}
+              disabled={flashing || pickerBusy}
+              onChange={(e) => setBoardId(e.target.value as BoardId)}
+            >
+              <option value="" disabled>Select an exact target board</option>
+              {BOARD_OPTIONS.map((b) => (
+                <option key={b.boardId} value={b.boardId}>
+                  {b.label} ({b.mcuDisplay}) · {b.support}{!b.motorOutput ? " · no motor output" : ""}
+                  {b.primary ? ": primary" : ""}
+                </option>
+              ))}
+            </select>
+            <p className="muted" style={{ marginTop: "0.35rem" }}>
+              Expected MCU gate: {board ? mcuDisplayName(board.mcu) : "no target selected"}: firmware HEX must match this MCU family.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Stage 3 */}
+      <section className="preflight" aria-label="Stage 3: Firmware File" style={{ marginTop: "0.75rem" }}>
+        <h3>Stage 3: Load Local Firmware (.hex)</h3>
+        <p className="muted" style={{ marginTop: "0.25rem" }}>
+          Load a local Intel HEX file built for your exact target board. No remote download is implemented; filenames do not guarantee target compatibility.
+        </p>
+        <div className="row" style={{ marginTop: "0.5rem" }}>
+          <div style={{ flex: 2 }}>
+            <label htmlFor="hex-file">Firmware File (.hex)</label>
+            <input
+              id="hex-file"
+              type="file"
+              accept=".hex,application/octet-stream,text/plain"
+              disabled={flashing}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                void onPickFile(f);
+              }}
+            />
+            {fileLoading && (
+              <p className="muted" style={{ marginTop: "0.35rem" }}>
+                Parsing firmware file…
+              </p>
+            )}
+            {fileName && !fileLoading && (
+              <p className="muted" style={{ marginTop: "0.35rem" }}>
+                Selected: <strong>{fileName}</strong>
+                {fileSize != null ? ` · ${formatBytes(fileSize)}` : ""}
+                {parsed
+                  ? ` · image ${formatBytes(parsed.byteLength)} @ 0x${parsed.startAddress.toString(16)}`
+                  : ""}
+              </p>
+            )}
+            {parseError && <div className="fail">{parseError}</div>}
+            {validationError && !parseError && parsed && (
+              <div className="fail" style={{ marginTop: "0.4rem" }}>
+                {validationError}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Stage 4 */}
+      <section className="preflight" aria-label="Stage 4: DFU Bootloader Setup" style={{ marginTop: "0.75rem" }}>
+        <h3>Stage 4: Enter DFU Mode & Disconnect CDC</h3>
+        <ul className="preflight-list">
+          <li>
+            <strong>Software method:</strong> In the Configurator CLI tab, type <code>bl</code> to request ST ROM DFU mode. If dirty settings are refused, review and save them first; no automatic discard is performed. A serial disconnect alone does not prove DFU.
+          </li>
+          <li>
+            <strong>Physical method:</strong> If the FC is unresponsive or software bootloader command is unavailable, use the board manufacturer's documented BOOT procedure or an established SWD recovery route. If BOOT is broken or inaccessible, do not rely on software bl to recover failed firmware startup.
+          </li>
+          <li>
+            <strong>Disconnect CDC:</strong> Ensure the CDC serial connection in Configurator is disconnected before proceeding to claim the DFU device.
           </li>
         </ul>
       </section>
 
-      <div className="row" style={{ marginTop: "0.75rem" }}>
-        <div>
-          <label htmlFor="board">Board</label>
-          <select
-            id="board"
-            value={boardId}
-            disabled={flashing}
-            onChange={(e) => setBoardId(e.target.value as BoardId)}
-          >
-            <option value="" disabled>Select a target</option>
-            {BOARD_OPTIONS.map((b) => (
-              <option key={b.boardId} value={b.boardId}>
-                {b.label} ({b.mcuDisplay})
-                {b.primary ? " — primary" : ""}
-              </option>
-            ))}
-          </select>
-          <p className="muted" style={{ marginTop: "0.35rem" }}>
-            expectedMcu gate: {board ? mcuDisplayName(board.mcu) : "no target selected"} · hex must match this
-            MCU family
-          </p>
-        </div>
-      </div>
+      {/* Stage 5 */}
+      <section className="preflight" aria-label="Stage 5: Select DFU Device" style={{ marginTop: "0.75rem" }}>
+        <h3>Stage 5: Select & Confirm DFU Device</h3>
 
-      <div className="row" style={{ alignItems: "center" }}>
-        <label htmlFor="use-mock-flash" style={{ display: "flex", gap: "0.5rem" }}>
-          <input
-            id="use-mock-flash"
-            type="checkbox"
-            checked={demoMode}
-            disabled={flashing || !!liveDisabledReason}
-            onChange={(e) => setUseMock(e.target.checked)}
-          />
-          Demo mode (mock DFU — no USB write)
-        </label>
-      </div>
-
-      {demoMode && (
         <div className="row" style={{ alignItems: "center" }}>
-          <label
-            htmlFor="mock-understood"
-            style={{ display: "flex", gap: "0.5rem", color: "#fbbf24" }}
-          >
+          <label htmlFor="use-mock-flash" style={{ display: "flex", gap: "0.5rem" }}>
             <input
-              id="mock-understood"
+              id="use-mock-flash"
               type="checkbox"
-              checked={mockUnderstood}
-              disabled={flashing}
-              onChange={(e) => setMockUnderstood(e.target.checked)}
+              checked={demoMode}
+              disabled={flashing || pickerBusy}
+              onChange={(e) => setUseMock(e.target.checked)}
             />
-            I understand this is mock / will not write firmware
+            Demo mode (mock DFU simulation: no USB write)
           </label>
         </div>
-      )}
 
-      <div className="row" style={{ alignItems: "center" }}>
-        <label
-          htmlFor="props-off"
-          style={{ display: "flex", gap: "0.5rem", color: "#fecaca" }}
-        >
-          <input
-            id="props-off"
-            type="checkbox"
-            checked={propsOff}
-            disabled={flashing}
-            onChange={(e) => setPropsOff(e.target.checked)}
-          />
-          Props removed / craft safe — required before Flash
-        </label>
-      </div>
+        {demoMode && (
+          <div className="row" style={{ alignItems: "center", marginTop: "0.35rem" }}>
+            <label
+              htmlFor="mock-understood"
+              style={{ display: "flex", gap: "0.5rem", color: "#fbbf24" }}
+            >
+              <input
+                id="mock-understood"
+                type="checkbox"
+                checked={mockUnderstood}
+                disabled={flashing}
+                onChange={(e) => setMockUnderstood(e.target.checked)}
+              />
+              I understand this is demo / mock and will not write firmware to hardware: required for demo
+            </label>
+          </div>
+        )}
 
-      <div className="row" style={{ marginTop: "0.75rem" }}>
-        <div style={{ flex: 2 }}>
-          <label htmlFor="hex-file">Firmware (.hex)</label>
-          <input
-            id="hex-file"
-            type="file"
-            accept=".hex,application/octet-stream,text/plain"
-            disabled={flashing}
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              void onPickFile(f);
-            }}
-          />
-          {fileName && (
-            <p className="muted" style={{ marginTop: "0.35rem" }}>
-              Selected: <strong>{fileName}</strong>
-              {fileSize != null ? ` · ${formatBytes(fileSize)}` : ""}
-              {parsed
-                ? ` · image ${formatBytes(parsed.byteLength)} @ 0x${parsed.startAddress.toString(16)}`
-                : ""}
+        {isLive && (
+          <div style={{ marginTop: "0.5rem" }}>
+            <div className="row" style={{ alignItems: "center" }}>
+              <button
+                type="button"
+                className="ghost"
+                disabled={flashing || pickerBusy || cdcConnectedLive || !flasher?.requestDevice || !!liveDisabledReason}
+                onClick={() => void onRequestDevice()}
+              >
+                {pickerBusy ? "Selecting device…" : "Select DFU device…"}
+              </button>
+              <span className="muted">
+                {deviceLabel ??
+                  (stDfuClaimed
+                    ? "ST DFU selected"
+                    : "No DFU device selected (need ST 0483:DF11)")}
+              </span>
+            </div>
+
+            <p className="muted" style={{ marginTop: "0.4rem", maxWidth: "42rem" }}>
+              Note: <strong>0483:DF11</strong> is the generic ST ROM DFU USB bootloader ID shared by all STM32 microcontrollers. It does <em>not</em> identify your specific flight controller model or target board.
+            </p>
+
+            <div className="row" style={{ marginTop: "0.5rem", alignItems: "center" }}>
+              <label
+                htmlFor="board-match-confirmed"
+                style={{ display: "flex", gap: "0.5rem", color: "#fde68a" }}
+              >
+                <input
+                  id="board-match-confirmed"
+                  type="checkbox"
+                  checked={boardMatchConfirmed}
+                  disabled={flashing}
+                  onChange={(e) => setBoardMatchConfirmed(e.target.checked)}
+                />
+                I confirm this HEX matches my exact board target (0483:DF11 is generic DFU, not board ID) and I have a recovery method: required for live
+              </label>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Stage 6 */}
+      <section className="preflight" aria-label="Stage 6: Execute Flash" style={{ marginTop: "0.75rem" }}>
+        <h3>Stage 6: Execute Flash</h3>
+
+        <div className="row" style={{ marginTop: "0.5rem", alignItems: "center" }}>
+          <button
+            type="button"
+            className="primary primary-lg"
+            disabled={!canFlash}
+            title={flashTitle}
+            onClick={() => void onFlash()}
+          >
+            {flashing ? "Flashing…" : "Flash"}
+          </button>
+          {flashing && (
+            <button type="button" className="danger" onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+        </div>
+
+        <div className="flash-progress" aria-live="polite" style={{ marginTop: "0.75rem" }}>
+          <div className="flash-progress-meta">
+            <span className="flash-stage">Stage: {progress.phase}</span>
+            <span className="muted">{pct}%</span>
+          </div>
+          <div
+            className="flash-progress-bar"
+            role="progressbar"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className={`flash-progress-fill phase-${progress.phase}${
+                mockFlashComplete || (demoMode && progress.phase === "done")
+                  ? " phase-mock-done"
+                  : ""
+              }`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          {progress.message && (
+            <p className="muted" style={{ marginTop: "0.4rem" }}>
+              {progress.message}
             </p>
           )}
-          {parseError && <div className="fail">{parseError}</div>}
         </div>
-      </div>
 
-      {isLive && (
-        <div style={{ marginTop: "0.5rem" }}>
-          <div className="row">
-            <button
-              type="button"
-              className="ghost"
-              disabled={flashing || !flasher?.requestDevice}
-              onClick={() => void onRequestDevice()}
-            >
-              Request DFU device…
-            </button>
-            <span className="muted">
-              {deviceLabel ??
-                (stDfuClaimed
-                  ? "ST DFU claimed"
-                  : "No DFU device claimed (need ST 0483:DF11)")}
-            </span>
+        {(mockFlashComplete || (demoMode && progress.phase === "done")) && (
+          <div className="banner-warn" role="status" style={{ marginTop: "0.65rem" }}>
+            <strong>{MOCK_ONLY_DONE}</strong>
+            <br />
+            Demo path succeeded in-process simulation only. Your flight controller was <em>not</em> reflashed. Do not treat this as a live hardware flash PASS.
           </div>
-          <p className="muted" style={{ marginTop: "0.4rem", maxWidth: "42rem" }}>
-            Picker filters <strong>0483:DF11</strong> only. FW recipe if Chrome
-            is empty: Device Manager <strong>STM32 BOOTLOADER</strong> (not
-            COM); Zadig WinUSB on that interface + restart Chrome; if COM only
-            → hold BOOT while plugging USB.
-          </p>
-        </div>
-      )}
-
-      <div className="row" style={{ marginTop: "0.85rem", alignItems: "center" }}>
-        <button
-          type="button"
-          className="primary primary-lg"
-          disabled={!canFlash}
-          title={flashTitle}
-          onClick={() => void onFlash()}
-        >
-          {flashing ? "Flashing…" : "Flash"}
-        </button>
-        {flashing && (
-          <button type="button" className="danger" onClick={onCancel}>
-            Cancel
-          </button>
         )}
-      </div>
 
-      <div className="flash-progress" aria-live="polite">
-        <div className="flash-progress-meta">
-          <span className="flash-stage">Stage: {progress.phase}</span>
-          <span className="muted">{pct}%</span>
-        </div>
-        <div
-          className="flash-progress-bar"
-          role="progressbar"
-          aria-valuenow={pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div
-            className={`flash-progress-fill phase-${progress.phase}${
-              mockFlashComplete || (demoMode && progress.phase === "done")
-                ? " phase-mock-done"
-                : ""
-            }`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        {progress.message && (
-          <p className="muted" style={{ marginTop: "0.4rem" }}>
-            {progress.message}
-          </p>
-        )}
-      </div>
+        {error && <div className="fail" style={{ marginTop: "0.65rem" }}>{error}</div>}
+      </section>
 
-      {(mockFlashComplete || (demoMode && progress.phase === "done")) && (
-        <div className="banner-warn" role="status">
-          <strong>{MOCK_ONLY_DONE}</strong>
-          <br />
-          Demo path succeeded in-process only. Your Kakute / flight controller
-          was <em>not</em> reflashed. Do not treat this as a live flash PASS.
-        </div>
-      )}
+      {/* Stage 7 */}
+      <section className="preflight" aria-label="Stage 7: Reconnect & Verify" style={{ marginTop: "0.75rem" }}>
+        <h3>Stage 7: Reconnect & Restore Configuration</h3>
+        <p className="muted" style={{ marginTop: "0.25rem" }}>
+          After readback verification, use Connect to select the real CDC port, not a mock port. Verify target/version, inspect settings, and restore only compatible settings from your <code>diff all</code> backup. Use <code>save</code> for deliberate persistent changes; no automatic restore or save is performed.
+        </p>
 
-      {showReconnectHint && progress.phase === "done" && isLive && (
-        <div className="banner-info" role="status">
-          <strong>Firmware written and readback verified.</strong> Replug / reconnect over CDC
-          (Connect tab), run version/status, then confirm below to unlock
-          Rates / PID / CLI / Status.
-          <div className="row" style={{ marginTop: "0.65rem" }}>
-            <button
-              type="button"
-              className="primary"
-              onClick={onConfirmReconnect}
-            >
-              I reconnected — unlock config tabs
-            </button>
+        {showReconnectHint && progress.phase === "done" && isLive && (
+          <div className="banner-info" role="status" style={{ marginTop: "0.5rem" }}>
+            <strong>Firmware written and readback verified.</strong> Replug or connect over CDC (Connect tab), Connect reads version/status automatically and checks the expected board. CLI stays locked until live verification succeeds.
+            <div className="row" style={{ marginTop: "0.65rem" }}>
+              <button
+                type="button"
+                className="primary"
+                disabled={verifyingReconnect || connectionStatus !== "connected" || !postFlashGate}
+                onClick={() => void onConfirmReconnect()}
+              >
+                {!postFlashGate ? "Live reconnect verified" : verifyingReconnect ? "Checking live board…" : "Verify live reconnect"}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-
-      {error && <div className="fail">{error}</div>}
+        )}
+      </section>
     </div>
   );
 }

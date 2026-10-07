@@ -28,6 +28,13 @@ export function assertMcuGate(
 ): void {
   const expected = asMcu(opts?.expectedMcu);
   const tagged = asMcu(firmware.mcu);
+  if (opts?.expectedMcu !== undefined && !expected) {
+    throw new Error(`Unsupported target MCU: ${opts.expectedMcu}. No fallback is allowed.`);
+  }
+  if (firmware.mcu !== undefined && !tagged) {
+    throw new Error(`Unsupported firmware MCU tag: ${firmware.mcu}. No fallback is allowed.`);
+  }
+
 
   if (expected && tagged && expected !== tagged) {
     throw new Error(

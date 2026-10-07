@@ -34,7 +34,8 @@
     "test:blackbox": "tsc && node tests/blackbox-recording.cjs",
     "test:gyro-notch": "tsc && node tests/gyro-notch.cjs",
     "test:rpm-filter": "tsc && node tests/rpm-filter.cjs",
-    "test:motor-direction": "tsc && node tests/motor-direction.cjs"
+    "test:motor-direction": "tsc && node tests/motor-direction.cjs",
+    "test:hex-validation": "tsc && node dist/smoke/hex-validation.js && node tests/mcu-gate-strict.cjs"
   },
   "engines": {
     "node": ">=18"

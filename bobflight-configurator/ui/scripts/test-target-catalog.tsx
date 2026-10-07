@@ -24,7 +24,7 @@ console.log('PASS target catalog: data consistency, planned/host exclusions, cap
 const page=readFileSync(new URL('../src/pages/FlasherPage.tsx',import.meta.url),'utf8');
 assert(page.includes('useState<BoardId>("")'));
 assert(!page.includes('?? BOARD_OPTIONS[0]'));
-assert(page.includes('if (!board || !flasher || !parsed || !propsOff) return;'));
+assert(page.includes('if (!board || !flasher || !parsed || !propsOff || !backupTaken) return;'));
 assert(page.includes('const canFlashLive =\n    !!board &&'));
 assert(page.includes('const canFlashMock =\n    !!board &&'));
 console.log('PASS explicit selection: empty initial target, no first-board fallback, live/mock/action guards');

@@ -52,24 +52,41 @@ function waitReadyBanner(
   });
 }
 
-/** Derive ConnectOptions.transport from path / explicit transport. */
+/** Derive ConnectOptions.transport from path / explicit transport. Fail closed on contradictory hints. */
 export function resolveConnectOptions(options: ConnectOptions): ConnectOptions {
-  const path = options.path || MOCK_PORT_PATH;
-  if (path.startsWith("webserial:") || options.transport === "webserial") {
-    return { ...options, path, transport: "webserial" };
+  const rawPath = options.path;
+  const explicitTransport = options.transport;
+
+  const isMockPath = !rawPath || rawPath.startsWith("mock:") || rawPath === MOCK_PORT_PATH;
+  const isWebSerialPath = typeof rawPath === "string" && rawPath.startsWith("webserial:");
+
+  let actualRoute: "mock" | "webserial" | "serial";
+  let normalizedPath: string;
+
+  if (isMockPath) {
+    actualRoute = "mock";
+    normalizedPath = rawPath && rawPath.startsWith("mock:") ? rawPath : MOCK_PORT_PATH;
+  } else if (isWebSerialPath) {
+    actualRoute = "webserial";
+    normalizedPath = rawPath;
+  } else {
+    actualRoute = "serial";
+    normalizedPath = rawPath;
   }
-  if (
-    path.startsWith("mock:") ||
-    path === MOCK_PORT_PATH ||
-    options.transport === "mock"
-  ) {
-    return {
-      ...options,
-      path: path.startsWith("mock:") ? path : MOCK_PORT_PATH,
-      transport: "mock",
-    };
+
+  if (explicitTransport !== undefined) {
+    if (explicitTransport !== actualRoute) {
+      throw new Error(
+        `Contradictory or mismatched connect options: transport '${explicitTransport}' does not match path '${rawPath ?? ""}' (routed as ${actualRoute})`
+      );
+    }
   }
-  return { ...options, path, transport: options.transport ?? "serial" };
+
+  return {
+    ...options,
+    path: normalizedPath,
+    transport: actualRoute,
+  };
 }
 
 class ProtocolHostAdapter implements BobFlightHost {
@@ -82,13 +99,20 @@ class ProtocolHostAdapter implements BobFlightHost {
   private sdReader = new SdSectorReader(this.commands, (cmd, opts) => this.client.sendCommand(cmd, opts));
   /** Settings storage actions in flight (save, defaults, `storage` reads), host-wide. */
   private storage = new StorageActivity();
+  private isLiveTransport = false;
+  private connectionAttempt = 0;
   readonly mode: ProtocolMode;
 
   constructor(mode: ProtocolMode) {
     this.mode = mode;
     // Auto supports mock://, webserial:, and native serialport paths.
     this.client = new BobFlightCliClient(new AutoTransportFactory());
-    this.client.onStatus(() => { this.sessionGeneration++; });
+    this.client.onStatus((s) => {
+      this.sessionGeneration++;
+      if (s !== "connected") {
+        this.isLiveTransport = false;
+      }
+    });
   }
 
   /** Escape hatch for advanced callers; pages should prefer host settings APIs. */
@@ -102,6 +126,10 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   getConnectionStatus(): ConnectionStatus {
     return this.client.getConnectionStatus();
+  }
+
+  isLiveConnection(): boolean {
+    return this.client.getConnectionStatus() === "connected" && this.isLiveTransport;
   }
 
   onLine(cb: (line: string) => void): () => void {
@@ -176,7 +204,9 @@ class ProtocolHostAdapter implements BobFlightHost {
   }
 
   async connect(options: ConnectOptions): Promise<void> {
+    const attempt = ++this.connectionAttempt;
     this.lastError = null;
+    this.isLiveTransport = false;
     try {
       const opts = resolveConnectOptions(options);
       const isMock = opts.transport === "mock";
@@ -194,13 +224,25 @@ class ProtocolHostAdapter implements BobFlightHost {
           bannerErr,
         );
       }
+      if (
+        attempt === this.connectionAttempt &&
+        (opts.transport === "webserial" || opts.transport === "serial") &&
+        this.client.getConnectionStatus() === "connected"
+      ) {
+        this.isLiveTransport = true;
+      }
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
+      if (attempt === this.connectionAttempt) {
+        this.isLiveTransport = false;
+        this.lastError = err instanceof Error ? err.message : String(err);
+      }
       throw err;
     }
   }
 
   async disconnect(): Promise<void> {
+    this.connectionAttempt++;
+    this.isLiveTransport = false;
     this.lastError = null;
     await this.client.disconnect();
   }
@@ -312,9 +354,6 @@ export function createHost(mode?: ProtocolMode): BobFlightHost {
     );
   }
 
-  // TODO(browser): If BobFlightCliClient + polyfills fail in a target browser,
-  // keep importing parseStatus/MOCK_PORT_PATH/types from @bobflight/protocol and
-  // wrap a thin adapter with the same API surface (do not fork protocol/).
   return new ProtocolHostAdapter(resolved);
 }
 

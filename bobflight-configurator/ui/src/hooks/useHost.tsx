@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,6 +14,7 @@ import {
   type ConnectionStatus,
   type ParsedStatus,
 } from "../protocol";
+import { canUnlockPostFlashGate } from "../protocol/postFlashGate";
 
 interface HostContextValue {
   host: BobFlightHost;
@@ -26,10 +28,10 @@ interface HostContextValue {
   clearCli: () => void;
   refreshStatus: () => Promise<void>;
   pollAfterConnect: () => Promise<void>;
-  /** True after a flash until user confirms CDC reconnect / version OK. */
+  /** True after a flash until fresh live CDC target/version verification succeeds. */
   postFlashGate: boolean;
-  setPostFlashGate: (locked: boolean) => void;
-  clearPostFlashGateAfterReconnect: () => void;
+  setPostFlashGate: (locked: boolean, expectedBoardId?: string) => void;
+  clearPostFlashGateAfterReconnect: () => Promise<boolean>;
 }
 
 const HostContext = createContext<HostContextValue | null>(null);
@@ -42,10 +44,22 @@ export function HostProvider({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<ParsedStatus | null>(null);
   const [cliLines, setCliLines] = useState<string[]>([]);
-  const [postFlashGate, setPostFlashGate] = useState(false);
+  const [postFlashGate, setPostFlashGateState] = useState(false);
+  const expectedBoardRef = useRef<string | undefined>(undefined);
+  const gateLockedRef = useRef(false);
+
+  const connectionGenRef = useRef(0);
+  const flashGenRef = useRef(0);
 
   useEffect(() => {
-    const offStatus = host.onStatus(setConnectionStatus);
+    const offStatus = host.onStatus((s) => {
+      connectionGenRef.current++;
+      setConnectionStatus(s);
+      if (s !== "connected") {
+        setVersion(null);
+        setStatus(null);
+      }
+    });
     const offLine = host.onLine((line) => {
       setCliLines((prev) => [...prev.slice(-499), line]);
     });
@@ -55,40 +69,126 @@ export function HostProvider({ children }: { children: ReactNode }) {
     };
   }, [host]);
 
-  useEffect(() => {
-    if (connectionStatus === "disconnected" || connectionStatus === "error") {
-      setVersion(null);
-      setStatus(null);
-    }
-  }, [connectionStatus]);
-
   const appendCli = useCallback((line: string) => {
     setCliLines((prev) => [...prev.slice(-499), line]);
   }, []);
 
   const clearCli = useCallback(() => setCliLines([]), []);
 
+  const setPostFlashGate = useCallback((locked: boolean, boardId?: string) => {
+    if (!locked) return; // Prevent set false bypass
+    flashGenRef.current++;
+    setVersion(null);
+    setStatus(null);
+    setLastError(null);
+    setPostFlashGateState(true);
+    expectedBoardRef.current = boardId;
+    gateLockedRef.current = true;
+  }, []);
+
   const refreshStatus = useCallback(async () => {
     if (host.getConnectionStatus() !== "connected") return;
-    const s = await host.getStatus();
-    setStatus(s);
+    const conn = connectionGenRef.current, flash = flashGenRef.current;
+    const current = () => conn === connectionGenRef.current && flash === flashGenRef.current && host.getConnectionStatus() === "connected";
+    try {
+      const s = await host.getStatus();
+      if (current()) setStatus(s);
+    } catch (err) {
+      if (current()) setLastError(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
   }, [host]);
 
   const pollAfterConnect = useCallback(async () => {
     if (host.getConnectionStatus() !== "connected") return;
-    const v = await host.getVersion();
-    setVersion(v);
-    const s = await host.getStatus();
-    setStatus(s);
-    // Auto-clear gate when post-flash reconnect yields version+status.
-    if (v && s) {
-      setPostFlashGate(false);
+    const pollConnGen = connectionGenRef.current;
+    const pollFlashGen = flashGenRef.current;
+    const expectedBoardId = expectedBoardRef.current;
+
+    try {
+      const v = await host.getVersion();
+      const s = await host.getStatus();
+
+      if (
+        connectionGenRef.current === pollConnGen &&
+        flashGenRef.current === pollFlashGen &&
+        host.getConnectionStatus() === "connected"
+      ) {
+        setVersion(v);
+        setStatus(s);
+
+        if (gateLockedRef.current) {
+          const ok = canUnlockPostFlashGate({
+            host,
+            connectionStatus: host.getConnectionStatus(),
+            expectedBoardId,
+            version: v,
+            status: s,
+            pollConnectionGen: pollConnGen,
+            currentConnectionGen: connectionGenRef.current,
+            pollFlashGen: pollFlashGen,
+            currentFlashGen: flashGenRef.current,
+          });
+          if (ok) {
+            setPostFlashGateState(false);
+            expectedBoardRef.current = undefined;
+          gateLockedRef.current = false;
+          }
+        }
+      }
+    } catch (err) {
+      if (connectionGenRef.current === pollConnGen && flashGenRef.current === pollFlashGen)
+        setLastError(err instanceof Error ? err.message : String(err));
+      throw err;
     }
   }, [host]);
 
-  const clearPostFlashGateAfterReconnect = useCallback(() => {
-    setPostFlashGate(false);
-  }, []);
+  const clearPostFlashGateAfterReconnect = useCallback(async (): Promise<boolean> => {
+    if (!gateLockedRef.current) return false;
+    if (host.getConnectionStatus() !== "connected") return false;
+
+    const pollConnGen = connectionGenRef.current;
+    const pollFlashGen = flashGenRef.current;
+    const expectedBoardId = expectedBoardRef.current;
+
+    try {
+      const v = await host.getVersion();
+      const s = await host.getStatus();
+
+      if (
+        connectionGenRef.current === pollConnGen &&
+        flashGenRef.current === pollFlashGen &&
+        host.getConnectionStatus() === "connected"
+      ) {
+        setVersion(v);
+        setStatus(s);
+
+        const ok = canUnlockPostFlashGate({
+          host,
+          connectionStatus: host.getConnectionStatus(),
+          expectedBoardId,
+          version: v,
+          status: s,
+          pollConnectionGen: pollConnGen,
+          currentConnectionGen: connectionGenRef.current,
+          pollFlashGen: pollFlashGen,
+          currentFlashGen: flashGenRef.current,
+        });
+
+        if (ok) {
+          setPostFlashGateState(false);
+          expectedBoardRef.current = undefined;
+          gateLockedRef.current = false;
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      if (connectionGenRef.current === pollConnGen && flashGenRef.current === pollFlashGen)
+        setLastError(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }, [host]);
 
   const value: HostContextValue = {
     host,
