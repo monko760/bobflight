@@ -45,4 +45,4 @@ The millisecond-boundary test seeds the private accumulated epoch to avoid billi
 
 The ARM-component CI job runs this alongside reset/layout and reset-to-MMIO suites. Native CTest includes it when the same optional local dependencies are installed. Temporary ELF fixtures are never firmware artifacts. Hardware selectors, board definitions, saved settings and configurator remain unchanged. No user rebuild, flash or flight readiness is requested or claimed.
 
-Next is USB/CDC integration plus physical timing/interrupt qualification before enabling a complete board backend. Routing expansion continues through [traceable upstream board facts](../../TARGETS.md#referencing-upstream-routing-facts), not inherited driver compatibility.
+A follow-up [real TinyUSB link integration](f405-usb-link.md) checks stack compatibility and identity callbacks without pretending to verify enumeration. Board-specific USB setup and physical timing/interrupt qualification remain required before enabling a complete backend. Routing expansion continues through [traceable upstream board facts](../../TARGETS.md#referencing-upstream-routing-facts), not inherited driver compatibility.

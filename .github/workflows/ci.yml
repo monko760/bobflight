@@ -229,3 +229,5 @@ jobs:
         run: python3 tests/test_f405_clock_mmio.py
       - name: Test F405 reset through clock and DWT timekeeping
         run: python3 tests/test_f405_timebase.py
+      - name: Link real F405 TinyUSB stack and verify USB identities
+        run: python3 tests/test_f405_usb_link.py
