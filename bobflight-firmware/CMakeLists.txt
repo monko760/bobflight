@@ -321,6 +321,13 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_include_directories(bobflight_f4_clock_plan_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_compile_options(bobflight_f4_clock_plan_test PRIVATE -UNDEBUG)
   add_test(NAME f4_clock_plan COMMAND bobflight_f4_clock_plan_test)
+  # Isolated clock-start component, never selected by a hardware target.
+  add_executable(bobflight_f4_clock_start_test
+    tests/host_f4_clock_start.c src/hal/stm32f4/clock_start.c
+    src/hal/stm32f4/clock_plan.c)
+  target_include_directories(bobflight_f4_clock_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(bobflight_f4_clock_start_test PRIVATE -UNDEBUG)
+  add_test(NAME f4_clock_start COMMAND bobflight_f4_clock_start_test)
   add_test(NAME mcu_backend_selection COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/test_mcu_backend_selection.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER})
   add_test(NAME boot_led_modes COMMAND ${Python3_EXECUTABLE}

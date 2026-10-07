@@ -194,3 +194,19 @@ jobs:
       - name: Windows PowerShell 5.1 selection guards
         shell: powershell
         run: '& ./bobflight-firmware/tests/test_target_tooling.ps1'
+
+  firmware-f4-components:
+    name: F4 clock components (Cortex-M4 compile only)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Compile isolated components, not a firmware image
+        run: |
+          mkdir -p build-f4-components
+          arm-none-eabi-gcc -std=c11 -Wall -Wextra -Werror -ffreestanding -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -Os -Isrc -c src/hal/stm32f4/clock_plan.c -o build-f4-components/clock_plan.o
+          arm-none-eabi-gcc -std=c11 -Wall -Wextra -Werror -ffreestanding -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -Os -Isrc -c src/hal/stm32f4/clock_start.c -o build-f4-components/clock_start.o
