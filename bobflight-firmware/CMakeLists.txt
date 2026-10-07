@@ -328,6 +328,16 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_include_directories(bobflight_f4_clock_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_compile_options(bobflight_f4_clock_start_test PRIVATE -UNDEBUG)
   add_test(NAME f4_clock_start COMMAND bobflight_f4_clock_start_test)
+  # Optional locally; mandatory in the dedicated ARM-component CI job.
+  find_program(BOBFLIGHT_COMPONENT_ARM_GCC arm-none-eabi-gcc)
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import unicorn, elftools"
+    RESULT_VARIABLE _bf_f4_model_deps OUTPUT_QUIET ERROR_QUIET)
+  if(BOBFLIGHT_COMPONENT_ARM_GCC AND _bf_f4_model_deps EQUAL 0)
+    add_test(NAME f4_startup_layout COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/tests/test_f4_startup_layout.py)
+  else()
+    message(STATUS "F4 startup component tests need ARM GCC and tests/f4-component-requirements.txt; dedicated CI runs them")
+  endif()
   add_test(NAME mcu_backend_selection COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/test_mcu_backend_selection.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER})
   add_test(NAME boot_led_modes COMMAND ${Python3_EXECUTABLE}
