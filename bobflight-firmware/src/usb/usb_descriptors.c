@@ -8,10 +8,9 @@
  */
 #include "tusb.h"
 #include <string.h>
-#include <stdio.h>
 
 #define USB_VID   0x1209u /* pid.codes / open */
-#define USB_PID   0xB0B1u /* BobFlight CDC placeholder — replace if assigned */
+#define USB_PID   0xB0B1u /* BobFlight CDC placeholder - replace if assigned */
 #define USB_BCD   0x0200u
 
 enum {
@@ -27,10 +26,12 @@ enum {
 #define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
 
 /*
- * STM32F74x unique device ID base (RM0431). F72x uses 0x1FF07A10 — both
- * Kakute (F745) and T-Motor (F722) builds share this TU file; pick at compile.
+ * STM32 unique device ID base. F405 uses 0x1FFF7A10. F72x uses 0x1FF07A10.
+ * F745 uses 0x1FF0F420. Target is picked at compile time.
  */
-#if defined(STM32F722xx) || (defined(BOBFLIGHT_TARGET_MCU_STM32F722))
+#if defined(BF_F4_COMPONENT_F405XG) || defined(STM32F405xx) || defined(BOBFLIGHT_TARGET_MCU_STM32F405)
+#define BF_UID_BASE 0x1FFF7A10u
+#elif defined(STM32F722xx) || defined(BOBFLIGHT_TARGET_MCU_STM32F722)
 #define BF_UID_BASE 0x1FF07A10u
 #else
 #define BF_UID_BASE 0x1FF0F420u /* F745 / F74x default */
@@ -71,6 +72,15 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
     return desc_fs_configuration;
 }
 
+static void u32_to_hex8(char *buf, uint32_t val)
+{
+    static const char hex_digits[] = "0123456789ABCDEF";
+    for (int i = 0; i < 8; i++) {
+        uint32_t shift = (uint32_t)(7 - i) * 4U;
+        buf[i] = hex_digits[(val >> shift) & 0x0FU];
+    }
+}
+
 static char g_serial_ascii[25]; /* 24 hex chars + NUL from 96-bit UID */
 static bool g_serial_ready;
 
@@ -85,13 +95,13 @@ static void serial_from_uid(void)
     w0 = uid[0];
     w1 = uid[1];
     w2 = uid[2];
-    /* Fixed-width hex — unique per chip, stable across resets. */
-    (void)snprintf(g_serial_ascii, sizeof(g_serial_ascii),
-                   "%08lX%08lX%08lX",
-                   (unsigned long)w2, (unsigned long)w1, (unsigned long)w0);
-    if (g_serial_ascii[0] == '\0') {
-        memcpy(g_serial_ascii, "BFCDC12DEAD", 12);
-    }
+
+    /* Fixed-width uppercase hex in w2, w1, w0 order - unique per chip. */
+    u32_to_hex8(&g_serial_ascii[0], w2);
+    u32_to_hex8(&g_serial_ascii[8], w1);
+    u32_to_hex8(&g_serial_ascii[16], w0);
+    g_serial_ascii[24] = '\0';
+
     g_serial_ready = true;
 }
 
@@ -99,7 +109,7 @@ static char const *string_desc_arr[] = {
     (const char[]){0x09, 0x04}, /* English (0x0409) */
     "BobFlight",
     "BobFlight CDC",
-    NULL, /* index 3 — filled from UID at runtime */
+    NULL, /* index 3 - filled from UID at runtime */
     "BobFlight Serial",
 };
 
