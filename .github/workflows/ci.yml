@@ -231,3 +231,5 @@ jobs:
         run: python3 tests/test_f405_timebase.py
       - name: Link real F405 TinyUSB stack and verify USB identities
         run: python3 tests/test_f405_usb_link.py
+      - name: Test F405 USB clock pin reset and IRQ preparation
+        run: python3 tests/test_f405_usb_prepare.py
