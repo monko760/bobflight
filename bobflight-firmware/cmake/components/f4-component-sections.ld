@@ -6,6 +6,8 @@ SECTIONS {
   .text : { *(.text .text.*) *(.rodata .rodata.*) *(.glue_7 .glue_7t) } > FLASH
   .ARM.extab : { *(.ARM.extab*) } > FLASH
   .ARM.exidx : { *(.ARM.exidx*) } > FLASH
+  /* Newlib may emit DWARF unwind records even for C memcpy. Keep bounded in flash. */
+  .eh_frame : ALIGN(4) { KEEP(*(.eh_frame .eh_frame.*)) } > FLASH
   .data : {
     . = ALIGN(4); _sdata = .; *(.data .data.*) . = ALIGN(4); _edata = .;
   } > RAM AT > FLASH

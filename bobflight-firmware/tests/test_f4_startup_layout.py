@@ -141,6 +141,23 @@ class StartupLayout(unittest.TestCase):
         p,_=self.build('f411xe',extra=source)
         self.assertNotEqual(p.returncode,0);self.assertIn('CCM',p.stdout)
 
+    def test_library_unwind_records_stay_in_flash(self):
+        # Reproduce GCC13/newlib memcpy's .eh_frame on older toolchains too.
+        source=r"""__asm__(".cfi_sections .eh_frame\n"
+            ".section .text.unwind_fixture,\"ax\",%progbits\n"
+            ".thumb\n.thumb_func\n.global unwind_fixture\n"
+            "unwind_fixture:\n.cfi_startproc\n bx lr\n.cfi_endproc\n.previous\n");"""
+        for part,(_,_,nvm,_) in PARTS.items():
+            with self.subTest(part=part):
+                result,path=self.build(part,extra=source)
+                self.assertEqual(result.returncode,0,result.stdout)
+                with path.open('rb') as stream:
+                    elf=ELFFile(stream);sec=elf.get_section_by_name('.eh_frame')
+                    self.assertIsNotNone(sec);self.assertGreater(sec['sh_size'],0)
+                    self.assertTrue(sec['sh_flags']&2)
+                    self.assertTrue(0x08000000<=sec['sh_addr']<sec['sh_addr']+sec['sh_size']<=nvm)
+                verify(path)
+
     def test_unexpected_allocated_sections_rejected(self):
         for part in PARTS:
             p,_=self.build(part,extra='const unsigned orphan __attribute__((section(".unmapped_component_data"))) = 42;')

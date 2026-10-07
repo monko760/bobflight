@@ -41,7 +41,7 @@ Memory constants and IRQ-number facts were checked against ST CMSIS headers at c
 
 ## Verification and CI
 
-`tests/test_f4_startup_layout.py` runs six test groups with per-part subcases: positive/strong-override vector links, bounded reset execution, compile/link part guards, flash/RAM/stack overflow, CCM and DMA placement, and orphan-section rejection. Commands compile with strict warnings, `-ffreestanding`, `-fno-builtin`, Cortex-M4 hard-float flags and `-nostdlib`. The linker rejects orphan sections. Generated ELFs are temporary component fixtures, not uploaded firmware artifacts.
+`tests/test_f4_startup_layout.py` runs seven test groups with per-part subcases: positive/strong-override vector links, bounded reset execution, compile/link part guards, flash/RAM/stack overflow, CCM and DMA placement, orphan-section rejection, and compiler-library unwind records explicitly bounded in application flash. Commands compile with strict warnings, `-ffreestanding`, `-fno-builtin`, Cortex-M4 hard-float flags and `-nostdlib`. The linker rejects orphan sections. Generated ELFs are temporary component fixtures, not uploaded firmware artifacts.
 
 The reset model loads only physical flash contents into Unicorn, pre-fills SRAM/CCM with sentinel bytes, and executes at most 20,000 instructions. It checks data copy, BSS/DMA clearing, noinit/CCM preservation, CPACR and VTOR writes, retained interrupt masking and arrival at the component entry. Unexpected reset writes outside normal SRAM and those two system registers fail the model. Emulation is not silicon validation.
 

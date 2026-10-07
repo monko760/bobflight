@@ -30,7 +30,7 @@ Seven groups cover nominal and delayed readiness with 8/25 MHz simulation crysta
 
 The model implements read-only readiness/status bits and bounded readiness delays. It is not an analog oscillator, regulator, bus-latency, clock-frequency or errata model. Reported clock frequencies are derived from the supplied nominal HSE value, not measurements. On failures, preserved descriptors are not usable measurements or fallback clocks.
 
-Linking the previously compile-only clock planner revealed its compiler-generated `memset`/`memcpy` dependencies. The fixture explicitly links the ARM toolchain's C library and compiler support (`-lc`, `-lgcc`) while retaining `-nostdlib` startup control. Only non-runtime debug information is stripped; symbols remain available and unexpected allocated sections remain errors. It does not use a mock memory helper or silently relax the linker bounds.
+Linking the previously compile-only clock planner revealed its compiler-generated `memset`/`memcpy` dependencies. The fixture explicitly links the ARM toolchain's C library and compiler support (`-lc`, `-lgcc`) while retaining `-nostdlib` startup control. Only non-runtime debug information is stripped; symbols remain available. Newlib versions can also emit allocated `.eh_frame` unwind records for C memory helpers. Those are explicitly retained in bounded application flash, with a cross-version reproduction test; other unexpected allocated sections remain errors. It does not use a mock memory helper or silently relax the linker bounds.
 
 The dedicated F4 CI job always runs this suite. Native CTest adds it when ARM GCC and the pinned existing model dependencies are installed, alongside the reset-only suite. Test ELF files are temporary, never published as firmware artifacts.
 
