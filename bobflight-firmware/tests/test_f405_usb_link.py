@@ -42,6 +42,7 @@ class F405USBLink(unittest.TestCase):
         sources += [ROOT/'tests/fixtures/f405_timebase/entry.c',ROOT/'tests/fixtures/f405_usb_link/hooks.c']
         sources += [TUSB/n for n in ('tusb.c','common/tusb_fifo.c','device/usbd.c','class/cdc/cdc_device.c',
                                     'portable/synopsys/dwc2/dcd_dwc2.c','portable/synopsys/dwc2/dwc2_common.c')]
+        sources += getattr(cls,'EXTRA_SOURCES',[])
         objects=[]
         for i,src in enumerate(sources):
             obj=cls.dir/f'source-{i}.o';cls.run_cmd([cls.cc,*FLAGS,*cls.includes,*cls.defs,'-c',str(src),'-o',str(obj)]);objects.append(str(obj))

@@ -28,4 +28,4 @@ F405 UID/endpoint/IRQ values were checked against ST's `stm32f405xx.h` at `9192c
 
 ## Next useful milestone
 
-Integrate board-specific USB platform preparation and diagnostics, then verify actual host enumeration, repeated connects/resets and clock/timing behavior on an F405. Hardware is now useful to make this phase faster, rather than expanding controller simulations. Sensor/receiver, persistent Save, guarded `bl` and motor paths remain later requirements; no arming/failsafe or flight-ready change is made here.
+The next [guarded preparation component](f405-usb-prepare.md) covers GPIO, clocks, reset and disabled IRQ setup without entering the USB controller. PHY/controller initialization and diagnostics still need integration before actual host enumeration, repeated connects/resets and timing checks on an F405. Hardware is now useful to make this phase faster, rather than expanding controller simulations. Sensor/receiver, persistent Save, guarded `bl` and motor paths remain later requirements; no arming/failsafe or flight-ready change is made here.
