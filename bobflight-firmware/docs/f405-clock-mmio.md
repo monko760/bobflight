@@ -36,6 +36,6 @@ The dedicated F4 CI job always runs this suite. Native CTest adds it when ARM GC
 
 ## Next integration gates
 
-Monotonic timekeeping, scheduler timing, USB/CDC, board-driven GPIO/SPI/sensors/UART, persistence and guarded `bl`, plus timers/DMA/ADC remain prerequisites for usable board support. F411's separate electrical timer-limit question remains open. Broader routing work follows [traceable board references](../../TARGETS.md#referencing-upstream-routing-facts), with independently authored mappings and per-variant verification.
+A follow-up [DWT/SysTick timebase component](f405-timebase.md) reuses the existing shared cycle accumulator and connects to reset/clock in a modeled fixture. Hardware scheduling/interrupt delivery, USB/CDC, board-driven GPIO/SPI/sensors/UART, persistence and guarded `bl`, plus timers/DMA/ADC remain prerequisites for usable board support. F411's separate electrical timer-limit question remains open. Broader routing work follows [traceable board references](../../TARGETS.md#referencing-upstream-routing-facts), with independently authored mappings and per-variant verification.
 
 No firmware rebuild or physical installation is requested. Do not flash a fixture ELF. Independently verified BOOT/SWD recovery is required before future experimental installation; software `bl` cannot recover failed startup or unavailable USB. See [the overall gates](broader-mcu-support.md).

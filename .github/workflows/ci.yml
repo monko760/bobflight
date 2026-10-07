@@ -227,3 +227,5 @@ jobs:
         run: python3 tests/test_f4_startup_layout.py
       - name: Test F405 reset through physical-address clock adapter
         run: python3 tests/test_f405_clock_mmio.py
+      - name: Test F405 reset through clock and DWT timekeeping
+        run: python3 tests/test_f405_timebase.py
