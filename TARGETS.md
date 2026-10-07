@@ -28,6 +28,22 @@ python3 bobflight-firmware/tests/test_target_registry.py
 python3 bobflight-firmware/tests/test_target_artifact.py
 ```
 
+## Referencing upstream routing facts
+
+Use matching Betaflight board definitions as traceable hardware references, not as proof that BobFlight drivers work. The [current config repository](https://github.com/betaflight/config) supplies build-time board defaults; older releases may use [legacy unified targets](https://github.com/betaflight/unified-targets). Pin the relevant revision rather than treating a moving branch as evidence for a specific controller.
+
+For each new profile:
+
+1. Establish exact target/manufacturer identity, PCB/sensor revision and MCU package/density. Do not infer the physical variant from an MCU family or similar board name.
+2. Record the source URL/commit and whether each mapping is upstream-reported, corroborated by manufacturer documentation/readback, or physically verified. Keep provenance in IR comments or accompanying documentation; do not add unsupported fields to the strict registry schema.
+3. Independently express hardware facts in BobFlight's schema: pin/bus connections, chip selects, sensor identity/orientation, oscillator assumptions, pad numbering and peripheral constraints. Translate timer/DMA option identifiers into actual STM32 resources; Betaflight-specific option numbers are not hardware addresses.
+4. Check package pins, alternate functions, driver capabilities and timer/DMA/resource conflicts before enabling the target. Existing registry checks are not a complete physical resource validator.
+5. Bench-verify BobFlight boot/USB, sensor identity/orientation, relevant UART/ADC/output routing, saved settings and guarded bootloader entry, with an independent recovery path. A working Betaflight target is evidence about that implementation, not BobFlight qualification.
+
+The current Betaflight config repository is GPL-3.0 licensed. Do not copy its configuration files, implementation code or executable initialization logic into Apache-2.0 BobFlight and merely relabel them. Factual-reference work and independently authored mappings remain separate from any proposal for bulk source reuse, which needs its own licensing review. No bulk importer or new board qualification is introduced by this policy.
+
+Aircraft mounting rotation, custom motor reordering, receiver choices, tuning and calibration remain persistent aircraft settings, not facts borrowed from another aircraft's configuration. Supported remapping still requires an implemented and validated routing path.
+
 ## Configurator
 
 The existing flash-target selector now draws its board choices from the validated catalog and starts empty. An explicit supported target is required for live and mock flashing; an unknown selection never falls back to the first board. The family browser is informational and cannot select, download, flash, or activate planned hardware. Actual flashing retains its existing MCU and image guards. The protocol MCU union and flash limits must be explicitly implemented before a future family can be enabled.

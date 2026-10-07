@@ -4,15 +4,13 @@ Shared exact-part MCU backends and board definitions remain the architecture. A 
 
 ## Current slice
 
-PR #71 provides F405/F411 clock arithmetic and register plans. Its follow-up adds ordered cold-start clock execution through injected register callbacks, with bounded polling and explicit failure classification. Host models and Cortex-M4 object compilation do not establish physical startup. Hardware selectors remain unchanged and reject unimplemented parts.
+Clock/register plans, callback-driven cold-start sequencing, and exact-density reset/vector/linker components are merged foundations. The [F405xG direct register adapter](f405-clock-mmio.md) now connects reset through clock startup in an executable, bounded register-model fixture. F411 retains isolated component coverage, without this physical-address adapter.
 
-The follow-up is stacked on #71, not a silent merge of that draft. PR #72's configurator improvements are independently merged; no configurator changes belong to this clock slice.
-
-The next stacked slice now supplies [exact-density reset/vector and linker components](f4-startup-layout.md), with linked-fixture and reset-model tests. It still does not connect clock startup or supply a physical board backend.
+This is still not a usable board image: models supply readiness signals, and no silicon was exercised. Hardware selectors remain unchanged and reject unimplemented parts. Board routing facts will follow the [traceable upstream-reference process](../../TARGETS.md#referencing-upstream-routing-facts), without importing GPL implementation or assuming driver compatibility.
 
 ## Next implementation gates
 
-1. Exact-part reset/vector tables and memory layout, CPU/FPU flags, stack and DMA-capable RAM placement, then a verified physical register-access adapter. Establish reset-state and fault behavior before connecting clock startup to a hardware build.
+1. Extend the linked F405 reset/clock path into a complete hardware backend only after applicable silicon/errata and reset/fault qualification. The new adapter is verified by address checks and modeled execution, not physical operation. Preserve exact-density layouts and the failure stop boundary.
 2. Monotonic timebase and scheduler timing, USB/CDC with a validated 48 MHz source, GPIO/SPI/sensor drivers and UART/receiver freshness. Preserve existing timing and failsafe contracts.
 3. Part/density-specific flash geometry and reserved nonvolatile settings storage, power-loss-safe Save, `diff all`, guarded software bootloader entry and independent recovery. Do not infer ROM addresses or flash layout from another part.
 4. ADC, timers/DMA/interrupt resources and motor protocols. F405 is the initial hardware-integration path. F411's unresolved APB1 timer electrical-limit note must be resolved before enabling its hardware timers, not treated as approval because the clock formula compiles.

@@ -225,3 +225,5 @@ jobs:
         run: python3 -m pip install -r tests/f4-component-requirements.txt
       - name: Test exact-part startup, memory bounds and reset execution
         run: python3 tests/test_f4_startup_layout.py
+      - name: Test F405 reset through physical-address clock adapter
+        run: python3 tests/test_f405_clock_mmio.py

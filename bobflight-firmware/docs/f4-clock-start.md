@@ -2,6 +2,8 @@
 
 **Bounded backend slice component, not an enabled F4 hardware target.** This module implements hardware-isolated cold-reset clock bring-up for STM32F405 and STM32F411 microcontrollers using injected MMIO register callbacks. It builds upon validated register plans from `clock_plan.{h,c}` and executes a strictly ordered hardware initialization sequence.
 
+For the connected F405xG reset-to-MMIO fixture, see [F405 register adapter](f405-clock-mmio.md). F411 retains callback/model coverage only; no hardware target is enabled.
+
 ---
 
 ## Architecture & Interfaces

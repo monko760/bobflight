@@ -41,7 +41,7 @@ Memory constants and IRQ-number facts were checked against ST CMSIS headers at c
 
 ## Verification and CI
 
-`tests/test_f4_startup_layout.py` runs six test groups with per-part subcases: positive/strong-override vector links, bounded reset execution, compile/link part guards, flash/RAM/stack overflow, CCM and DMA placement, and orphan-section rejection. Commands compile with strict warnings, `-ffreestanding`, `-fno-builtin`, Cortex-M4 hard-float flags and `-nostdlib`. The linker rejects orphan sections. Generated ELFs are temporary component fixtures, not uploaded firmware artifacts.
+`tests/test_f4_startup_layout.py` runs seven test groups with per-part subcases: positive/strong-override vector links, bounded reset execution, compile/link part guards, flash/RAM/stack overflow, CCM and DMA placement, orphan-section rejection, and compiler-library unwind records explicitly bounded in application flash. Commands compile with strict warnings, `-ffreestanding`, `-fno-builtin`, Cortex-M4 hard-float flags and `-nostdlib`. The linker rejects orphan sections. Generated ELFs are temporary component fixtures, not uploaded firmware artifacts.
 
 The reset model loads only physical flash contents into Unicorn, pre-fills SRAM/CCM with sentinel bytes, and executes at most 20,000 instructions. It checks data copy, BSS/DMA clearing, noinit/CCM preservation, CPACR and VTOR writes, retained interrupt masking and arrival at the component entry. Unexpected reset writes outside normal SRAM and those two system registers fail the model. Emulation is not silicon validation.
 
@@ -49,6 +49,6 @@ The dedicated ARM-component CI job installs pinned test dependencies and always 
 
 ## Remaining gates
 
-[Clock sequencing](f4-clock-start.md) remains a separate component: it is not wired into this reset fixture. Physical register access, exact-part clock integration/errata checks, monotonic timing, USB/peripheral drivers, nonvolatile storage and physical guarded `bl` verification remain unfinished. The F411 timer electrical-limit question still applies before timer enablement.
+The original reset-only fixture remains focused on memory/vector behavior. A separate [F405 reset-to-MMIO fixture](f405-clock-mmio.md) now links this startup with clock sequencing and an exact-address adapter. It is model-tested, not a hardware backend. Physical silicon and errata qualification, monotonic timing, USB/peripheral drivers, nonvolatile storage and physical guarded `bl` verification remain unfinished. F411 has no direct adapter in this slice, and its timer electrical-limit question still applies before timer enablement.
 
 No arming/failsafe, flight-ready status, existing firmware runtime or saved-configuration behavior changes. No physical board was flashed or tested. No user rebuild/installation is requested. Do not use these fixture ELFs on hardware; experimental installation still requires a separately verified BOOT/SWD recovery route. See [broader support gates](broader-mcu-support.md).
