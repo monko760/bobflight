@@ -49,6 +49,6 @@ The dedicated ARM-component CI job installs pinned test dependencies and always 
 
 ## Remaining gates
 
-[Clock sequencing](f4-clock-start.md) remains a separate component: it is not wired into this reset fixture. Physical register access, exact-part clock integration/errata checks, monotonic timing, USB/peripheral drivers, nonvolatile storage and physical guarded `bl` verification remain unfinished. The F411 timer electrical-limit question still applies before timer enablement.
+The original reset-only fixture remains focused on memory/vector behavior. A separate [F405 reset-to-MMIO fixture](f405-clock-mmio.md) now links this startup with clock sequencing and an exact-address adapter. It is model-tested, not a hardware backend. Physical silicon and errata qualification, monotonic timing, USB/peripheral drivers, nonvolatile storage and physical guarded `bl` verification remain unfinished. F411 has no direct adapter in this slice, and its timer electrical-limit question still applies before timer enablement.
 
 No arming/failsafe, flight-ready status, existing firmware runtime or saved-configuration behavior changes. No physical board was flashed or tested. No user rebuild/installation is requested. Do not use these fixture ELFs on hardware; experimental installation still requires a separately verified BOOT/SWD recovery route. See [broader support gates](broader-mcu-support.md).
