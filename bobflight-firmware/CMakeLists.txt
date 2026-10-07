@@ -337,6 +337,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
       ${CMAKE_SOURCE_DIR}/tests/test_f4_startup_layout.py)
     add_test(NAME f405_clock_mmio COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_SOURCE_DIR}/tests/test_f405_clock_mmio.py)
+    add_test(NAME f405_timebase COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/tests/test_f405_timebase.py)
   else()
     message(STATUS "F4 startup component tests need ARM GCC and tests/f4-component-requirements.txt; dedicated CI runs them")
   endif()
