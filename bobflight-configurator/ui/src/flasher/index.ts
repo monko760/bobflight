@@ -35,3 +35,4 @@ export {
   type FlasherKind,
 } from "./createFlasher";
 export { tryBindProtocolFlasher } from "./protocolBridge";
+export { validateFirmwareForBoard } from "./firmwareValidation";

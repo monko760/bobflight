@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import {validateFirmwareForBoard as validate} from '../src/flasher/firmwareValidation';
+import type {ParsedHex} from '../src/flasher/types';
+const base=0x08000000;
+const bytes=new Uint8Array(32);const dv=new DataView(bytes.buffer);dv.setUint32(0,0x20010000,true);dv.setUint32(4,base+9,true);
+const image:ParsedHex={baseAddress:base,startAddress:base,byteLength:bytes.length,bytes,regions:[{address:base,data:bytes}],mcu:'F722'};
+const valid=(p=image,n='bobflight-tmotor_f7_v2-main.hex',board='tmotor_f7_v2')=>validate(p,board,n);
+assert.equal(valid(),null);assert.equal(valid(image,'bobflight.hex'),null); // no false automatic identity claim
+assert.match(valid(image,'bobflight-other-main.hex')!,/filename/);
+assert.match(valid(image,'stm32f411.hex')!,/MCU/);
+assert.match(valid({...image,mcu:'F745'})!,/MCU/);
+assert.match(valid(image,'blink.hex')!,/Diagnostic/);
+assert.match(valid(image,'image.bin')!,/Intel HEX/);
+assert.match(valid(image,undefined,'stm32f411')!,/supported/);
+assert.match(valid({...image,baseAddress:base+4})!,/vector/);
+assert.match(valid({...image,regions:[{address:base-1,data:bytes}]})!,/window/);
+assert.match(valid({...image,regions:[...image.regions,{address:0x08080000,data:new Uint8Array(1)}]})!,/window/);
+assert.match(valid({...image,regions:[{address:base,data:bytes.subarray(0,4)}]})!,/missing/);
+const bad=bytes.slice();new DataView(bad.buffer).setUint32(4,base+8,true);
+assert.match(valid({...image,bytes:bad,regions:[{address:base,data:bad}]})!,/Thumb/);
+assert.match(valid({...image,entryAddress:0x08040000})!,/entry/);
+console.log('PASS firmware preflight: target hints, app bounds, reserved storage, vectors, entry and diagnostics');

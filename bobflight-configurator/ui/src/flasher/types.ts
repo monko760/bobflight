@@ -44,15 +44,15 @@ export const BOARD_OPTIONS = catalog.boards.flatMap(board => {
   const target = mcuForBoard(board.id);
   const mcu = normalizeMcu(target?.part);
   if (board.support === 'host-only' || target?.status !== 'implemented' || !mcu) return [];
-  return [{boardId: board.id, label: board.display_name, mcu, mcuDisplay: target.part, primary: false}];
+  return [{boardId: board.id, label: board.display_name, mcu, mcuDisplay: target.part, support: board.support, motorOutput: board.capabilities.motor_output, primary: false}];
 });
 export type BoardId = string;
 
 export function normalizeMcu(mcu: ExpectedMcu | undefined): BobFlightMcu | null {
   if (!mcu) return null;
   const s = String(mcu).toUpperCase().replace(/^STM32/, "");
-  if (s === "F745" || s.includes("F745")) return "F745";
-  if (s === "F722" || s.includes("F722")) return "F722";
+  if (s === "F745") return "F745";
+  if (s === "F722") return "F722";
   return null;
 }
 

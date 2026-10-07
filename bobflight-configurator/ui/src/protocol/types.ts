@@ -89,6 +89,8 @@ export interface BobFlightHost {
   getVersion(): Promise<string>;
   getStatus(): Promise<ParsedStatus>;
   getConnectionStatus(): ConnectionStatus;
+  /** True ONLY when currently connected via real WebSerial/serial transport (not mock). */
+  isLiveConnection?(): boolean;
   onLine(cb: (line: string) => void): () => void;
   onStatus(cb: (s: ConnectionStatus) => void): () => void;
   getLastError(): string | null;

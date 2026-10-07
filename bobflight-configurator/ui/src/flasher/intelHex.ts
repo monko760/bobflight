@@ -32,6 +32,8 @@ export function parseIntelHex(
 /** Infer MCU hint from filename (best-effort; not authoritative). */
 export function mcuHintFromFilename(name: string): string | undefined {
   const n = name.toLowerCase();
+  const explicit = /(?:stm32)?([fh]\d{3})(?!\d)/i.exec(name);
+  if (explicit) return explicit[1].toUpperCase();
   if (n.includes("f745") || n.includes("kakute")) return "F745";
   if (n.includes("f722") || n.includes("tmotor")) return "F722";
   return undefined;

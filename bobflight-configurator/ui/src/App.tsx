@@ -57,9 +57,11 @@ const GATED_TABS: ReadonlySet<Tab> = new Set([
 
 function Shell() {
   const [tab, setTab] = useState<Tab>("flasher");
+  const [flashBusy, setFlashBusy] = useState(false);
   const { connectionStatus, postFlashGate } = useHost();
 
   function selectTab(id: Tab) {
+    if (flashBusy && id !== "flasher") return;
     if (postFlashGate && GATED_TABS.has(id)) {
       return;
     }
@@ -107,7 +109,7 @@ function Shell() {
               ["cli", "CLI"],
             ] as const
           ).map(([id, label]) => {
-            const gated = postFlashGate && GATED_TABS.has(id);
+            const gated = (postFlashGate && GATED_TABS.has(id)) || (flashBusy && id !== "flasher");
             return (
               <button
                 key={id}
@@ -116,7 +118,7 @@ function Shell() {
                 disabled={gated}
                 title={
                   gated
-                    ? "Locked after flash — reconnect CDC and confirm version/status on Flasher"
+                    ? "Finish or cancel flashing, then reconnect the live CDC board for automatic target/version verification"
                     : undefined
                 }
                 onClick={() => selectTab(id)}
@@ -131,10 +133,10 @@ function Shell() {
           {postFlashGate && GATED_TABS.has(tab) && (
             <div className="banner-warn" role="status">
               Config tabs locked after firmware flash. Use Connect to reattach
-              CDC, then confirm unlock on the Flasher tab.
+              the live CDC board for automatic target/version verification.
             </div>
           )}
-          {tab === "flasher" && <FlasherPage />}
+          <div hidden={tab !== "flasher"}><FlasherPage onBusyChange={setFlashBusy} /></div>
           {tab === "connect" && <ConnectPage />}
           {tab === "setup" && <SetupPage />}
           {tab === "ports" && <PortsPage />}
