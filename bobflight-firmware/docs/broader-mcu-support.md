@@ -8,6 +8,8 @@ PR #71 provides F405/F411 clock arithmetic and register plans. Its follow-up add
 
 The follow-up is stacked on #71, not a silent merge of that draft. PR #72's configurator improvements are independently merged; no configurator changes belong to this clock slice.
 
+The next stacked slice now supplies [exact-density reset/vector and linker components](f4-startup-layout.md), with linked-fixture and reset-model tests. It still does not connect clock startup or supply a physical board backend.
+
 ## Next implementation gates
 
 1. Exact-part reset/vector tables and memory layout, CPU/FPU flags, stack and DMA-capable RAM placement, then a verified physical register-access adapter. Establish reset-state and fault behavior before connecting clock startup to a hardware build.
