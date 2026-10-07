@@ -2,6 +2,8 @@
 
 **Isolated, test-only component, not an implemented F4 backend.** F4 entries remain planned and hardware selection still rejects them. No register writes, clock switching, startup, firmware flashing or physical bootloader verification are performed.
 
+For the subsequent ordered execution component, see [cold-start clock sequencing](f4-clock-start.md). That component is separately tested through register callbacks and remains excluded from hardware selection. This page describes the pure planning interfaces.
+
 ## Implemented interfaces
 
 `bf_f4_make_clock_plan()` computes frequencies and requirements from an exact MCU part, HSE crystal frequency and supplied VDD. `bf_f4_make_clock_register_plan()` adds part-specific mask/value descriptions for PLL, bus prescaler, power-scale and flash-latency fields. Both reject invalid inputs without modifying caller output. A future part cannot inherit another part's voltage-scale encoding.
