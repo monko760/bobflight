@@ -247,8 +247,8 @@ bool dwc2_core_init(uint8_t rhport, bool is_hs_phy, bool is_dma) {
   // Enable PHY clock TODO stop/gate clock when suspended mode
   dwc2->pcgcctl &= ~(PCGCCTL_STOPPCLK | PCGCCTL_GATEHCLK | PCGCCTL_PWRCLMP | PCGCCTL_RSTPDWNMODULE);
 
-  dfifo_flush_tx(dwc2, 0x10); // all tx fifo
-  dfifo_flush_rx(dwc2);
+  TU_ASSERT(dfifo_flush_tx(dwc2, 0x10)); // all tx fifo
+  TU_ASSERT(dfifo_flush_rx(dwc2));
 
   // Clear pending and disable all interrupts
   dwc2->gintsts = 0xFFFFFFFFU;

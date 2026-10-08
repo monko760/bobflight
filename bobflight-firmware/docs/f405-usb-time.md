@@ -23,3 +23,5 @@ Five new ARM-execution groups cover binding/clock/context checks, delay progress
 The F4 CI toolchain-install step now has a five-minute timeout, following an observed installation stall that was resolved by a single job restart. This limits infrastructure waiting without skipping any firmware tests.
 
 Next: use this timing service for PHY/mode settling and disconnect/reconnect transitions, then integrate CDC diagnostics. Physical USB enumeration, real clock accuracy and target recovery still need an exact F405 board. No arming/failsafe, persistent-settings schema or flight-ready change is made here.
+
+The next [USB startup failure correction](usb-startup-failure.md) propagates stalled FIFO flushes and prevents false initialized states before controller bring-up proceeds.
