@@ -190,3 +190,5 @@ export {
 export type { MotorDirectionOption, MotorDirectionCliCommand, MotorDirectionGetResult, MotorDirectionSetResult, MixerReport, MotorDirectionView } from "./motor-direction";
 export { MockMotorDirection, MOTOR_DIRECTION_MOCK_SCENARIOS, MOTOR_DIRECTION_MOCK_FUTURE_TOKEN } from "./motor-direction-mock";
 export type { MotorDirectionMockScenario } from "./motor-direction-mock";
+
+export { F405_USB_DIAGNOSTIC_PROFILE, F405_DIAGNOSTIC_MARKERS, hasF405DiagnosticMarkers, validateF405DiagnosticImage, assertF405DfuLayout } from "./flasher/f405-diagnostic";

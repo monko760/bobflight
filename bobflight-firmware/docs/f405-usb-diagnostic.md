@@ -43,3 +43,9 @@ The output is `bobflight-mltempf4-usb-diagnostic.hex` with companion ELF/BIN fil
 Image checks cover vector binding, linker bounds, absence of heap/stdio dependencies, diagnostic USB identity and placement of IRQ unmasking after stack initialization. Native parser tests reject write commands, control bytes and overlong lines. These do not establish physical enumeration, interrupt delivery, clock accuracy, sustained traffic reliability or flight readiness.
 
 After hardware enumeration, expected results are a CDC serial port, a diagnostic banner, `version` identifying the F405 test image, and `status` reporting stage 8/error 0 with increasing uptime. If it never enumerates, reports an error, resets repeatedly or heats unexpectedly, disconnect USB and use the confirmed BOOT route for recovery. Do not connect motors or external power to extend this first test.
+
+## Configurator diagnostic installation
+
+The companion flasher update adds an explicit Motolab MLTEMPF4 USB-diagnostic profile and a basic custom-board form. It accepts this existing image by checking embedded content, vectors, application bounds and the device's DFU flash layout, rather than trusting its filename. It never treats this image as normal F7/main firmware. See the [diagnostic flashing procedure](../../bobflight-configurator/protocol/src/flasher/F405-DIAGNOSTIC.md).
+
+The diagnostic flash path requires readback verification and leaves the board in DFU. Unplug USB, remove the BOOT bridge and reconnect USB before using the dedicated read-only diagnostic console. Normal configuration controls remain locked. The custom path currently supports only the matching F405xG/1 MiB/8 MHz USB-only profile; other combinations are shown but not silently substituted.

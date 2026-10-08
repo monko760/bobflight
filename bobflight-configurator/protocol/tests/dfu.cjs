@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const { WebUsbDfuFlasher } = require('../dist/flasher/webusb-dfu.js');
 const { parseIntelHex } = require('../dist/flasher/intel-hex.js');
 const { planSectorErases } = require('../dist/flasher/flash-sectors.js');
+const { F405_DIAGNOSTIC_MARKERS, validateF405DiagnosticImage } = require('../dist/flasher/f405-diagnostic.js');
 const BASE = 0x08000000;
 
 // Models DFU transitions and NOR flash (writes cannot turn zero bits back to one).
@@ -17,6 +18,7 @@ class Device {
   constructor(fault = '') { this.fault = fault; if (fault === 'stale') { this.state = 10; this.status = 3; } }
   async claimInterface() {} async selectAlternateInterface() {} async releaseInterface() {} async close() {}
   async controlTransferOut(s, data = new Uint8Array()) {
+    this.outRequests=(this.outRequests||0)+1;
     if (s.request === 4) { this.clears++; this.status = 0; this.state = 2; }
     else if (s.request === 6) { assert.ok([2,5,9].includes(this.state), 'ABORT only from idle states'); this.state = 2; }
     else if (s.request === 1) {
@@ -29,7 +31,7 @@ class Device {
             if (data[0] === 0x21) this.pointer = address;
             else if (data[0] === 0x41) {
               if (this.fault === 'erase') { this.status = 4; this.state = 10; return; }
-              const bounds = [0,32768,65536,98304,131072,262144,524288,786432,1048576];
+              const bounds = this.f405 ? [0,16384,32768,49152,65536,131072,262144,393216,524288,655360,786432,917504,1048576] : [0,32768,65536,98304,131072,262144,524288,786432,1048576];
               const i = bounds.findIndex((x,i) => i < bounds.length-1 && address-BASE >= x && address-BASE < bounds[i+1]);
               assert.ok(i >= 0); this.erases.push(BASE+bounds[i]);
               this.memory.fill(255,bounds[i],bounds[i+1]);
@@ -71,6 +73,10 @@ class Device {
 global.window = { isSecureContext:true };
 async function run(image, fault='', options={}) {
   const device = new Device(fault);
+  if(options.expectedMcu==='F405') {
+    device.f405=true;
+    device.configuration.interfaces[0].alternates[0].interfaceName='layout' in options ? options.layout : '@Internal Flash /0x08000000/04*016Kg,01*064Kg,07*128Kg';
+  }
   Object.defineProperty(global,'navigator',{configurable:true,value:{usb:{async requestDevice(){return device;}}}});
   const flasher = new WebUsbDfuFlasher(); const phases=[];
   flasher.onProgress(p => { phases.push(p); if(fault === 'cancel' && p.phase === 'writing') flasher.cancel(); });
@@ -106,6 +112,37 @@ function parsed(regions) { return {baseAddress:regions[0].address,regions,bytes:
     const bad = await run(image); assert.ok(bad.error); assert.equal(bad.device.erases.length,0); assert.equal(bad.device.writes,0);
   }
   assert.throws(()=>planSectorErases([region(BASE,1)],undefined),/supported target/);
+
+  const d=Buffer.alloc(20000);
+  d.writeUInt32LE(0x20020000,0); for(const o of [4,60,332])d.writeUInt32LE(BASE+393,o);
+  let markerOffset=512;for(const marker of F405_DIAGNOSTIC_MARKERS){d.write(marker+'\0',markerOffset,'ascii');markerOffset+=marker.length+1;}
+  const diagnostic={baseAddress:BASE,bytes:d,regions:[{address:BASE,data:d}]};
+  const diagnosticOptions={expectedMcu:'F405',imageProfile:'f405-usb-diagnostic',verify:true,leave:false};
+  const f405=await run(diagnostic,'',diagnosticOptions);assert.ifError(f405.error);
+  assert.deepEqual(f405.device.erases,[BASE,BASE+16384]);assert.equal(f405.device.leaves,0);
+  assert(f405.device.uploads>0);assert.deepEqual(f405.device.memory.subarray(0,d.length),d);
+  assert.equal(f405.device.memory[32768],0);assert.match(f405.phases.at(-1).message,/remove BOOT/);
+  for(const layout of [null,'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg','@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg','@Internal Flash /0x08004000/04*016Kg,01*064Kg,07*128Kg']) {
+    const bad=await run(diagnostic,'',{...diagnosticOptions,layout});assert(bad.error);
+    assert.equal(bad.device.outRequests||0,0,'bad geometry must precede all DFU writes');
+  }
+  for(const opt of [{leave:true},{verify:false},{imageProfile:undefined},{expectedMcu:'F722'}]) {
+    const bad=await run(diagnostic,'',{...diagnosticOptions,...opt});assert(bad.error);assert.equal(bad.device.outRequests||0,0);
+  }
+  const wrong=d.slice();wrong[512]=0;
+  assert.throws(()=>validateF405DiagnosticImage({...diagnostic,bytes:wrong,regions:[{address:BASE,data:wrong}]}),/identity/);
+  const overflow={...diagnostic,regions:[...diagnostic.regions,{address:0x080c0000,data:new Uint8Array(1)}]};
+  assert.throws(()=>validateF405DiagnosticImage(overflow),/range/);
+  for(const fault of ['corrupt','short-read','short-write','write','erase','cancel']){
+    const bad=await run(diagnostic,fault,diagnosticOptions);assert(bad.error);assert.equal(bad.device.leaves,0);assert(!bad.phases.some(p=>p.phase==='done'));
+  }
+  if(process.env.BF_F405_TEST_HEX){
+    const real=parseIntelHex(fs.readFileSync(process.env.BF_F405_TEST_HEX,'utf8'));
+    const result=await run(real,'',diagnosticOptions);assert.ifError(result.error);assert.equal(result.device.leaves,0);
+    for(const region of real.regions)assert.deepEqual(result.device.memory.subarray(region.address-BASE,region.address-BASE+region.data.length),Buffer.from(region.data));
+    console.log('PASS exact existing F405 HEX: all programmed bytes readback verified in DFU model; no ROM jump.');
+  }
+  console.log('PASS F405 profile, geometry-before-write, 16 KiB sectors, readback, preserved sectors, corruption/errors/cancellation, and mandatory cold restart.');
   if(process.argv[2]) {
     const real = parseIntelHex(fs.readFileSync(process.argv[2],'utf8'));
     const result = await run(real); assert.ifError(result.error);

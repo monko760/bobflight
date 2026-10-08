@@ -1,3 +1,4 @@
+import { assertMcuGate } from "@bobflight/protocol";
 /**
  * Mock flasher — last-resort fallback if Protocol createFlasher('mock') throws.
  * Never claims WebUSB DFU success.
@@ -118,6 +119,7 @@ export function createMockFlasher(): Flasher {
 
       cancelled = false;
       const parsed = asParsed(firmware);
+      assertMcuGate(parsed, opts);
       gateMcu(parsed, opts?.expectedMcu);
 
       const total = parsed.byteLength;

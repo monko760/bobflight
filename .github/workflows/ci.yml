@@ -91,6 +91,7 @@ jobs:
           npm --prefix protocol run test:bootloader
           npm --prefix ui run test:firmware-validation
           npm --prefix ui run test:flasher-journey
+          npm --prefix ui run test:diagnostic-console
           npm --prefix ui run test:post-flash
           npm --prefix ui run test:transport-identity
       - name: Settings smoke

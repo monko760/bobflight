@@ -1,4 +1,5 @@
 // Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0
+import { validateF405DiagnosticImage, hasF405DiagnosticMarkers } from '@bobflight/protocol';
 import { BOARD_OPTIONS, type ParsedHex } from './types';
 const BASE = 0x08000000;
 // Matches the current supported BobFlight F7 linker/publication policies.
@@ -9,6 +10,15 @@ export function validateFirmwareForBoard(image: ParsedHex | null, boardId: strin
   if (!board) return 'Select a supported, buildable board target first.';
   if (!image || !filename) return 'Load the application HEX for the selected board.';
   if (!/\.hex$/i.test(filename)) return 'Load an Intel HEX (.hex) firmware file, not a BIN or manifest.';
+  if (board.imageProfile === 'f405-usb-diagnostic') {
+    const hint = /(?:stm32)?([fh]\d{3})(?!\d)/i.exec(filename)?.[1].toUpperCase();
+    if (hint && hint !== 'F405') return 'Firmware filename MCU does not match F405.';
+    const canonical = /^bobflight-([a-z0-9_]+)-main\.hex$/i.exec(filename);
+    if (canonical) return 'A normal board main image is not the explicit F405 diagnostic.';
+    try { validateF405DiagnosticImage(image); return null; }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
+  }
+  if (hasF405DiagnosticMarkers(image)) return 'F405 diagnostic cannot be flashed as a normal F7 board image.';
   if (/prove-reset|blink|diagnostic/i.test(filename)) return 'Diagnostic/blink images are not normal configurator firmware. Load the board application HEX.';
   const canonical = /^bobflight-([a-z0-9_]+)-main\.hex$/i.exec(filename);
   if (canonical && canonical[1].toLowerCase() !== boardId) return `Firmware filename names ${canonical[1]}, not selected target ${boardId}.`;

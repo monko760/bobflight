@@ -13,7 +13,7 @@ assert.equal(mcuForBoard('unknown'),undefined);
 assert.equal(mcuForBoard('tmotor_f7_v2')?.part,'STM32F722');
 assert.equal(catalog.boards.find(b=>b.id==='tmotor_f7_v2')?.capabilities.motor_output,false);
 assert.equal(BOARD_OPTIONS.some(b=>b.boardId==='dummy'),false);
-assert.deepEqual(BOARD_OPTIONS.map(b=>b.boardId).sort(),Object.keys(GENERATED_BOARD_MCU).sort());
+assert.deepEqual(BOARD_OPTIONS.filter(b=>!b.imageProfile).map(b=>b.boardId).sort(),Object.keys(GENERATED_BOARD_MCU).sort());
 assert(catalog.mcus.filter(m=>m.family!=='F7').every(m=>m.status==='planned'&&!m.toolchain));
 const html=renderToStaticMarkup(<TargetCatalog/>);
 assert(html.includes('informational'));assert(html.includes('not hardware or flight qualification'));
@@ -28,3 +28,6 @@ assert(page.includes('if (!board || !flasher || !parsed || !propsOff || !backupT
 assert(page.includes('const canFlashLive =\n    !!board &&'));
 assert(page.includes('const canFlashMock =\n    !!board &&'));
 console.log('PASS explicit selection: empty initial target, no first-board fallback, live/mock/action guards');
+
+assert.deepEqual(BOARD_OPTIONS.filter(b=>b.imageProfile).map(b=>b.boardId).sort(),['custom_f405xg_usb','mltempf4']);
+assert(BOARD_OPTIONS.filter(b=>b.imageProfile).every(b=>b.mcu==='F405'&&!b.motorOutput));
