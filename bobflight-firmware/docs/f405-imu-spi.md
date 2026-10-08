@@ -2,7 +2,7 @@
 
 Goal: reuse the existing shared `drivers/gyro.c` for the Motolab Tempest F4,
 then expose sensor telemetry through the normal shared firmware. This increment
-adds the isolated F405 SPI transport and its shared-HAL bridge. It does **not**
+adds the isolated F405 SPI transport and its shared-HAL bridge. The next increment adds GPIO preparation and tests the connected GPIO/SPI/shared-driver chain. It does **not**
 change the working USB-only image or register an operational main F405 target.
 
 ## Routing evidence, not physical qualification
@@ -45,9 +45,28 @@ At nominal 84 MHz APB2 the first supported setting is /128, or 656250 Hz. This
 is a configured nominal rate, not a measured hardware frequency or loop budget.
 
 No fast loop-rate eligibility, arming policy, motor capability or flight-ready
-status is added. GPIO/MMIO bring-up, board registration, sensor CLI integration,
+status is added. Normal-application GPIO/HAL integration, board registration, sensor CLI integration,
 nonvolatile settings, receiver/UART backends and safe software bootloader entry
 remain later integration work. Do not flash a component test executable.
+
+## GPIO preparation increment
+
+`gyro_gpio_prepare` accepts caller-owned board metadata and validates the narrow
+SPI1 PA5/PA6/PA7, PA4 CS, PC5 data-ready route before any MMIO access. It does not
+hardcode a board ID or silently accept another pin mapping. Initialization is
+one-shot per reset. It verifies the inactive PA4 output latch before enabling
+output mode and preserves unrelated GPIO fields, including USB and PA9.
+The CS callback remains inert until every preparation readback succeeds; runtime
+calls permit interrupts. Failed writes may leave partial configuration, not a
+claimed rollback or proof of physical pin state. Data ready is polled through
+the existing sensor driver, not an enabled EXTI interrupt.
+
+Run `python3 tests/test_f405_gyro_gpio.py` for isolation/negative-path tests and
+`python3 tests/test_f405_sensor_chain.py` to repeat SPI/shared-gyro tests with real
+compiled GPIO preparation and BSRR chip select rather than simulated CS callbacks.
+These use modeled registers and sensor responses. They are not a hardware test
+or a new flashable image. [Shared-application integration](f405-main-integration.md)
+records the remaining startup/HAL work.
 
 ## Verification and remaining work
 

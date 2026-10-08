@@ -14,6 +14,7 @@ SPI=0x40013000
 FLAGS=['-std=c11','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-mcpu=cortex-m4','-mthumb','-mfpu=fpv4-sp-d16','-mfloat-abi=hard','-Os','-ffunction-sections','-fdata-sections']
 
 class F405SPI(unittest.TestCase):
+ WITH_GPIO=False
  @classmethod
  def setUpClass(cls):
   cls.temp=tempfile.TemporaryDirectory(prefix='bf-f405-spi-');cls.addClassCleanup(cls.temp.cleanup)
@@ -21,7 +22,9 @@ class F405SPI(unittest.TestCase):
   sources=[HAL/x for x in ('startup_component.c','spi_component.c','gyro_spi_bridge.c')]
   sources += [ROOT/'src'/x for x in ('drivers/gyro.c','drivers/sensor_calibration.c','flight/filter.c','flight/config.c','sched/loop_rate_setting.c')]
   sources += [ROOT/'tests/fixtures/f405_gyro_spi/entry.c']
+  if cls.WITH_GPIO:sources.append(HAL/'gyro_gpio_prepare.c')
   cmd=['arm-none-eabi-gcc',*FLAGS,'-DBF_F4_COMPONENT_F405XG','-DBOBFLIGHT_HOST=0','-I'+str(ROOT/'src'),'-nostdlib',*[str(p) for p in sources],'-Wl,-L,'+str(ROOT/'cmake/components'),'-Wl,-T,'+str(ROOT/'cmake/components/f405xg.ld'),'-Wl,--gc-sections,--build-id=none','-Wl,--start-group','-lc','-lm','-lgcc','-Wl,--end-group','-o',str(cls.elf)]
+  if cls.WITH_GPIO:cmd.insert(1,'-DBF_F405_TEST_REAL_GPIO')
   r=subprocess.run(cmd,capture_output=True,text=True,timeout=60)
   if r.returncode:raise RuntimeError(r.stdout+r.stderr)
 
@@ -30,6 +33,7 @@ class F405SPI(unittest.TestCase):
    elf=ELFFile(f);symbols={s.name:int(s['st_value']) for s in elf.get_section_by_name('.symtab').iter_symbols()}
    cpu=Uc(UC_ARCH_ARM,UC_MODE_THUMB|UC_MODE_MCLASS);cpu.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_M4)
    for base,size in [(0x08000000,0x100000),(0x20000000,0x20000),(0x10000000,0x10000),(0xe000e000,0x1000),(0x40013000,0x1000),(0x40023000,0x1000)]:cpu.mem_map(base,size)
+   if self.WITH_GPIO:cpu.mem_map(0x40020000,0x1000)
    for seg in elf.iter_segments():
     if seg['p_type']=='PT_LOAD' and seg['p_filesz']:cpu.mem_write(seg['p_paddr'],seg.data())
    sp,pc=struct.unpack('<II',elf.get_section_by_name('.isr_vector').data()[:8]);cpu.reg_write(UC_ARM_REG_SP,sp)
@@ -38,6 +42,10 @@ class F405SPI(unittest.TestCase):
    sensor=bytearray(128);sensor[0x75]=0x69 if case==1 else 0x68;sensor[0x3a]=1
    for addr,value in [(0x3b,2048),(0x3d,1024),(0x3f,4096),(0x43,164),(0x45,-328),(0x47,492)]:sensor[addr:addr+2]=struct.pack('>h',value)
    reg={SPI:0,SPI+4:0,SPI+8:2,SPI+12:0,SPI+28:0,0x40023844:0}
+   if self.WITH_GPIO:
+    reg[0x40023830]=0
+    for base in (0x40020000,0x40020800):
+     for off in (0,4,8,12,16,20,24,28,32,36):reg[base+off]=0
    if mode=='active_spi':reg[SPI]=0x347
    selected=False;offset=0;address=0;reading=False;pending=False;ovr_dr=False;ovr_cleared=False
    tx_count=0;status_reads=0;done=[];writes=[]
@@ -48,10 +56,14 @@ class F405SPI(unittest.TestCase):
    def write(uc,access,addr,size,value,user):
     nonlocal selected,offset,address,reading,pending,tx_count
     if addr==symbols['fixture_cs']:
-     selected=bool(value);offset=0
+     if not self.WITH_GPIO:selected=bool(value);offset=0
      return
     if 0x40000000<=addr<0x50000000:
      self.assertIn(addr,reg,('unexpected peripheral write',hex(addr)));writes.append((addr,size,value))
+     if self.WITH_GPIO and addr==0x40020018:
+      self.assertIn(value,(16,1<<20))
+      reg[0x40020014]=(reg[0x40020014]|(value&65535))&~(value>>16)
+      selected=not bool(reg[0x40020014]&16);offset=0;return
      if addr==SPI+12:
       self.assertEqual(size,1);self.assertTrue(selected);self.assertTrue(reg[SPI]&64)
       tx_count+=1
@@ -92,6 +104,7 @@ class F405SPI(unittest.TestCase):
    cpu.hook_add(UC_HOOK_CODE,oncode)
    cpu.hook_add(UC_HOOK_MEM_WRITE,write)
    for lo,hi in [(SPI,SPI+0xff),(0x40023800,0x400238ff)]:cpu.hook_add(UC_HOOK_MEM_READ,load,begin=lo,end=hi)
+   if self.WITH_GPIO:cpu.hook_add(UC_HOOK_MEM_READ,load,begin=0x40020000,end=0x40020fff)
    cpu.emu_start(pc,0,count=600000)
    self.assertTrue(done,'component exceeded instruction budget');self.assertEqual(read('fixture_error'),0,'C assertion line')
    self.assertEqual(cpu.reg_read(UC_ARM_REG_PRIMASK),int(case>=200 and case!=203),'PRIMASK changed unexpectedly')
