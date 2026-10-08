@@ -21,7 +21,7 @@ Optional `BOBFLIGHT_TOOL_ROOT` points at the directory containing existing `arm-
 
 From the configurator directory: `npm ci`, `npm --prefix protocol run build`, then `npm run dev`. The dev server defaults to `127.0.0.1:5173`. `start-configurator-builder.ps1` at repository root performs these frontend preparation steps on Windows; pass `-ToolRoot` if the tools are stored in another checkout. It does not compile or flash firmware at launch.
 
-Select a target, then Build HEX. A clean committed source tree is required before and after compilation. Failed builds clear the previously loaded image and never reuse an old output. Successful results show the source revision, SHA-256 of the downloaded HEX text, profile and bounded compiler log. The browser checks transfer integrity and passes the image into the existing target validation. A checksum is not a signature or hardware qualification.
+Select a target, then Build HEX. A clean committed source tree is required before and after compilation. The two generated catalog sources use explicit LF checkout rules so Windows newline conversion does not create false dirty-source failures. Real changes to those files still block a build. Failed builds clear the previously loaded image and never reuse an old output. Successful results show the source revision, SHA-256 of the downloaded HEX text, profile and bounded compiler log. The browser checks transfer integrity and passes the image into the existing target validation. A checksum is not a signature or hardware qualification.
 
 ## Scope and protections
 

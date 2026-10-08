@@ -84,3 +84,6 @@ __pycache__/
 
 # Local compiler UI startup, never automatic flashing.
 !/start-configurator-builder.ps1
+
+# Explicit cross-platform rules for generated source files.
+!/.gitattributes

@@ -201,6 +201,8 @@ jobs:
           node-version: 20
       - name: Local builder request guards on Windows
         run: node bobflight-configurator/scripts/test-local-hex-builder.mjs
+      - name: Generated catalogs stay clean with Windows line endings
+        run: python bobflight-configurator/scripts/test-generated-checkout.py
       - name: Validate registry and atomic artifact publication
         run: |
           python bobflight-firmware/tests/test_target_registry.py
