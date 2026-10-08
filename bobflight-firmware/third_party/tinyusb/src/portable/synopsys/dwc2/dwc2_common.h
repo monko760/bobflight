@@ -96,18 +96,34 @@ void dwc2_core_handle_common_irq(uint8_t rhport, bool in_isr);
 //--------------------------------------------------------------------+
 // DFIFO
 //--------------------------------------------------------------------+
-TU_ATTR_ALWAYS_INLINE static inline void dfifo_flush_tx(dwc2_regs_t* dwc2, uint8_t fnum) {
-  // flush TX fifo and wait for it cleared (BobFlight: bounded spin)
-  uint32_t spin = 1000000u;
+// BobFlight: finite polling work, with explicit failure on a stuck flush.
+// Production keeps the previous one-million-read ceiling. A smaller test-only
+// override exercises exact boundary behavior without long emulation runs.
+#ifndef DWC2_BF_FIFO_SPIN_MAX
+#define DWC2_BF_FIFO_SPIN_MAX 1000000u
+#endif
+#if DWC2_BF_FIFO_SPIN_MAX < 1 || DWC2_BF_FIFO_SPIN_MAX > 1000000u
+#error "DWC2_BF_FIFO_SPIN_MAX must be in 1..1000000"
+#endif
+
+TU_ATTR_ALWAYS_INLINE static inline bool dfifo_flush_tx(dwc2_regs_t* dwc2, uint8_t fnum) {
   dwc2->grstctl = GRSTCTL_TXFFLSH | (fnum << GRSTCTL_TXFNUM_Pos);
-  while (spin-- && (0 != (dwc2->grstctl & GRSTCTL_TXFFLSH_Msk))) {}
+  for (uint32_t remaining = DWC2_BF_FIFO_SPIN_MAX; remaining != 0u; remaining--) {
+    if ((dwc2->grstctl & GRSTCTL_TXFFLSH_Msk) == 0u) {
+      return true;
+    }
+  }
+  return false;
 }
 
-TU_ATTR_ALWAYS_INLINE static inline void dfifo_flush_rx(dwc2_regs_t* dwc2) {
-  // flush RX fifo and wait for it cleared (BobFlight: bounded spin)
-  uint32_t spin = 1000000u;
+TU_ATTR_ALWAYS_INLINE static inline bool dfifo_flush_rx(dwc2_regs_t* dwc2) {
   dwc2->grstctl = GRSTCTL_RXFFLSH;
-  while (spin-- && (0 != (dwc2->grstctl & GRSTCTL_RXFFLSH_Msk))) {}
+  for (uint32_t remaining = DWC2_BF_FIFO_SPIN_MAX; remaining != 0u; remaining--) {
+    if ((dwc2->grstctl & GRSTCTL_RXFFLSH_Msk) == 0u) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void dfifo_read_packet(dwc2_regs_t* dwc2, uint8_t* dst, uint16_t len);

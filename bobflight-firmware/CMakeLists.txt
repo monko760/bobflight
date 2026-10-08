@@ -345,6 +345,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
       ${CMAKE_SOURCE_DIR}/tests/test_f405_usb_prepare.py)
     add_test(NAME f405_usb_time COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_SOURCE_DIR}/tests/test_f405_usb_time.py)
+    add_test(NAME usb_fifo_init COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/tests/test_usb_fifo_init.py)
   else()
     message(STATUS "F4 startup component tests need ARM GCC and tests/f4-component-requirements.txt; dedicated CI runs them")
   endif()

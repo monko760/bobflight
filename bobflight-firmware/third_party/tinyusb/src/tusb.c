@@ -91,7 +91,10 @@ bool tusb_rhport_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
       .role = TUSB_ROLE_DEVICE,
       .speed = TUD_OPT_HIGH_SPEED ? TUSB_SPEED_HIGH : TUSB_SPEED_FULL
     };
-    TU_ASSERT ( tud_rhport_init(TUD_OPT_RHPORT, &dev_init) );
+    if (!tud_rhport_init(TUD_OPT_RHPORT, &dev_init)) {
+      _tusb_rhport_role[TUD_OPT_RHPORT] = TUSB_ROLE_INVALID;
+      return false;
+    }
     _tusb_rhport_role[TUD_OPT_RHPORT] = TUSB_ROLE_DEVICE;
     #endif
 
@@ -115,7 +118,11 @@ bool tusb_rhport_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
 
   #if CFG_TUD_ENABLED
   if (rh_init->role == TUSB_ROLE_DEVICE) {
-    TU_ASSERT(tud_rhport_init(rhport, rh_init));
+    // BobFlight: do not retain an active device role after failed startup.
+    if (!tud_rhport_init(rhport, rh_init)) {
+      _tusb_rhport_role[rhport] = TUSB_ROLE_INVALID;
+      return false;
+    }
   }
   #endif
 

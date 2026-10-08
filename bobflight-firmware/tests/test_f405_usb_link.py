@@ -37,7 +37,7 @@ class F405USBLink(unittest.TestCase):
         cls.tmp=tempfile.TemporaryDirectory(prefix='bf-f405-usb-link-');cls.addClassCleanup(cls.tmp.cleanup)
         cls.dir=Path(cls.tmp.name);cls.images={}
         cls.includes=['-I'+str(p) for p in (ROOT/'src',HAL,TUSB,ROOT/'third_party/cmsis-core/Include')]
-        cls.defs=['-DBF_F4_COMPONENT_F405XG','-DCFG_TUSB_MCU=OPT_MCU_STM32F4']
+        cls.defs=['-DBF_F4_COMPONENT_F405XG','-DCFG_TUSB_MCU=OPT_MCU_STM32F4'] + getattr(cls,'EXTRA_DEFS',[])
         sources=[HAL/n for n in ('startup_component.c','clock_plan.c','clock_start.c','clock_mmio.c','timebase.c','usb_time.c')]
         sources += [ROOT/'tests/fixtures/f405_timebase/entry.c',ROOT/'tests/fixtures/f405_usb_link/hooks.c']
         sources += [TUSB/n for n in ('tusb.c','common/tusb_fifo.c','device/usbd.c','class/cdc/cdc_device.c',

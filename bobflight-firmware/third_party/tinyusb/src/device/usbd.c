@@ -535,7 +535,13 @@ bool tud_configure(uint8_t rhport, uint32_t cfg_id, const void* cfg_param) {
   return dcd_configure(rhport, cfg_id, cfg_param);
 }
 
+// BobFlight: a partial controller start is not a recoverable initialized state.
+// Require a cold software restart after DCD initialization failure. Do not retry
+// over partially initialized class/queue/PHY state or claim that deinit cleans it.
+static bool _bf_dcd_init_failed;
+
 bool tud_rhport_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
+  TU_VERIFY(!_bf_dcd_init_failed);
   if (tud_inited()) {
     return true; // skip if already initialized
   }
@@ -595,13 +601,18 @@ bool tud_rhport_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
   _usbd_rhport = rhport;
 
   // Init device controller driver
-  TU_ASSERT(dcd_init(rhport, rh_init));
+  if (!dcd_init(rhport, rh_init)) {
+    _usbd_rhport = RHPORT_INVALID;
+    _bf_dcd_init_failed = true;
+    return false;
+  }
   dcd_int_enable(rhport);
 
   return true;
 }
 
 bool tud_deinit(uint8_t rhport) {
+  TU_VERIFY(!_bf_dcd_init_failed);
   if (!tud_inited()) {
     return true; // skip if not initialized
   }
