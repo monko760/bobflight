@@ -81,3 +81,6 @@ __pycache__/
 # Generic target definitions and build tooling.
 !/build-target.ps1
 !/TARGETS.md
+
+# Local compiler UI startup, never automatic flashing.
+!/start-configurator-builder.ps1

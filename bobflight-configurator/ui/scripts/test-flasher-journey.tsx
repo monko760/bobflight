@@ -1,5 +1,7 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import assert from "node:assert/strict";
+import { webcrypto, createHash } from "node:crypto";
+import { File as NodeFile } from "node:buffer";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
@@ -106,7 +108,7 @@ async function main() {
     const pageText = visibleText(container);
     assert.ok(pageText.includes("Stage 1: Safety, Backup & Recovery Setup"));
     assert.ok(pageText.includes("Stage 2: Select Target Board"));
-    assert.ok(pageText.includes("Stage 3: Load Local Firmware"));
+    assert.ok(pageText.includes("Stage 3: Build or Load Firmware"));
     assert.ok(pageText.includes("Stage 4: Enter DFU Mode & Disconnect CDC"));
     assert.ok(pageText.includes("Stage 5: Select & Confirm DFU Device"));
     assert.ok(pageText.includes("Stage 6: Execute Flash"));
@@ -174,6 +176,43 @@ async function main() {
     assert.ok(isDisabled(flashBtn));
 
     root.unmount();
+  });
+
+  await test("Build HEX feeds the importer, locks selection, never flashes and clears old images on failure", async () => {
+    (globalThis as Record<string, unknown>).__setupTestHost = {connectionStatus:"disconnected",setPostFlashGate:()=>{},clearPostFlashGateAfterReconnect:()=>{}};
+    if (!globalThis.crypto) Object.defineProperty(globalThis,"crypto",{value:webcrypto,configurable:true});
+    const oldFile=globalThis.File, oldFetch=globalThis.fetch;
+    (globalThis as unknown as {File:unknown}).File=NodeFile;
+    let requests=0, finish: (value:unknown)=>void = ()=>{};
+    globalThis.fetch=(async (_url:unknown, init?:RequestInit) => {
+      if(init?.method==="GET")return {ok:true,json:async()=>({protocol:1,token:"fixture"})};
+      requests++; return await new Promise(resolve=>{finish=resolve;});
+    }) as typeof fetch;
+    const states:boolean[]=[];
+    const root=createRoot(container as never);
+    try {
+      flushSync(()=>root.render(<FlasherPage onBusyChange={v=>states.push(v)}/>));
+      await selectOption(selectById("board"),"tmotor_f7_v2");
+      assert.equal(requests,0,"selection must not start a build");
+      await click(buttonByText("Build HEX"));
+      assert.equal(requests,1);
+      assert.ok(isDisabled(selectById("board")));
+      assert.ok(isDisabled(inputById("hex-file")));
+      assert.ok(isDisabled(buttonByText("Flash")));
+      // Directly invoke the same handler to model two queued clicks.
+      await click(buttonByText("Building HEX"));assert.equal(requests,1);
+      finish({ok:true,json:async()=>({fileName:"bobflight-tmotor_f7_v2-main.hex",hex:F722_HEX,sha256:createHash("sha256").update(F722_HEX).digest("hex"),sourceRevision:"a".repeat(40),profile:"main",boardId:"tmotor_f7_v2"})});
+      assert.ok(await waitFor(()=>visibleText(container).includes("Selected: bobflight-tmotor_f7_v2-main.hex")));
+      assert.ok(await waitFor(()=>!isDisabled(selectById("board"))));
+      assert.ok(isDisabled(buttonByText("Flash")),"build cannot bypass flash safety controls");
+      assert.deepEqual(states,[true,false]);
+      await click(buttonByText("Build HEX"));
+      assert.ok(!visibleText(container).includes("Selected: bobflight-tmotor_f7_v2-main.hex"));
+      finish({ok:false,json:async()=>({error:"Compiler unavailable"})});
+      assert.ok(await waitFor(()=>visibleText(container).includes("Compiler unavailable")));
+      assert.ok(isDisabled(buttonByText("Flash")));
+      assert.deepEqual(states,[true,false,true,false]);
+    } finally {flushSync(()=>root.unmount());globalThis.fetch=oldFetch;globalThis.File=oldFile;}
   });
 
   console.log(`\nAll ${passed} Flasher Journey tests passed successfully!`);

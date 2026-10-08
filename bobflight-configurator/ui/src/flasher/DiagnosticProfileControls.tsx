@@ -16,7 +16,7 @@ export function DiagnosticProfileControls(p:Props) {
   return <div className="banner-warn" style={{marginTop:'0.5rem'}}>
     <strong>Experimental USB-only profile, not normal flight firmware.</strong>
     {p.custom&&<>
-      <p>Basic defaults leave motors, sensors, receiver, UARTs and settings storage unassigned. These fields check a prebuilt image; they do not rewrite it.</p>
+      <p>Basic defaults leave motors, sensors, receiver, UARTs and settings storage unassigned. These fields select the supported basic build profile and validate imported images; they do not rewrite an imported HEX.</p>
       <label htmlFor="custom-mcu">Physical MCU</label>
       <select id="custom-mcu" value={p.mcu} disabled={p.disabled} onChange={e=>{p.onMcu(e.target.value);p.onConfirm(false);}}>
         <option value="">Select the actual MCU</option>{catalog.mcus.map(m=><option key={m.id} value={m.part}>{m.part} ({m.family})</option>)}<option value="other">Other / not identified</option>
@@ -33,6 +33,6 @@ export function DiagnosticProfileControls(p:Props) {
     </>}
     <p>STM32F405xG, 1 MiB flash, 8 MHz HSE, 3.3 V. USB on PA11/PA12; PA9 unchanged. No motors, sensors, configuration writes or software bootloader command. Use USB power only with no attached peripherals. Motolab values are reference assumptions, not automatic board detection.</p>
     <label><input id="diagnostic-assumptions" type="checkbox" checked={p.confirmed} disabled={p.disabled||!!problem} onChange={e=>p.onConfirm(e.target.checked)}/> I confirm these MCU/flash/crystal/USB-routing assumptions match my board and independent BOOT recovery works.</label>
-    <p>The flasher checks embedded diagnostic identity and the DFU flash layout before erase. Layout is not exact chip identity. Your existing MLTEMPF4 diagnostic HEX can be used; no firmware rebuild is needed.</p>
+    <p>The flasher checks embedded diagnostic identity and the DFU flash layout before erase. Layout is not exact chip identity. Build a matching diagnostic below or reuse an existing matching HEX. Other MCU/crystal combinations remain unavailable until their backends are implemented.</p>
   </div>;
 }

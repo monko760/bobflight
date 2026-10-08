@@ -26,6 +26,7 @@ import {
 } from "../flasher";
 import { useHost } from "../hooks/useHost";
 import { TargetCatalog } from "../targets/TargetCatalog";
+import { HexBuilder } from "../flasher/HexBuilder";
 import { DiagnosticConsole } from "../flasher/DiagnosticConsole";
 import { DiagnosticProfileControls, customProfileProblem } from "../flasher/DiagnosticProfileControls";
 
@@ -138,6 +139,9 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   const [parseError, setParseError] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const fileSeqRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [buildBusy, setBuildBusy] = useState(false);
+  const builderRef = useRef(false);
 
   const [deviceLabel, setDeviceLabel] = useState<string | null>(null);
   const [claimedVid, setClaimedVid] = useState<number | null>(null);
@@ -165,11 +169,23 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     [boardId],
   );
 
+  const onBuildBusy = useCallback((active: boolean) => {
+    builderRef.current = active; setBuildBusy(active);
+    if (active) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      fileSeqRef.current++; loadingRef.current = false; setFileLoading(false);
+      setParsed(null); setFileName(null); setFileSize(null); setParseError(null);
+      setBoardMatchConfirmed(false); setShowReconnectHint(false); setMockFlashComplete(false);
+      setProgress({phase:"idle",bytesWritten:0,bytesTotal:0});
+    }
+    onBusyChange?.(active || operationRef.current);
+  }, [onBusyChange]);
+
   const diagnostic = board?.imageProfile === 'f405-usb-diagnostic';
   const customBoard = boardId === 'custom_f405xg_usb';
   const customProblem = customProfileProblem(customBoard,customMcu,customFlash,customHse);
   const onDiagnosticActive = useCallback((active:boolean)=>{
-    setDiagnosticConsoleActive(active);onBusyChange?.(active||operationRef.current);
+    setDiagnosticConsoleActive(active);onBusyChange?.(active||operationRef.current||builderRef.current);
   },[onBusyChange]);
   const [protocolReady, setProtocolReady] = useState(() => protocolFlasherReady());
   const webUsbOk = useMemo(() => isWebUsbAvailable(), []);
@@ -252,16 +268,16 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   useEffect(() => () => { fileSeqRef.current++; }, []);
   useEffect(() => () => { flasher?.cancel(); }, [flasher]);
   useEffect(() => {
-    if (!flashing) return;
+    if (!flashing && !buildBusy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [flashing]);
+  }, [flashing, buildBusy]);
   const cdcConnectedLive = isLive && connectionStatus === "connected";
 
   const onPickFile = useCallback(
-    async (file: File | null) => {
-      if (flashing || diagnosticConsoleActive || operationRef.current) return;
+    async (file: File | null, fromBuilder = false) => {
+      if (flashing || diagnosticConsoleActive || operationRef.current || (builderRef.current && !fromBuilder)) return;
       const currentSeq = ++fileSeqRef.current;
       setBoardMatchConfirmed(false);
       setParseError(null);
@@ -309,7 +325,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   );
 
   async function onRequestDevice() {
-    if (flashing || diagnosticConsoleActive || pickerRef.current || operationRef.current || !isLive || liveDisabledReason || cdcConnectedLive) return;
+    if (builderRef.current || flashing || diagnosticConsoleActive || pickerRef.current || operationRef.current || !isLive || liveDisabledReason || cdcConnectedLive) return;
     if (!flasher?.requestDevice) {
       setError("Device picker not available on this flasher");
       return;
@@ -346,7 +362,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   }
 
   async function onFlash() {
-    if (flashing || diagnosticConsoleActive || pickerRef.current || operationRef.current || loadingRef.current) return;
+    if (builderRef.current || flashing || diagnosticConsoleActive || pickerRef.current || operationRef.current || loadingRef.current) return;
     if (!board || !flasher || !parsed || !propsOff || !backupTaken) return;
     if (diagnostic && !diagnosticAssumptions) return;
 
@@ -440,6 +456,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   const canFlashLive =
     !!board &&
     !diagnosticConsoleActive &&
+    !buildBusy &&
     (!diagnostic || diagnosticAssumptions) &&
     !!flasher &&
     !!parsed &&
@@ -458,6 +475,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   const canFlashMock =
     !!board &&
     !diagnosticConsoleActive &&
+    !buildBusy &&
     (!diagnostic || diagnosticAssumptions) &&
     !!flasher &&
     !!parsed &&
@@ -571,7 +589,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
               id="props-off"
               type="checkbox"
               checked={propsOff}
-              disabled={flashing || diagnosticConsoleActive}
+              disabled={flashing || buildBusy || diagnosticConsoleActive}
               onChange={(e) => setPropsOff(e.target.checked)}
             />
             Propellers removed, battery disconnected / craft safe: required
@@ -587,7 +605,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
               id="backup-taken"
               type="checkbox"
               checked={backupTaken}
-              disabled={flashing || diagnosticConsoleActive}
+              disabled={flashing || buildBusy || diagnosticConsoleActive}
               onChange={(e) => setBackupTaken(e.target.checked)}
             />
             Saved any readable configuration (or accept that no backup is available) and confirmed independent recovery: required
@@ -604,7 +622,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
             <select
               id="board"
               value={boardId}
-              disabled={flashing || pickerBusy || diagnosticConsoleActive}
+              disabled={flashing || buildBusy || pickerBusy || diagnosticConsoleActive}
               onChange={(e) => setBoardId(e.target.value as BoardId)}
             >
               <option value="" disabled>Select a known board or custom profile</option>
@@ -620,23 +638,27 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
             </p>
           </div>
         </div>
-        {diagnostic && <DiagnosticProfileControls custom={customBoard} mcu={customMcu} flash={customFlash} hse={customHse} confirmed={diagnosticAssumptions} disabled={flashing||pickerBusy||diagnosticConsoleActive} onMcu={setCustomMcu} onFlash={setCustomFlash} onHse={setCustomHse} onConfirm={setDiagnosticAssumptions}/>}
+        {diagnostic && <DiagnosticProfileControls custom={customBoard} mcu={customMcu} flash={customFlash} hse={customHse} confirmed={diagnosticAssumptions} disabled={flashing||buildBusy||pickerBusy||diagnosticConsoleActive} onMcu={setCustomMcu} onFlash={setCustomFlash} onHse={setCustomHse} onConfirm={setDiagnosticAssumptions}/>}
       </section>
 
       {/* Stage 3 */}
       <section className="preflight" aria-label="Stage 3: Firmware File" style={{ marginTop: "0.75rem" }}>
-        <h3>Stage 3: Load Local Firmware (.hex)</h3>
+        <h3>Stage 3: Build or Load Firmware (.hex)</h3>
+        <HexBuilder boardId={boardId} customMcu={customMcu} customFlash={customFlash} customHse={customHse}
+          disabled={flashing || pickerBusy || fileLoading || diagnosticConsoleActive || cdcConnectedLive || demoMode}
+          onBusyChange={onBuildBusy} onLoad={(file) => onPickFile(file, true)} />
         <p className="muted" style={{ marginTop: "0.25rem" }}>
-          Load a local Intel HEX file built for your exact target board. No remote download is implemented; filenames do not guarantee target compatibility.
+          Build from this local source checkout, or import an existing Intel HEX for your exact target. Building never flashes a controller; filenames alone do not prove compatibility.
         </p>
         <div className="row" style={{ marginTop: "0.5rem" }}>
           <div style={{ flex: 2 }}>
             <label htmlFor="hex-file">Firmware File (.hex)</label>
             <input
               id="hex-file"
+              ref={fileInputRef}
               type="file"
               accept=".hex,application/octet-stream,text/plain"
-              disabled={flashing || diagnosticConsoleActive}
+              disabled={flashing || buildBusy || diagnosticConsoleActive}
               onChange={(e) => {
                 const f = e.target.files?.[0] ?? null;
                 void onPickFile(f);
@@ -692,7 +714,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
               id="use-mock-flash"
               type="checkbox"
               checked={demoMode}
-              disabled={flashing || pickerBusy || diagnosticConsoleActive}
+              disabled={flashing || buildBusy || pickerBusy || diagnosticConsoleActive}
               onChange={(e) => setUseMock(e.target.checked)}
             />
             Demo mode (mock DFU simulation: no USB write)
@@ -709,7 +731,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
                 id="mock-understood"
                 type="checkbox"
                 checked={mockUnderstood}
-                disabled={flashing || diagnosticConsoleActive}
+                disabled={flashing || buildBusy || diagnosticConsoleActive}
                 onChange={(e) => setMockUnderstood(e.target.checked)}
               />
               I understand this is demo / mock and will not write firmware to hardware: required for demo
@@ -723,7 +745,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
               <button
                 type="button"
                 className="ghost"
-                disabled={flashing || pickerBusy || diagnosticConsoleActive || cdcConnectedLive || !flasher?.requestDevice || !!liveDisabledReason}
+                disabled={flashing || buildBusy || pickerBusy || diagnosticConsoleActive || cdcConnectedLive || !flasher?.requestDevice || !!liveDisabledReason}
                 onClick={() => void onRequestDevice()}
               >
                 {pickerBusy ? "Selecting device…" : "Select DFU device…"}
@@ -749,7 +771,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
                   id="board-match-confirmed"
                   type="checkbox"
                   checked={boardMatchConfirmed}
-                  disabled={flashing || diagnosticConsoleActive}
+                  disabled={flashing || buildBusy || diagnosticConsoleActive}
                   onChange={(e) => setBoardMatchConfirmed(e.target.checked)}
                 />
                 I confirm this HEX matches my exact board target (0483:DF11 is generic DFU, not board ID) and I have a recovery method: required for live
@@ -825,7 +847,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
           <h3>Stage 7: Cold restart &amp; read-only diagnostic check</h3>
           <p>After successful readback verification: unplug USB, remove the BOOT bridge, then reconnect USB. This image needs cold-reset state, not a direct ROM bootloader jump. Keep the board on USB power only.</p>
           <p>Expect the F405 diagnostic banner, then status should report stage=8, error=0 and increasing uptime. This identifies the reference firmware, not the physical board. Normal settings and arming controls remain locked. Use only the diagnostic console below, not normal Connect.</p>
-          <DiagnosticConsole disabled={demoMode||flashing||pickerBusy||cdcConnectedLive||!diagnosticAssumptions||!!customProblem} onActiveChange={onDiagnosticActive}/>
+          <DiagnosticConsole disabled={demoMode||flashing||buildBusy||pickerBusy||cdcConnectedLive||!diagnosticAssumptions||!!customProblem} onActiveChange={onDiagnosticActive}/>
         </> : <>
         <h3>Stage 7: Reconnect & Restore Configuration</h3>
         <p className="muted" style={{ marginTop: "0.25rem" }}>
