@@ -13,6 +13,7 @@
 
 import type { ParsedHex } from "./intel-hex";
 import { assertMcuGate, normalizeFirmware } from "./mcu-gate";
+import { readDfuInterfaceName } from "./dfu-descriptors";
 import { assertF405DfuLayout } from "./f405-diagnostic";
 import { planSectorErases } from "./flash-sectors";
 import {
@@ -594,7 +595,13 @@ export class WebUsbDfuFlasher implements Flasher {
       if (opts?.imageProfile === "f405-usb-diagnostic") {
         const selected = device.configuration?.interfaces.find(i => i.interfaceNumber === this.interfaceNumber);
         const alternate = selected?.alternates.find(a => a.alternateSetting === DEFAULT_ALT);
-        assertF405DfuLayout(alternate?.interfaceName);
+        let name = alternate?.interfaceName;
+        if (name == null || name.trim() === "") {
+          name = await readDfuInterfaceName(device, device.configuration!.configurationValue,
+            this.interfaceNumber, DEFAULT_ALT, () => this.throwIfCancelled(0, total));
+        }
+        assertF405DfuLayout(name);
+        this.throwIfCancelled(0, total);
       }
       await this.prepareDevice(device);
       this.throwIfCancelled(0, total);

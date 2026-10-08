@@ -17,7 +17,7 @@
     "smoke": "tsc && node dist/smoke/smoke.js",
     "clean": "rm -rf dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:dfu": "tsc && node tests/dfu.cjs",
+    "test:dfu": "tsc && node tests/dfu-descriptors.cjs && node tests/dfu.cjs",
     "smoke:settings": "tsc && node dist/smoke/smoke-settings.js",
     "smoke:webserial": "tsc && node dist/smoke/smoke-webserial-node.js",
     "smoke:flasher": "tsc && node dist/smoke/smoke-flasher.js",
