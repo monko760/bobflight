@@ -25,6 +25,9 @@
  */
 
 #include "tusb_option.h"
+#if CFG_TUSB_MCU == OPT_MCU_STM32F4 && defined(BF_F4_COMPONENT_F405XG)
+#include "hal/stm32f4/usb_time.h"
+#endif
 
 #define DWC2_COMMON_DEBUG   2
 
@@ -92,6 +95,12 @@ static bool phy_fs_init(dwc2_regs_t* dwc2) {
   if (!reset_core(dwc2)) {
     return false;
   }
+
+  #if CFG_TUSB_MCU == OPT_MCU_STM32F4 && defined(BF_F4_COMPONENT_F405XG)
+  // Old core requires at least three PHY clocks after reset. One measured
+  // microsecond is a conservative margin for the configured 48 MHz clock.
+  TU_ASSERT(bf_f405_usb_wait_us(1u, 1000000u));
+  #endif
 
   // USB turnaround time is critical for certification where long cables and 5-Hubs are used.
   // So if you need the AHB to run at less than 30 MHz, and if USB turnaround time is not critical,

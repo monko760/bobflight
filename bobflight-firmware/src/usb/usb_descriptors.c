@@ -108,7 +108,11 @@ static void serial_from_uid(void)
 static char const *string_desc_arr[] = {
     (const char[]){0x09, 0x04}, /* English (0x0409) */
     "BobFlight",
+#if defined(BF_F405_USB_DIAGNOSTIC)
+    "BobFlight F405 USB test",
+#else
     "BobFlight CDC",
+#endif
     NULL, /* index 3 - filled from UID at runtime */
     "BobFlight Serial",
 };

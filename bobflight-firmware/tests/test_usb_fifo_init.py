@@ -5,6 +5,7 @@ import subprocess
 import unittest
 from unicorn import UC_HOOK_MEM_READ
 import test_f405_usb_link as link
+from test_f405_timebase import CYC,MASK
 
 BASE=0x50000000
 OTGINT,AHB,USB,RESET,GINTSTS,GINTMSK=BASE+4,BASE+8,BASE+12,BASE+16,BASE+20,BASE+24
@@ -23,7 +24,9 @@ class ReadyBits(link.IRQMachine):
         self.uc.mem_map(BASE,0x1000)
         self.uc.hook_add(UC_HOOK_MEM_READ,self.read,begin=BASE,end=BASE+0xfff)
         assert self.call('fixture_usb_time_bind',mask=1)==1
+        self.running_usb_time=True
     def read(self,uc,access,address,size,value,user):
+        if address==CYC and getattr(self,'running_usb_time',False):self.cycles=(self.cycles+1680000)&MASK
         if not BASE<=address<BASE+0x1000:return super().read(uc,access,address,size,value,user)
         assert address in self.usb and size==4,('unmodeled USB read',hex(address),size)
         if address==RESET and self.pending:
@@ -44,10 +47,49 @@ class ReadyBits(link.IRQMachine):
         elif address in (OTGINT,GINTSTS):self.usb[address]&=~value
         else:self.usb[address]=value
 
+DCFG,DCTL=BASE+0x800,BASE+0x804
+class DeviceModeBits(ReadyBits):
+    def __init__(self,path,stuck=False,delay_fault=False):
+        self.stuck=stuck;self.delay_fault=delay_fault;self.sequence=[]
+        super().__init__(path)
+        self.usb.update({DCFG:0,DCTL:0});self.usb[GINTSTS]=1
+    def write(self,uc,access,address,size,value,user):
+        oldmode=self.usb[GINTSTS]&1
+        super().write(uc,access,address,size,value,user)
+        if address==GINTSTS:self.usb[GINTSTS]|=oldmode # CMOD is read-only, not W1C.
+        if address==USB and value&(1<<30):
+            self.sequence.append(('force',self.cycles))
+            if not self.stuck:self.usb[GINTSTS]&=~1
+            if self.delay_fault:self.reg[0xe000e010]=5
+        if address==DCTL:self.sequence.append(('disconnect' if value&2 else 'connect',self.cycles))
+        if address==DCFG:self.sequence.append(('configure',self.cycles))
+
 class USBFifoInit(link.F405USBLink):
     EXTRA_SOURCES=[link.ROOT/'tests/fixtures/usb_fifo_init/entry.c']
     EXTRA_DEFS=['-DDWC2_BF_FIFO_SPIN_MAX=8u',
                 '-DCFG_TUSB_RHPORT0_MODE=(OPT_MODE_DEVICE|OPT_MODE_FULL_SPEED)']
+
+    def test_device_mode_settle_disconnect_and_software_init(self):
+        m=DeviceModeBits(self.images['f405'])
+        self.assertEqual(m.call('fixture_tusb_start',mask=1),1)
+        self.assertEqual([x[0] for x in m.sequence],['force','disconnect','configure','connect'])
+        times=dict(m.sequence)
+        self.assertGreaterEqual(((times['disconnect']-times['force'])&MASK)//168,50000)
+        self.assertGreaterEqual(((times['configure']-times['disconnect'])&MASK)//168,20000)
+        self.assertEqual(m.call('tud_inited'),1)
+        self.assertEqual(m.call('tud_mounted'),0) # No host or enumeration in this model.
+        self.assertEqual(m.nvic_writes,[(0xe000e108,8)])
+        self.assertEqual(m.usb[DCTL]&2,0)
+
+    def test_mode_or_delay_failure_never_reaches_device_bank(self):
+        for stuck,delay_fault in ((True,False),(False,True)):
+            with self.subTest(stuck=stuck,delay_fault=delay_fault):
+                m=DeviceModeBits(self.images['f405'],stuck,delay_fault)
+                self.assertEqual(m.call('fixture_tusb_start',mask=1),0)
+                self.assertEqual([x[0] for x in m.sequence],['force'])
+                self.assertEqual(m.call('tud_inited'),0)
+                self.assertEqual(m.nvic_writes,[])
+                self.assertFalse(any(a in (DCFG,DCTL) for op,a,v in m.usb_accesses))
 
     def test_default_and_invalid_compile_time_budgets(self):
         source=self.EXTRA_SOURCES[0]
