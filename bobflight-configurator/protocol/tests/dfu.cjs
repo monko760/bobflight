@@ -10,7 +10,7 @@ const BASE = 0x08000000;
 // Deliberately return offset DataViews, as permitted by WebUSB.
 class Device {
   vendorId = 0x0483; productId = 0xdf11; opened = true;
-  configuration = { interfaces: [{ interfaceNumber: 0, alternates: [{
+  configuration = { configurationValue: 1, interfaces: [{ interfaceNumber: 0, alternates: [{
     interfaceClass: 0xfe, interfaceSubclass: 1, alternateSetting: 0,
   }] }] };
   memory = Buffer.alloc(1024 * 1024, 0);
@@ -52,6 +52,7 @@ class Device {
     return { status:'ok', bytesWritten: this.fault === 'short-write' && s.value === 2 ? data.length-1 : data.length };
   }
   async controlTransferIn(s,n) {
+    if(s.requestType==='standard' && this.descriptors)return this.descriptors.controlTransferIn(s,n);
     let data;
     if(s.request === 3) {
       if(this.state === 6 && this.fault === 'disconnect') { const e = new Error('device disconnected'); e.name = 'NetworkError'; throw e; }
@@ -73,12 +74,17 @@ class Device {
 global.window = { isSecureContext:true };
 async function run(image, fault='', options={}) {
   const device = new Device(fault);
+  if(options.rawDescriptor)device.descriptors=require('./fixtures/dfu-descriptors.cjs').device(options.rawDescriptor);
   if(options.expectedMcu==='F405') {
     device.f405=true;
     device.configuration.interfaces[0].alternates[0].interfaceName='layout' in options ? options.layout : '@Internal Flash /0x08000000/04*016Kg,01*064Kg,07*128Kg';
   }
   Object.defineProperty(global,'navigator',{configurable:true,value:{usb:{async requestDevice(){return device;}}}});
   const flasher = new WebUsbDfuFlasher(); const phases=[];
+  if(fault==='cancel-descriptor') {
+    const original=device.descriptors.controlTransferIn.bind(device.descriptors);
+    device.descriptors.controlTransferIn=async(s,n)=>{const result=await original(s,n);flasher.cancel();return result;};
+  }
   flasher.onProgress(p => { phases.push(p); if(fault === 'cancel' && p.phase === 'writing') flasher.cancel(); });
   await flasher.requestDevice();
   let error;
@@ -122,6 +128,17 @@ function parsed(regions) { return {baseAddress:regions[0].address,regions,bytes:
   assert.deepEqual(f405.device.erases,[BASE,BASE+16384]);assert.equal(f405.device.leaves,0);
   assert(f405.device.uploads>0);assert.deepEqual(f405.device.memory.subarray(0,d.length),d);
   assert.equal(f405.device.memory[32768],0);assert.match(f405.phases.at(-1).message,/remove BOOT/);
+  for(const layout of [null,'','   ']) {
+    const raw=await run(diagnostic,'',{...diagnosticOptions,layout,rawDescriptor:{}});assert.ifError(raw.error);
+    assert.equal(raw.device.descriptors.requests.length,5);assert.deepEqual(raw.device.erases,[BASE,BASE+16384]);assert.equal(raw.device.leaves,0);
+  }
+  for(const rawDescriptor of [{stall:true},{layout:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg'}]) {
+    const bad=await run(diagnostic,'',{...diagnosticOptions,layout:null,rawDescriptor});assert(bad.error);assert.equal(bad.device.outRequests||0,0);
+  }
+  const cancelledRead=await run(diagnostic,'cancel-descriptor',{...diagnosticOptions,layout:null,rawDescriptor:{}});
+  assert.match(cancelledRead.error?.message??'',/cancelled/i);assert.equal(cancelledRead.device.outRequests||0,0);
+  const contradiction=await run(diagnostic,'',{...diagnosticOptions,layout:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg',rawDescriptor:{}});
+  assert(contradiction.error);assert.equal(contradiction.device.descriptors.requests.length,0);assert.equal(contradiction.device.outRequests||0,0);
   for(const layout of [null,'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg','@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg','@Internal Flash /0x08004000/04*016Kg,01*064Kg,07*128Kg']) {
     const bad=await run(diagnostic,'',{...diagnosticOptions,layout});assert(bad.error);
     assert.equal(bad.device.outRequests||0,0,'bad geometry must precede all DFU writes');
