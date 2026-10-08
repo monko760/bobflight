@@ -67,7 +67,7 @@ export function ReceiverPage() {
     finally{if(id===epoch.current)setPending(false);}
   }
   return <div className="panel">
-    <h2>Receiver · CRSF</h2>
+    <h2>Receiver</h2>
     <StoragePanel requiredScope="receiver_map" blocked={pending||!reading||uart!==reading.uart||map!==reading.map}/>
     <p>Remove propellers, power the receiver and turn on your transmitter. Move one control at a time and check its name and direction below.</p>
     <p role="status" className={live?"":"banner-warn"}>
@@ -85,6 +85,13 @@ export function ReceiverPage() {
     <ReceiverLinkReadout reading={responding?reading:null}/>
     <p className="muted">Once the receiver has sent link statistics, the firmware treats LQ 0, or no statistics for more than 1 second, as receiver loss: the existing failsafe cuts the motors about 250 ms later and the board does not re-arm by itself. “absent” means none were seen since boot, so loss detection uses channel frames only.</p>
     <h3>Receiver connection</h3>
+    <p><label htmlFor="receiver-protocol">Receiver protocol</label>{" "}
+      <select id="receiver-protocol" aria-describedby="receiver-protocol-help" value="CRSF" disabled={!editable}
+        onChange={()=>{/* CRSF is fixed in firmware; no protocol mutation command exists yet. */}}>
+        <option value="CRSF">CRSF</option>
+      </select>
+    </p>
+    <p id="receiver-protocol-help" className="muted">CRSF is the only supported receiver protocol for now. It is fixed in firmware, so no separate protocol Apply or Save is needed. UART and channel-order changes still require Apply, then Save to controller.</p>
     <label>Receiver TX wire connects to board pad <select value={uart??6} disabled={!editable} onChange={e=>setUart(Number(e.target.value))}>
       {ports.map(n=><option key={n} value={n}>R{n} / UART{n}</option>)}
     </select></label>{" "}
