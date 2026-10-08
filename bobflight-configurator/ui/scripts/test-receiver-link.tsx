@@ -156,10 +156,28 @@ async function main() {
     saveSettings: () => mock.saveSettings(), restoreDefaults: () => mock.restoreDefaults(),
   };
   (globalThis as Record<string, unknown>).__setupTestHost = {
-    host, connectionStatus: "connected", version: "BobFlight test", status: null,
+    host, connectionStatus: "disconnected", version: "BobFlight test", status: null,
     refreshStatus: async () => {}, pollAfterConnect: async () => {}, setLastError: () => {}, postFlashGate: false,
   };
   const root: Root = createRoot(container as never);
+  flushSync(() => root.render(<ReceiverPage />));
+  const protocolSelect = () => {
+    const nodes = container.findAll(e => e.getAttribute("id") === "receiver-protocol");
+    assert.equal(nodes.length, 1, "one receiver protocol selector");
+    return nodes[0];
+  };
+  const disabled = (e: FakeElement) => e.disabled || e.hasAttribute("disabled");
+  const context = (globalThis as Record<string, unknown>).__setupTestHost as Record<string, unknown>;
+  await test("protocol selector offers only CRSF and stays disabled while disconnected", () => {
+    const select = protocolSelect();
+    assert.equal(select.tagName, "SELECT");
+    assert.deepEqual(select.options.map(o => [o.value, o.textContent]), [["CRSF", "CRSF"]]);
+    assert.ok(select.options[0].selected);
+    assert.ok(disabled(select));
+    assert.ok(container.textContent.includes("fixed in firmware"));
+    assert.equal(sent.length, 0, "disconnected selector sends no commands");
+  });
+  context.connectionStatus = "connected";
   flushSync(() => root.render(<ReceiverPage />));
   const blockedNote = () => container.textContent.includes("Apply all edits on this page before saving");
   const order: ReceiverLinkMockScenario[] = ["present-ok", "lq-zero", "rf-mode-low", "stats-stale", "no-frames", "absent", "unknown-token", "old-fc", "present-ok"];
@@ -172,6 +190,32 @@ async function main() {
       if (sc !== "old-fc") assert.equal(blockedNote(), false, `${sc}: link state must not feed StoragePanel blocked`);
     });
   }
+  await test("valid diagnostics enable CRSF without a new Apply/Save or protocol command", () => {
+    const select = protocolSelect();
+    assert.ok(!disabled(select));
+    assert.deepEqual(select.options.map(o => o.value), ["CRSF"]);
+    const key = Object.keys(select).find(k => k.startsWith("__reactProps$"));
+    assert.ok(key, "React event props available");
+    const props = (select as unknown as Record<string, {onChange: (e: unknown) => void}>)[key!];
+    const before = [...sent];
+    props.onChange({currentTarget: {value: "CRSF"}});
+    assert.deepEqual(sent, before, "selecting CRSF does not mutate or save board state");
+  });
+  await test("missing receiver diagnostics disable protocol selection", async () => {
+    const goodSend = host.sendCommand;
+    host.sendCommand = (cmd: CliCommand) => cmd === "receiver"
+      ? Promise.resolve("unknown command: receiver") : goodSend(cmd);
+    assert.ok(await waitFor(() => disabled(protocolSelect()) && container.textContent.includes("No current receiver diagnostics."), 2000));
+    host.sendCommand = goodSend;
+  });
+  await test("post-flash gate and disconnect disable the protocol selector", () => {
+    context.postFlashGate = true;
+    flushSync(() => root.render(<ReceiverPage />));
+    assert.ok(disabled(protocolSelect()));
+    context.postFlashGate = false; context.connectionStatus = "disconnected";
+    flushSync(() => root.render(<ReceiverPage />));
+    assert.ok(disabled(protocolSelect()));
+  });
   root.unmount(); await mock.disconnect();
   console.log(`PASS receiver link statistics readout: ${passed} tests`);
 }
