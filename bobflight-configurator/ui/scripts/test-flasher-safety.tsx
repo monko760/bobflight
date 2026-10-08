@@ -126,3 +126,52 @@ async function prepare() {
   assert(gate,'failed/cancelled flash must retain recovery gate');assert(isDisabled(buttonByText('Flash')),'retry requires a new device selection');
   flushSync(()=>root.unmount());console.log('PASS double start blocked, cancel waits for settlement, failed flash remains gated');
 }
+
+// F405 profile journey uses a synthetic validation fixture, not executable firmware.
+function f405Hex() {
+  const data=new Uint8Array(1024);const v=new DataView(data.buffer);
+  v.setUint32(0,0x20020000,true);v.setUint32(4,0x08000189,true);
+  v.setUint32(15*4,0x08000189,true);v.setUint32((16+67)*4,0x08000189,true);
+  const strings="BobFlight F405 USB diagnostic, MLTEMPF4 reference\r\nExperimental; not normal firmware or flight-qualified.\r\n\0USB-only; PA9 unchanged; no motor or flash-programming drivers.\r\n\0";
+  data.set(new TextEncoder().encode(strings),512);
+  const lines=[record([2,0,0,4,8,0])];
+  for(let i=0;i<data.length;i+=16)lines.push(record([16,i>>8,i&255,0,...data.slice(i,i+16)]));
+  lines.push(record([0,0,0,1]));return lines.join('\n');
+}
+{
+  scenario.available=true;scenario.flash=async()=>{};scenario.lastOptions=null;
+  gate=false;const root=mount();await sleep(20);
+  await selectOption(selectById('board'),'mltempf4');
+  await check(inputById('props-off'),true);await check(inputById('backup-taken'),true);
+  await load('bobflight-mltempf4-usb-diagnostic.hex',async()=>f405Hex());
+  assert(isDisabled(buttonByText('Flash')),'diagnostic assumptions require explicit acknowledgement');
+  await check(inputById('diagnostic-assumptions'),true);
+  await click(buttonByText('Select DFU device'));
+  await check(inputById('board-match-confirmed'),true);
+  assert(!isDisabled(buttonByText('Flash')),'explicit diagnostic profile must accept matching test image');
+  await click(buttonByText('Flash'));await sleep(30);
+  assert.deepEqual(scenario.lastOptions,{expectedMcu:'F405',verify:true,leave:false,imageProfile:'f405-usb-diagnostic'});
+  assert(gate,'normal configuration gate remains locked after diagnostic flash');
+  assert(visibleText(container).includes('remove the BOOT bridge'));
+  flushSync(()=>root.unmount());
+  console.log('PASS F405 known-board journey: assumptions, exact profile, readback, no ROM jump, normal gate retained');
+}
+{
+  const root=mount();await sleep(20);
+  await selectOption(selectById('board'),'custom_f405xg_usb');
+  assert(isDisabled(inputById('diagnostic-assumptions')));
+  await selectOption(selectById('custom-mcu'),'STM32H743');
+  await selectOption(selectById('custom-flash'),'1024');
+  await selectOption(selectById('custom-hse'),'8000000');
+  assert(visibleText(container).includes('not implemented here for STM32H743'));
+  assert(isDisabled(inputById('diagnostic-assumptions')));
+  await selectOption(selectById('custom-mcu'),'STM32F405');
+  assert(!isDisabled(inputById('diagnostic-assumptions')));
+  await check(inputById('diagnostic-assumptions'),true);
+  await selectOption(selectById('custom-hse'),'25000000');
+  assert(!inputById('diagnostic-assumptions').checked);
+  assert(isDisabled(inputById('diagnostic-assumptions')));
+  assert(isDisabled(buttonByText('Flash')));
+  flushSync(()=>root.unmount());
+  console.log('PASS custom-board selection: unknowns and unsupported MCU/clock blocked, changed assumptions invalidate acknowledgement');
+}

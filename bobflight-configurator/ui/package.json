@@ -32,7 +32,8 @@
     "test:flasher-journey": "node scripts/run-flasher-journey.mjs && node scripts/run-flasher-safety.mjs",
     "test:firmware-validation": "esbuild scripts/test-firmware-validation.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-firmware-validation.bundle.mjs && node scripts/test-firmware-validation.bundle.mjs",
     "test:post-flash": "node scripts/run-post-flash.mjs",
-    "test:transport-identity": "node scripts/run-transport-classification.mjs"
+    "test:transport-identity": "node scripts/run-transport-classification.mjs",
+    "test:diagnostic-console": "esbuild scripts/test-diagnostic-console.tsx --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-diagnostic-console.bundle.mjs && node scripts/test-diagnostic-console.bundle.mjs"
   },
   "dependencies": {
     "@bobflight/protocol": "file:../protocol",

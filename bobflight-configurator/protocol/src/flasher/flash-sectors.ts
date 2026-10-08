@@ -3,14 +3,15 @@ import { DEFAULT_FLASH_BASE } from "./types";
 
 // ST RM0385 (F745) and RM0431 (F722), main flash sector sizes in KiB.
 const SIZES: Record<string, readonly number[]> = {
+  F405: [16, 16, 16, 16, 64, 128, 128, 128, 128, 128, 128, 128],
   F745: [32, 32, 32, 32, 128, 256, 256, 256],
   F722: [16, 16, 16, 16, 64, 128, 128, 128],
 };
 
 /** Validate all ranges before USB writes; erase each intersecting sector once. */
 export function planSectorErases(regions: readonly HexRegion[], mcu: string | undefined): number[] {
-  const sizes = mcu === "F745" || mcu === "F722" ? SIZES[mcu] : undefined;
-  if (!sizes) throw new Error("Select a supported target (F745 or F722) before flashing.");
+  const sizes = mcu === "F745" || mcu === "F722" || mcu === "F405" ? SIZES[mcu] : undefined;
+  if (!sizes) throw new Error("Select a supported target (F745, F722 or explicit F405 diagnostic) before flashing.");
   let address = DEFAULT_FLASH_BASE;
   const sectors = sizes.map(kib => {
     const start = address;

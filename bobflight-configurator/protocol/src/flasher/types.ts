@@ -32,9 +32,11 @@ export interface FlashProgress {
  * Primary board kakute_f7_hdv → F745; secondary tmotor_f7_v2 → F722.
  * NEVER flash an F722 image onto an F745 (or vice versa).
  */
-export type BobFlightMcu = "F745" | "F722";
+export type BobFlightMcu = "F745" | "F722" | "F405";
 
 export interface FlashOptions {
+  /** Explicit USB-only F405 diagnostic; never a normal flight image. */
+  imageProfile?: "f405-usb-diagnostic";
   /** Flash base; ST ROM DFU default 0x08000000 (LOCKED). */
   startAddress?: number;
   /** Read-back verify after write (default true for live DFU). */
@@ -86,6 +88,7 @@ export const BOARD_MCU: Readonly<Record<string, BobFlightMcu>> = GENERATED_BOARD
 
 /** Public ST flash sizes used for gating (bytes from 0x08000000). */
 export const MCU_FLASH_SIZE: Readonly<Record<BobFlightMcu, number>> = {
+  F405: 1024 * 1024, // Diagnostic profile only; not generic F4 support.
   F745: 1024 * 1024, // STM32F745 — 1 MiB
   F722: 512 * 1024, // STM32F722 — 512 KiB
 };

@@ -13,6 +13,7 @@
 
 import type { ParsedHex } from "./intel-hex";
 import { assertMcuGate, normalizeFirmware } from "./mcu-gate";
+import { assertF405DfuLayout } from "./f405-diagnostic";
 import { planSectorErases } from "./flash-sectors";
 import {
   DEFAULT_FLASH_BASE,
@@ -71,6 +72,7 @@ interface UsbInterface {
 }
 
 interface UsbAlternateInterface {
+  interfaceName?: string | null;
   alternateSetting: number;
   interfaceClass: number;
   interfaceSubclass: number;
@@ -589,6 +591,11 @@ export class WebUsbDfuFlasher implements Flasher {
     try {
       device = await this.openDevice(DEFAULT_ALT);
       this.assertClaimedForFlash();
+      if (opts?.imageProfile === "f405-usb-diagnostic") {
+        const selected = device.configuration?.interfaces.find(i => i.interfaceNumber === this.interfaceNumber);
+        const alternate = selected?.alternates.find(a => a.alternateSetting === DEFAULT_ALT);
+        assertF405DfuLayout(alternate?.interfaceName);
+      }
       await this.prepareDevice(device);
       this.throwIfCancelled(0, total);
 
@@ -691,7 +698,7 @@ export class WebUsbDfuFlasher implements Flasher {
         phase: "done",
         bytesWritten: written,
         bytesTotal: total,
-        message: verify ? "Firmware written and readback verified. Reconnect USB to check startup." : "Firmware written without readback verification.",
+        message: opts?.imageProfile === "f405-usb-diagnostic" ? "Diagnostic written and readback verified. Remains in DFU: unplug USB, remove BOOT bridge, reconnect USB for cold startup." : verify ? "Firmware written and readback verified. Reconnect USB to check startup." : "Firmware written without readback verification.",
       });
     } catch (err) {
       if (this.cancelled) {
