@@ -28,6 +28,9 @@
  */
 
 #include "tusb_option.h"
+#if CFG_TUSB_MCU == OPT_MCU_STM32F4 && defined(BF_F4_COMPONENT_F405XG)
+#include "hal/stm32f4/usb_time.h"
+#endif
 
 #if CFG_TUD_ENABLED && defined(TUP_USBIP_DWC2)
 
@@ -459,6 +462,17 @@ bool dcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
   const bool is_dma = dma_device_enabled(dwc2);
   TU_ASSERT(dwc2_core_init(rhport, is_hs_phy, is_dma));
 
+  #if CFG_TUSB_MCU == OPT_MCU_STM32F4 && defined(BF_F4_COMPONENT_F405XG)
+  // Force and verify device mode BEFORE accessing the device-register bank.
+  // 50 ms mode settle and 20 ms disconnect are conservative bring-up margins,
+  // not a claim of measured host timing. Do not borrow later-core overrides.
+  dwc2->gusbcfg = (dwc2->gusbcfg & ~GUSBCFG_FHMOD) | GUSBCFG_FDMOD;
+  TU_ASSERT(bf_f405_usb_wait_us(50000u, 1000000u));
+  TU_ASSERT((dwc2->gintsts & GINTSTS_CMOD) == 0u);
+  dcd_disconnect(rhport);
+  TU_ASSERT(bf_f405_usb_wait_us(20000u, 1000000u));
+  #endif
+
   //------------- 7.1 Device Initialization -------------//
   // Set device max speed
   uint32_t dcfg = dwc2->dcfg & ~DCFG_DSPD_Msk;
@@ -478,10 +492,12 @@ bool dcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
   dcfg |= DCFG_NZLSOHSK; // send STALL back and discard if host send non-zlp during control status
   dwc2->dcfg = dcfg;
 
+  #if !(CFG_TUSB_MCU == OPT_MCU_STM32F4 && defined(BF_F4_COMPONENT_F405XG))
   dcd_disconnect(rhport);
 
   // Force device mode
   dwc2->gusbcfg = (dwc2->gusbcfg & ~GUSBCFG_FHMOD) | GUSBCFG_FDMOD;
+  #endif
 
   // BobFlight F405: GOTGCTL A/B session-override bits are reserved in this
   // older layout. Use GCCFG VBUSBSEN/NOVBUSSENS below, not later-core overrides.

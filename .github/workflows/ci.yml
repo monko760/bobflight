@@ -238,3 +238,5 @@ jobs:
         run: python3 tests/test_f405_usb_time.py
       - name: Test USB FIFO timeout and failed-start propagation
         run: python3 tests/test_usb_fifo_init.py
+      - name: Build F405 diagnostic and test read-only console
+        run: python3 tests/test_f405_diagnostic.py
