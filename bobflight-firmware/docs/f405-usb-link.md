@@ -7,12 +7,12 @@ This is a **compile/link and descriptor-execution milestone**, not a working USB
 - A narrow F405-only TinyUSB device header supplies the verified OTG_FS address, endpoint count, IRQ 67 and the required interrupt enable/disable operations. It does not import Cortex-M7 cache/lock-register behavior, F7 PLLSAI setup or another board's pins.
 - A full-speed, port-zero, no-OS, no-DMA CDC configuration uses existing buffer sizes. Unsupported component/port/speed combinations are rejected.
 - Shared descriptors select the F405 UID at `0x1FFF7A10`, preserving F722's `0x1FF07A10` and F745's `0x1FF0F420`. Fixed-width uppercase hexadecimal conversion removes an unnecessary printf/allocator linkage dependency while preserving all 24 serial characters and their word order.
-- Diagnostic callbacks connect TinyUSB's time API to the real F405 timebase. Unavailable time stops at an explicit fault boundary rather than inventing zero milliseconds. Diagnostic delays have a finite read budget and 100 ms request ceiling, not a measured wall-clock timeout.
+- The [owned USB timing service](f405-usb-time.md) connects TinyUSB's time API to the real F405 timebase. Unavailable time stops at an explicit fault boundary rather than inventing zero milliseconds. Diagnostic delays have a finite read budget and 100 ms request ceiling, not a measured wall-clock timeout.
 - The real OTG_FS handler is bound into the reset vector. A fixture-only stack-start function links configuration and initialization calls behind an explicit board-prepared argument. That argument is a caller assertion, not hardware verification.
 
 ## Deliberate boundary
 
-The reset fixture runs only through clock/time setup and then stops. **It does not call USB stack initialization.** The diagnostic image has no qualified board routing or RCC/GPIO/PHY/VBUS preparation. SystemCoreClock for the USB stack remains unset until its guarded start function is reached. None of these ELFs is an installation artifact.
+The reset fixture runs only through clock/time setup and then stops. **It does not call USB stack initialization.** The diagnostic image has no qualified board routing or RCC/GPIO/PHY/VBUS preparation. SystemCoreClock for the USB stack remains unset until the owned timing service is bound. Binding alone does not start USB. None of these ELFs is an installation artifact.
 
 Tests do not map USB peripheral registers, so accidentally crossing into controller initialization during the verified startup prefix fails rather than being mistaken for successful enumeration. No software model of USB packets, FIFO behavior or host attachment is added.
 
