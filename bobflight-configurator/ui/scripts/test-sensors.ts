@@ -30,6 +30,13 @@ sensors_end: 1
 let passed=0;
 async function test(name:string,fn:()=>unknown|Promise<unknown>){await fn();console.log('PASS',name);passed++;}
 async function main(){
+ await test('relative yaw is advertised explicitly and missing/unknown capability stays unavailable',()=>{
+const yawSnapshot=parseKeyValueSnapshot(fixture.replace('attitude_deg: 1.5 -2 0','attitude_deg: 1.5 -2 47.25').replace('sensors_end: 1','yaw_reference: gyro-relative\nsensors_end: 1'))!;
+assert.equal(yawSnapshot.yaw_reference,'gyro-relative');
+assert.equal(yawSnapshot.attitude_deg[2],47.25);
+assert.equal(parseKeyValueSnapshot(fixture)!.yaw_reference,undefined);
+assert.equal(parseKeyValueSnapshot(fixture.replace('sensors_end: 1','yaw_reference: magnetic\nsensors_end: 1'))!.yaw_reference,undefined);
+ });
  await test('level calibration capability and pose gates are explicit; old firmware stays read-only for level',()=>{
   const base=parseKeyValueSnapshot(fixture)!;const ctx={connected:true,snapshot:base,fresh:true,propsOff:true,stationary:true};
   assert.equal(checkActionGates('accel_level',ctx).allowed,false);

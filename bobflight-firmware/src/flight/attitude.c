@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Complementary roll/pitch estimator and angle-to-rate outer loop, degrees.
+ * Gyro-relative yaw is telemetry only, not an absolute heading or heading hold.
  * Limited-tilt prototype; no altitude hold or yaw heading hold. */
 #include "flight/attitude.h"
 #include <math.h>
@@ -20,6 +21,19 @@ bool attitude_update(const float gyro[3],const float acc[3],float dt){
     if(fabsf(cp)<0.1f){ready=false;return false;}
     angle[0]+=(gyro[0]+(gyro[1]*sr+gyro[2]*cr)*tanf(angle[1]*rad))*dt;
     angle[1]+=(gyro[1]*cr-gyro[2]*sr)*dt;
+    /* Euler yaw rate, using the same pre-update roll/pitch as the existing
+     * estimator. Reuse sr/cr/cp: no additional trigonometric calls per sample.
+     * This telemetry never feeds attitude_setpoint's rate-only yaw control.
+     * Keep wrapping bounded, including an unusually large finite gyro sample. */
+    float yaw=angle[2]+((gyro[1]*sr+gyro[2]*cr)/cp)*dt;
+    if(isfinite(yaw)){
+        if(yaw>180.f || yaw< -180.f){
+            yaw=fmodf(yaw,360.f);
+            if(yaw>180.f)yaw-=360.f;
+            if(yaw< -180.f)yaw+=360.f;
+        }
+        angle[2]=yaw;
+    }
     if(gravity){float alpha=dt/(0.5f+dt);float error=roll-angle[0];while(error>180)error-=360;while(error< -180)error+=360;angle[0]+=alpha*error;angle[1]+=alpha*(pitch-angle[1]);}
     while(angle[0]>180)angle[0]-=360;
     while(angle[0]< -180)angle[0]+=360;

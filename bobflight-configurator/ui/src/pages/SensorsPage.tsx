@@ -1,3 +1,4 @@
+import {AircraftAttitudeView} from "../components/AircraftAttitudeView";
 import {BoardOrientationPanel} from "../components/BoardOrientationPanel";
 import {StoragePanel} from "../components/StoragePanel";
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
@@ -49,7 +50,7 @@ export function SensorsPage() {
 
   const gyroOk = snapshot?.gyro_ok ?? false;
   const hasFreshCorrectVectors =
-    fresh && gyroOk && snapshot?.attitude_ready===true && angles.length === 3 && angles.every(Number.isFinite);
+    connected && fresh && gyroOk && snapshot?.attitude_ready===true && angles.length === 3 && angles.every(Number.isFinite);
 
   const roll = hasFreshCorrectVectors ? angles[0] : 0;
   const pitch = hasFreshCorrectVectors ? angles[1] : 0;
@@ -57,24 +58,8 @@ export function SensorsPage() {
   const magnitude =
     fresh && acc.length === 3 ? Math.hypot(acc[0], acc[1], acc[2]) : null;
 
-  // Project a quad in body coordinates (x forward, y right, z down).
-  const project = (x: number, y: number): [number, number] => {
-    const r = (roll * Math.PI) / 180;
-    const p = (pitch * Math.PI) / 180;
-    const yy = y * Math.cos(r);
-    const z = y * Math.sin(r);
-    const xx = x * Math.cos(p) + z * Math.sin(p);
-    const zz = -x * Math.sin(p) + z * Math.cos(p);
-    return [240 + yy * 0.88, 160 - xx * 0.58 + zz * 0.7];
-  };
-
-  const motors = [
-    project(90, -90),
-    project(90, 90),
-    project(-90, -90),
-    project(-90, 90),
-  ];
-  const nose = project(115, 0);
+  const yawAvailable=snapshot?.yaw_reference==="gyro-relative";
+  const yaw=hasFreshCorrectVectors&&yawAvailable?angles[2]:0;
 
   // Action gate evaluations
   const gateCtx = {
@@ -175,63 +160,10 @@ export function SensorsPage() {
       {/* Orientation SVG & Live Status Grid */}
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ flex: "1 1 320px", maxWidth: 520 }}>
-          <svg
-            viewBox="0 0 480 300"
-            role="img"
-            aria-label={
-              hasFreshCorrectVectors
-                ? `Quad tilt: roll ${roll.toFixed(1)}°, pitch ${pitch.toFixed(1)}°`
-                : "Quad orientation unavailable"
-            }
-            style={{ width: "100%", background: "#101b2a", borderRadius: 12 }}
-          >
-            <path d="M40 160H440 M240 30V280" stroke="#334155" strokeDasharray="5 5" />
-            <text x="240" y="25" textAnchor="middle" fill="#94a3b8" fontSize="13">
-              FRONT
-            </text>
-            {hasFreshCorrectVectors ? (
-              <g>
-                {motors.map(([x, y], i) => (
-                  <g key={i}>
-                    <line
-                      x1="240"
-                      y1="160"
-                      x2={x}
-                      y2={y}
-                      stroke={i < 2 ? "#38bdf8" : "#94a3b8"}
-                      strokeWidth="10"
-                    />
-                    <ellipse
-                      cx={x}
-                      cy={y}
-                      rx="28"
-                      ry="16"
-                      fill="#172c40"
-                      stroke={i < 2 ? "#38bdf8" : "#94a3b8"}
-                      strokeWidth="3"
-                    />
-                  </g>
-                ))}
-                <circle cx="240" cy="160" r="17" fill="#e2e8f0" />
-                <line
-                  x1="240"
-                  y1="160"
-                  x2={nose[0]}
-                  y2={nose[1]}
-                  stroke="#fb923c"
-                  strokeWidth="5"
-                />
-                <circle cx={nose[0]} cy={nose[1]} r="7" fill="#fb923c" />
-              </g>
-            ) : (
-              <text x="240" y="155" textAnchor="middle" fill="#cbd5e1">
-                Orientation unavailable (requires fresh sensor telemetry)
-              </text>
-            )}
-          </svg>
+          <AircraftAttitudeView roll={roll} pitch={pitch} yaw={yaw} ready={hasFreshCorrectVectors}/>
           <p className="muted" style={{ marginTop: "6px", fontSize: "0.85rem" }}>
-            Roll and pitch projection. Blue arms mark front. View is illustrative — verify axis
-            direction on real quad.
+            Solid blue arrow = FRONT; dashed tail = BACK. Logical QUADX motors:
+            M1 rear-right, M2 front-right, M3 rear-left, M4 front-left. These labels do not verify ESC wiring.
           </p>
         </div>
 
@@ -246,8 +178,8 @@ export function SensorsPage() {
               <div className="v">{hasFreshCorrectVectors ? `${pitch.toFixed(1)}°` : "—"}</div>
             </div>
             <div className="status-card">
-              <div className="k">Yaw</div>
-              <div className="v">Not measured</div>
+              <div className="k">Yaw (relative)</div>
+              <div className="v" data-yaw-readout="true">{hasFreshCorrectVectors&&yawAvailable?`${yaw.toFixed(1)}°`:"—"}</div>
             </div>
             <div className="status-card">
               <div className="k">Total Accel</div>
@@ -266,6 +198,11 @@ export function SensorsPage() {
               </div>
             </div>
           </div>
+
+          <p className="muted" data-yaw-note="true">
+            {yawAvailable?"Gyro-relative yaw, not a compass heading. It drifts over time and resets on controller reboot.":"Relative yaw unavailable: update the controller firmware as well as the configurator."}
+            {" "}The existing limited-tilt estimator can pause near vertical pitch.
+          </p>
 
           <table
             style={{

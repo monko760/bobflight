@@ -48,6 +48,8 @@ static bool command(const char *s){output[0]=0;return cmd_sensor_command(s);}
 int main(void){
  CHECK(command("sensors"));CHECK(strstr(output,"sensors_end: 1\r\n"));CHECK(strstr(output,"sensor_age_ms: 0\r\n"));CHECK(strstr(output,"cal_manual: no"));
  CHECK(strstr(output,"cal_bench_relaxed: no"));
+ CHECK(strstr(output,"yaw_reference: gyro-relative\r\n"));
+ rates[2]=47.25f;CHECK(command("sensors"));CHECK(strstr(output,"attitude_deg: 0.00 0.00 47.25\r\n"));rates[2]=0;
  CHECK(command("calibration"));CHECK(strstr(output,"calibration_end: 1\r\n"));CHECK(strstr(output,"mpu_accel_config: 0x10"));CHECK(strstr(output,"ram-only"));
  CHECK(strstr(output,"cal_diagnostics_version: 1")&&strstr(output,"cal_raw_face_0: uncaptured"));
  report=true;CHECK(command("calibration"));
