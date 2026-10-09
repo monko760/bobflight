@@ -1,10 +1,12 @@
 import { defineConfig } from "vite";
+import { localHexBuilderPlugin } from "../scripts/local-hex-builder.mjs";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 export default defineConfig({
   plugins: [
+    localHexBuilderPlugin(),
     react(),
     nodePolyfills({
       include: ["buffer", "events", "process", "util", "stream"],
@@ -35,6 +37,7 @@ export default defineConfig({
     global: "globalThis",
   },
   server: {
+    host: "127.0.0.1",
     port: 5173,
     fs: {
       allow: [path.resolve(__dirname, "..")],

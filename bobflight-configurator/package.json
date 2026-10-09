@@ -16,7 +16,8 @@
     "targets:generate": "node scripts/generate-target-catalog.cjs",
     "targets:check": "node scripts/generate-target-catalog.cjs --check",
     "prebuild": "npm run targets:generate",
-    "predev": "npm run targets:generate"
+    "predev": "npm run targets:generate",
+    "test:local-builder": "node scripts/test-local-hex-builder.mjs && npm --prefix ui run test:hex-builder"
   },
   "engines": {
     "node": ">=18"
