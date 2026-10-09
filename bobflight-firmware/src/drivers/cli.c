@@ -50,6 +50,7 @@ static void cli_write_str(const char *s)
 #include "drivers/sd_cli.h"
 #include "drivers/blackbox_cli.h"
 #include "drivers/nor_probe_cli.h"
+#include "drivers/barometer_cli.h"
 #include "drivers/filters_cli.h"
 #include "drivers/rpm_filter_cli.h"
 #include "drivers/motor_direction_cli.h"
@@ -433,6 +434,7 @@ static void handle_line(char *line)
     if (bl_pending) return; /* Do not execute buffered arm/motor/config commands while exiting. */
     nor_cli_before_command();
     if (cmd_nor_probe(line)) return;
+    if (cmd_barometer(line)) return;
     if (blackbox_cli_filter(line)) return;
     if (cmd_blackbox(line)) return;
     if (cmd_bootloader(line)) return;
@@ -582,6 +584,7 @@ void cli_poll(void)
     sd_cli_poll();
     blackbox_cli_poll();
     nor_cli_poll();
+    barometer_poll();
     /* Background only (bg_cli_poll): bounded gyro chip-ID / config readback, one
      * register at most every GYRO_HEALTH_PERIOD_MS, inside the time left before
      * the next gyro slot. */

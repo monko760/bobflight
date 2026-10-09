@@ -2,7 +2,7 @@
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
  *
- * Host unit checks for CRSF CRC8 (poly 0xD5) + RC 11-bit unpack/normalize.
+ * Host unit checks for CRSF CRC8 (poly 0xD5) + RC 11-bit unpack/normalize + LINK_STATISTICS.
  */
 #include "drivers/crsf.h"
 
@@ -40,19 +40,30 @@ void rx_link_note_stats(uint8_t uplink_lq, uint8_t rf_profile)
 {
     (void)uplink_lq; (void)rf_profile;
 }
+void rx_link_note_stats_full(const crsf_link_stats_t *stats)
+{
+    (void)stats;
+}
 
 /* LINK_STATISTICS (0x14): addr, len=12, type, 10-byte payload, crc. */
-static void build_link_stats(uint8_t f[14], uint8_t lq)
+static void build_link_stats_custom(uint8_t f[14], uint8_t r1, uint8_t r2, uint8_t lq, int8_t snr, uint8_t ant, uint8_t rf)
 {
-    const uint8_t payload[10] = {60u, 62u, lq, 9u, 0u, 7u, 3u, 70u, 98u, 5u};
+    const uint8_t payload[10] = {r1, r2, lq, (uint8_t)snr, ant, rf, 3u, 70u, 98u, 5u};
     f[0] = 0xC8u; f[1] = 12u; f[2] = 0x14u;
     memcpy(&f[3], payload, 10);
     f[13] = crsf_crc8(&f[2], 11u);
 }
 
+static void build_link_stats(uint8_t f[14], uint8_t lq)
+{
+    build_link_stats_custom(f, 60u, 62u, lq, 9, 0u, 7u);
+}
+
 static int link_stats_checks(void)
 {
     uint8_t f[16], lq = 0xAAu;
+    crsf_link_stats_t s;
+
     build_link_stats(f, 87u);
     if (!crsf_parse_link_stats(f, 14u, &lq, NULL) || lq != 87u) return 1;
     build_link_stats(f, 0u); lq = 0xAAu;
@@ -78,6 +89,28 @@ static int link_stats_checks(void)
         if (!crsf_parse_link_stats(f, 14u, &lq, &got) || lq != 66u || got != rf) return 10;
     }
     if (CRSF_RF_PROFILE_4FPS != 0u) return 11;
+
+    /* Extended crsf_parse_link_stats_full checks */
+    memset(&s, 0, sizeof(s));
+    build_link_stats_custom(f, 75u, 80u, 95u, -5, 1u, 2u);
+    if (!crsf_parse_link_stats_full(f, 14u, &s)) return 12;
+    if (s.rssi1_dbm != -75) return 13;
+    if (s.rssi2_dbm != -80) return 14;
+    if (s.uplink_lq != 95u) return 15;
+    if (s.uplink_snr != -5) return 16;
+    if (s.active_antenna != 1u) return 17;
+    if (s.rf_mode != 2u) return 18;
+
+    /* Active antenna bounds check: 0 and 1 valid, > 1 invalid */
+    build_link_stats_custom(f, 60u, 62u, 90u, 10, 0u, 1u);
+    if (!crsf_parse_link_stats_full(f, 14u, &s) || s.active_antenna != 0u) return 19;
+    build_link_stats_custom(f, 60u, 62u, 90u, 10, 1u, 1u);
+    if (!crsf_parse_link_stats_full(f, 14u, &s) || s.active_antenna != 1u) return 20;
+    build_link_stats_custom(f, 60u, 62u, 90u, 10, 2u, 1u);
+    if (crsf_parse_link_stats_full(f, 14u, &s)) return 21; /* antenna 2 rejected */
+    build_link_stats_custom(f, 60u, 62u, 90u, 10, 255u, 1u);
+    if (crsf_parse_link_stats_full(f, 14u, &s)) return 22; /* antenna 255 rejected */
+
     return 0;
 }
 

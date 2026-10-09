@@ -41,7 +41,7 @@ static uint32_t tail_hash(const char *h,size_t len){
 bool bb_session_start(bb_session_t *s,const fatlog_io_t *io,const blackbox_metadata_t *m,uint64_t now){
  if(!s||!io||!m||bb_session_busy(s)||recorder_active())return false;
  recorder_reset();memset(s,0,sizeof *s);s->reason="preparing";s->started_us=now;
- s->meta=*m;if(!s->meta.requested_hz)s->meta.requested_hz=m->sample_hz;if(!s->meta.rate_reason)s->meta.rate_reason=BB_RATE_REASON_DEFAULT;
+ s->meta=*m;s->meta.delta_frames=true;if(!s->meta.requested_hz)s->meta.requested_hz=m->sample_hz;if(!s->meta.rate_reason)s->meta.rate_reason=BB_RATE_REASON_DEFAULT;
  s->sample_hz=s->header_hz=m->sample_hz;s->requested_hz=s->meta.requested_hz;s->rate_reason=s->meta.rate_reason;
  s->header_len=blackbox_header(s->header,sizeof s->header,&s->meta);
  if(!s->header_len||s->header_len>BB_SESSION_RING_BYTES){fail(s,"invalid-log-metadata");return false;}
@@ -75,7 +75,7 @@ static void drain(bb_session_t *s){
  flight_log_sample_t sample;
  for(unsigned n=0;n<BB_SESSION_FRAMES_PER_POLL&&ring_free(s)>=sizeof s->packet;n++){
   if(!recorder_pop(&sample))return;
-  size_t len=blackbox_frame(s->packet,sizeof s->packet,&sample);
+  size_t len=blackbox_stream_frame(s->packet,sizeof s->packet,&sample,&s->encoder);
   if(!len){fail(s,"sample-encoding-failed");return;}
   ring_put(s,s->packet,len);s->frames++;
   if(sample.armed)s->seen_armed=true;

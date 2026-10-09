@@ -47,9 +47,13 @@ typedef struct {
     unsigned sd_spi_bus;
     hal_pin_t sd_cs_pin,sd_sck_pin,sd_miso_pin,sd_mosi_pin,sd_detect_pin;
 
-    /* Optional external SPI NOR, distinct from configuration flash. */
+    /* Optional external SPI NOR, separate from MCU configuration flash. */
     unsigned flash_spi_bus;
     hal_pin_t flash_cs_pin,flash_sck_pin,flash_miso_pin,flash_mosi_pin;
+
+    /* Optional onboard barometer bus. No device means bus 0/invalid pins. */
+    unsigned baro_i2c_bus;
+    hal_pin_t baro_scl_pin,baro_sda_pin;
 
     /* motors */
     board_motor_ch_t motors[BOARD_MOTOR_MAX];

@@ -27,14 +27,15 @@ static void finish(void){for(unsigned i=0;i<10000&&bb_session_busy(&session);i++
 int main(int argc,char **argv){
  config_init();pid_init();fatlog_io_t io={0};blackbox_metadata_t m={500,1000,300,"0.2.0-session-test",config_get(),0,NULL,NULL,1000,1};
  assert(bb_session_start(&session,&io,&m,now));assert(!bb_session_start(&session,&io,&m,now));poll_n(200);assert(session.phase==BBS_RECORDING);
+ m.delta_frames=true;blackbox_encoder_state_t expected_encoder={0};
  expected_len=blackbox_header((char*)expected,sizeof expected,&m);assert(expected_len);
  float raw[3]={26,-13,4},gyro[3]={25,-12.5f,4},setpoint[3]={35,-10,5},motor[4]={.2f,.4f,.6f,.8f},rc[4]={.1f,-.05f,.02f,.25f};pid_axis_out_t out;
  for(unsigned j=0;j<1200;j++){
   now+=1000;pid_set_dt(.001f);pid_update(gyro,setpoint,&out);
   if(j%2==0){
    pid_trace_t trace;assert(pid_trace_read(&trace));flight_log_sample_t s={.iteration=j,.time_us=(uint32_t)now,.dt_us=j?1000:0,.armed=1,.mode=1,.pid_valid=1,.gyro_valid=1,.rx_fresh=1,.output_healthy=1};
-   memcpy(s.gyro_raw,raw,sizeof raw);memcpy(s.gyro,gyro,sizeof gyro);memcpy(s.setpoint,setpoint,sizeof setpoint);memcpy(s.motor,motor,sizeof motor);memcpy(s.rc,rc,sizeof rc);memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);s.pid_output[0]=out.roll;s.pid_output[1]=out.pitch;s.pid_output[2]=out.yaw;
-   size_t n=blackbox_frame(expected+expected_len,sizeof expected-expected_len,&s);assert(n);expected_len+=n;
+   memcpy(s.gyro_raw,raw,sizeof raw);memcpy(s.gyro,gyro,sizeof gyro);memcpy(s.setpoint,setpoint,sizeof setpoint);memcpy(s.motor,motor,sizeof motor);memcpy(s.rc,rc,sizeof rc);s.setpoint_throttle=rc[3];memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);s.pid_output[0]=out.roll;s.pid_output[1]=out.pitch;s.pid_output[2]=out.yaw;
+   size_t n=blackbox_stream_frame(expected+expected_len,sizeof expected-expected_len,&s,&expected_encoder);assert(n);expected_len+=n;
   }
   bb_capture_observe(now,raw,gyro,setpoint,&out,motor,rc,true,1,0,true,true,true);poll_n(40);
  }

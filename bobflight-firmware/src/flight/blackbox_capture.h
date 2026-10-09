@@ -13,6 +13,17 @@ typedef struct {
  uint32_t erpm[4];      /* raw eRPM, 0 if that motor has no valid telemetry */
  uint8_t telem_ok;      /* bit m = motor m+1 telemetry OK */
  uint8_t filter_flags;  /* BB_FILTER_* (flight/flight_recorder.h) */
+ float accel_g[3],attitude_deg[3];
+ bool accel_valid,attitude_valid;
+ int16_t rssi_dbm[2];
+ uint8_t link_lq,link_antenna,link_rf_mode,link_valid;
+ int8_t link_snr;
+ uint32_t link_age_ms;
+ float baro_pressure_pa,baro_temp_c,baro_alt_cm,baro_reference_pa;
+ uint32_t baro_age_ms,baro_sample;
+ uint8_t baro_valid,baro_alt_valid;
+
+
 } bb_capture_extra_t;
 /* Cheap per-PID-loop context (events are detected on every call, logged or not). */
 typedef struct {
@@ -20,6 +31,8 @@ typedef struct {
  bool telem_capture_failed;   /* bidir DShot capture failure latched */
  uint32_t overruns_total;     /* scheduler overruns since boot */
  void (*fill)(bb_capture_extra_t *extra); /* NULL: extras stay zero */
+ float mixer_throttle; /* already computed after the failsafe override */
+ bool mixer_throttle_valid; /* production always supplies it; legacy host helper uses rc */
 } bb_capture_ctx_t;
 /* Pure packers shared by the firmware gather code and the host tests. */
 static inline uint8_t bb_loop_code(uint32_t loop_target_hz){

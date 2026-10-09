@@ -53,13 +53,18 @@ void bb_capture_observe_ex(uint64_t now,const float raw[3],const float filtered[
  memcpy(s.gyro_raw,raw,sizeof s.gyro_raw);memcpy(s.gyro,filtered,sizeof s.gyro);
  memcpy(s.setpoint,setpoint,sizeof s.setpoint);memcpy(s.motor,motors,sizeof s.motor);
  if(rc)memcpy(s.rc,rc,sizeof s.rc);
+ s.setpoint_throttle=ctx&&ctx->mixer_throttle_valid?ctx->mixer_throttle:(rc?rc[3]:0.f);
  s.armed=armed;s.mode=mode;s.failsafe=failsafe;
  s.pid_valid=pid_trace_read(&trace);
  if(s.pid_valid){memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);}
  s.pid_output[0]=output->roll;s.pid_output[1]=output->pitch;s.pid_output[2]=output->yaw;
  s.gyro_valid=gyro_valid;s.rx_fresh=fresh;s.output_healthy=output_healthy;
  if(ctx){
-  if(ctx->fill){bb_capture_extra_t x;memset(&x,0,sizeof x);ctx->fill(&x);memcpy(s.erpm,x.erpm,sizeof s.erpm);s.telem_ok=x.telem_ok;s.filter_flags=x.filter_flags;}
+  if(ctx->fill){bb_capture_extra_t x;memset(&x,0,sizeof x);ctx->fill(&x);memcpy(s.erpm,x.erpm,sizeof s.erpm);s.telem_ok=x.telem_ok;s.filter_flags=x.filter_flags;
+   memcpy(s.accel_g,x.accel_g,sizeof s.accel_g);memcpy(s.attitude_deg,x.attitude_deg,sizeof s.attitude_deg);
+   s.accel_valid=x.accel_valid&&gyro_valid;s.attitude_valid=x.attitude_valid&&gyro_valid;
+   memcpy(s.rssi_dbm,x.rssi_dbm,sizeof s.rssi_dbm);s.link_valid=x.link_valid;s.link_lq=x.link_lq;s.link_snr=x.link_snr;s.link_antenna=x.link_antenna;s.link_rf_mode=x.link_rf_mode;s.link_age_ms=x.link_age_ms;
+   s.baro_pressure_pa=x.baro_pressure_pa;s.baro_temp_c=x.baro_temp_c;s.baro_alt_cm=x.baro_alt_cm;s.baro_reference_pa=x.baro_reference_pa;s.baro_valid=x.baro_valid;s.baro_alt_valid=x.baro_alt_valid;s.baro_age_ms=x.baro_age_ms;s.baro_sample=x.baro_sample;}
   s.loop_code=ctx->loop_code;s.overruns=ctx->overruns_total-overruns_base;
  }
  s.events=pending_events;

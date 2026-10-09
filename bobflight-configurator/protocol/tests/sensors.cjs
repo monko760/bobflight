@@ -27,6 +27,7 @@ async function main(){
   const client=new BobFlightCliClient(new MockTransportFactory());
   await client.connect({path:'mock://bobflight',transport:'mock'});
   await new Promise(r=>setTimeout(r,15));
+  const baro=await client.sendCommand('barometer');assert.match(baro,/barometer_end: 1/);assert.match(baro,/barometer_valid: no/);assert.match(baro,/mock-no-physical-sensor/);
   const flash=await client.sendCommand('flash_info');assert.match(flash,/flash_info_end: 1/);assert.match(flash,/mock-no-physical-flash/);assert.match(flash,/flash_recording_supported: no/);
   for(const bad of ['flash_info extra','flash_erase','flash_info\nsave'])await assert.rejects(()=>client.sendCommand(bad),/unsupported/);
   const sensors=await client.sendCommand('sensors');

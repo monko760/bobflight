@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory() as td:
  check(holy,False,'tmotor_f7_v2')
  check(fixture(),False,'kakute_f7_hdv')
  check(fixture(),False,'unknown')
- matek=fixture(marker=b'matek_f722_px\0' b'0.2.0-prototype-matekf722px-bench1-crsf1-bl1-store13-cal2-mount1-actual1-dshot1-flashprobe1\0')
+ matek=fixture(marker=b'matek_f722_px\0' b'0.2.0-prototype-matekf722px-bench1-crsf1-bl1-store13-cal2-mount1-actual1-dshot1-flashprobe1-bb4-baro1\0')
  check(matek,True,'matek_f722_px')
  for at in [0x4000,0x7fff,0x8000,0xbfff]:
   check(matek[:-1]+[rec(at,0,b'X')]+matek[-1:],False,'matek_f722_px')

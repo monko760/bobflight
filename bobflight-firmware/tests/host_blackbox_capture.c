@@ -26,7 +26,7 @@ int main(void){
  assert(bb_capture_begin(500,0));bb_capture_observe((uint64_t)UINT32_MAX+1,raw,gyro,setpoint,&out,motor,rc,false,1,0,true,true,true);assert(!recorder_active());
  /* Schema 3: decimate first (slow inputs read only for logged samples), events
   * latched across skipped loops, cleared only when a frame carrying them is queued. */
- assert(bb_capture_begin(500,0));fills=0;bb_capture_ctx_t ctx={4,false,1000,fill};
+ assert(bb_capture_begin(500,0));fills=0;bb_capture_ctx_t ctx={4,false,1000,fill,0.f,false};
  bb_capture_observe_ex(0,raw,gyro,setpoint,&out,motor,rc,false,0,0,true,true,true,&ctx); /* baseline: no events invented */
  assert(recorder_pop(&s)&&s.events==0&&s.loop_code==4&&s.overruns==0&&fills==1);
  assert(s.erpm[0]==4321u&&s.erpm[3]==0u&&s.telem_ok==0x7u&&s.filter_flags==0x5Du);
@@ -62,5 +62,11 @@ int main(void){
  bb_capture_observe(2000,raw,gyro,setpoint,&out,motor,rc,true,1,0,true,true,true);
  assert(recorder_pop(&s)&&s.events==0&&recorder_pop(&s)&&s.events==BB_EVENT_ARM&&s.loop_code==0&&s.erpm[0]==0&&s.telem_ok==0&&s.filter_flags==0&&s.overruns==0);
  bb_capture_end();assert(recorder_pop(&s)==false);
+ /* Explicit mixer throttle is independent from retained pilot throttle. */
+ assert(bb_capture_begin(1000,0));ctx.mixer_throttle_valid=true;ctx.mixer_throttle=.3f;rc[3]=.8f;
+ bb_capture_observe_ex(1,raw,gyro,setpoint,&out,motor,rc,false,1,1,true,false,true,&ctx);
+ assert(recorder_pop(&s)&&s.setpoint_throttle==.3f&&s.rc[3]==.8f&&!s.rx_fresh);
+ ctx.mixer_throttle=NAN;bb_capture_observe_ex(1001,raw,gyro,setpoint,&out,motor,rc,false,1,1,true,false,true,&ctx);
+ assert(!recorder_pop(&s)&&recorder_stats()->total_invalid==1);bb_capture_end();
  puts("PASS production capture observer: disabled no-op, trace equality, post-mixer command values, reset validity, independent timing, 500Hz decimation, bounded overflow and timestamp wrap stop; schema 3 decimate-first fill, event latch across skipped loops, kept on drop, cleared when queued, overrun delta");
 }

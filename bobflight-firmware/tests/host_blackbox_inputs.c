@@ -9,8 +9,16 @@
 #include "flight/config.h"
 #include "sched/scheduler.h"
 #include <assert.h>
+#include "drivers/rx.h"
+static bool link_fresh=true;
+bool rx_link_stats_snapshot(rx_link_stats_snapshot_t *s){*s=(rx_link_stats_snapshot_t){.rssi1_dbm=-60,.rssi2_dbm=-75,.uplink_lq=97,.uplink_snr=-8,.active_antenna=1,.rf_mode=2,.valid=true,.fresh=link_fresh,.age_ms=link_fresh?3:1001};return link_fresh;}
 #include <stdio.h>
 #include <string.h>
+static float test_acc[3]={0,0,1},test_att[3]={10,20,30};
+const float *gyro_accel_g(void){return test_acc;}
+const float *attitude_degrees(void){return test_att;}
+bool gyro_is_healthy(void){return true;}
+bool attitude_ready(void){return true;}
 static bool bidir,capture_failed,notch[2];
 static dshot_telem_status_t status[4];
 static uint32_t erpm[4],loop_hz=4000u;
@@ -29,6 +37,8 @@ int main(void){
  /* Before the filter ever ran: off, nothing tracked, no telemetry. */
  rpm_filter_status_t st;rpm_filter_gyro_snapshot(&st);assert(st.reason==RPM_FILTER_OFF&&st.harmonics_active==0);
  bb_capture_extra_t x;memset(&x,0xA5,sizeof x);bb_inputs_fill(&x);
+ assert(x.link_valid&&x.rssi_dbm[0]==-60&&x.rssi_dbm[1]==-75&&x.link_lq==97&&x.link_snr==-8&&x.link_antenna==1&&x.link_age_ms==3);
+ assert(x.accel_valid&&x.attitude_valid&&x.accel_g[2]==1.f&&x.attitude_deg[2]==30.f);
  assert(x.telem_ok==0&&x.erpm[0]==0&&x.erpm[3]==0&&x.filter_flags==0);
  /* Live: bidir on, motors 1 and 3 OK (motor 3 OK with eRPM 0), 2 timed out, 4 bad CRC. */
  assert(config_set_key("rpm_filter_harmonics",3));
@@ -58,6 +68,7 @@ int main(void){
  assert(bb_loop_code(0)==0&&bb_loop_code(249)==0&&bb_loop_code(12000)==BB_LOOP_CODE_MAX);
  assert(bb_filter_flags_pack(false,false,2u,3u)==(2u<<BB_FILTER_RPM_REASON_SHIFT));
  assert(bb_filter_flags_pack(true,true,3u,9u)==127u);
+ link_fresh=false;bb_inputs_fill(&x);assert(!x.link_valid&&x.link_age_ms==1001&&x.rssi_dbm[0]==0);
  bb_inputs_fill(NULL);bb_inputs_context(NULL);rpm_filter_gyro_snapshot(NULL);
  puts("PASS blackbox schema 3 inputs: telemetry mask/eRPM gated on OK, filter flag bit order, loop code, overruns; RPM snapshot is read-only (no refresh until the filter runs)");
  return 0;

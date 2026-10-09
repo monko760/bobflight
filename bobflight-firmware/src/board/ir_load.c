@@ -60,6 +60,10 @@ bool board_ir_load_dummy(board_t *out)
     out->flash_miso_pin=BOARD_GENERATED_FLASH_MISO;
     out->flash_mosi_pin=BOARD_GENERATED_FLASH_MOSI;
 
+    out->baro_i2c_bus=BOARD_GENERATED_BARO_I2C;
+    out->baro_scl_pin=BOARD_GENERATED_BARO_SCL;
+    out->baro_sda_pin=BOARD_GENERATED_BARO_SDA;
+
     out->motor_count = BOARD_MOTOR_MAX;
     out->motors[0].pin = BOARD_GENERATED_MOTOR1_PIN;
     out->motors[0].timer = (uint8_t)BOARD_GENERATED_MOTOR1_TIM;

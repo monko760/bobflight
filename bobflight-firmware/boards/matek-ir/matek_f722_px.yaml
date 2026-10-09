@@ -41,3 +41,9 @@ flash_cs_pin: PB12
 flash_sck_pin: PB13
 flash_miso_pin: PB14
 flash_mosi_pin: PC3
+
+# Onboard BMP280, published Matek F722-PX / pinned MATEKF722HD routing.
+# Capability declaration is not a physical detection or flight qualification.
+baro_i2c_bus: 1
+baro_scl_pin: PB8
+baro_sda_pin: PB9

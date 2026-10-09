@@ -20,8 +20,12 @@
 #define CRSF_TYPE_RC     0x16u
 #define CRSF_TYPE_LINK_STATS 0x14u /* public CRSF_FRAMETYPE_LINK_STATISTICS */
 #define CRSF_LINK_STATS_PAYLOAD 10u /* rssi1, rssi2, uplink LQ %, snr, ant, rf mode, tx pwr, dl rssi, dl LQ, dl snr */
-#define CRSF_LINK_STATS_LQ_OFFSET 2u /* uplink link quality (%) within the payload */
-#define CRSF_LINK_STATS_RF_OFFSET 5u /* rf_profile (4fps=0, 50fps=1, 150fps=2) within the payload */
+#define CRSF_LINK_STATS_RSSI1_OFFSET 0u /* uplink RSSI 1 (dBm = -1 * byte) */
+#define CRSF_LINK_STATS_RSSI2_OFFSET 1u /* uplink RSSI 2 (dBm = -1 * byte) */
+#define CRSF_LINK_STATS_LQ_OFFSET    2u /* uplink link quality (%) within the payload */
+#define CRSF_LINK_STATS_SNR_OFFSET   3u /* uplink SNR (signed int8 dB) */
+#define CRSF_LINK_STATS_ANT_OFFSET   4u /* active antenna (0 or 1) */
+#define CRSF_LINK_STATS_RF_OFFSET    5u /* rf_profile (4fps=0, 50fps=1, 150fps=2) within the payload */
 #define CRSF_MAX_FRAME   64u
 #define CRSF_RC_PAYLOAD  22u /* 16 × 11-bit channels */
 #define CRSF_CH_MID      992u
@@ -126,17 +130,36 @@ bool crsf_parse_rc_frame(const uint8_t *frame, size_t n, float out[16])
     return true;
 }
 
-bool crsf_parse_link_stats(const uint8_t *frame, size_t n, uint8_t *uplink_lq, uint8_t *rf_profile)
+bool crsf_parse_link_stats_full(const uint8_t *frame, size_t n, crsf_link_stats_t *stats)
 {
     const unsigned len = 1u + CRSF_LINK_STATS_PAYLOAD + 1u;
-    if (!frame || !uplink_lq || n < len + 2u) return false;
+    if (!frame || !stats || n < len + 2u) return false;
     if (frame[0] != CRSF_SYNC_FC && frame[0] != CRSF_SYNC_TX) return false;
     if (frame[1] != len || frame[2] != CRSF_TYPE_LINK_STATS) return false;
     if (crsf_crc8(&frame[2], len - 1u) != frame[len + 1u]) return false;
-    if (frame[3u + CRSF_LINK_STATS_LQ_OFFSET] > 100u) return false; /* not a percentage */
-    *uplink_lq = frame[3u + CRSF_LINK_STATS_LQ_OFFSET];
-    if (rf_profile) *rf_profile = frame[3u + CRSF_LINK_STATS_RF_OFFSET];
+
+    const uint8_t *payload = &frame[3];
+    if (payload[CRSF_LINK_STATS_LQ_OFFSET] > 100u) return false; /* not a percentage */
+    if (payload[CRSF_LINK_STATS_ANT_OFFSET] > 1u) return false;   /* antenna index must be 0 or 1 */
+
+    stats->rssi1_dbm = (int16_t)(-(int16_t)payload[CRSF_LINK_STATS_RSSI1_OFFSET]);
+    stats->rssi2_dbm = (int16_t)(-(int16_t)payload[CRSF_LINK_STATS_RSSI2_OFFSET]);
+    stats->uplink_lq = payload[CRSF_LINK_STATS_LQ_OFFSET];
+    stats->uplink_snr = (int8_t)payload[CRSF_LINK_STATS_SNR_OFFSET];
+    stats->active_antenna = payload[CRSF_LINK_STATS_ANT_OFFSET];
+    stats->rf_mode = payload[CRSF_LINK_STATS_RF_OFFSET];
     return true;
+}
+
+bool crsf_parse_link_stats(const uint8_t *f,size_t n,uint8_t *lq,uint8_t *rf)
+{
+ const unsigned len=1u+CRSF_LINK_STATS_PAYLOAD+1u;
+ /* Preserve existing link-gate acceptance, independently of new RSSI validation. */
+ if(!f||!lq||n<len+2u)return false;
+ if(f[0]!=CRSF_SYNC_FC&&f[0]!=CRSF_SYNC_TX)return false;
+ if(f[1]!=len||f[2]!=CRSF_TYPE_LINK_STATS)return false;
+ if(crsf_crc8(f+2,len-1u)!=f[len+1u]||f[5]>100u)return false;
+ *lq=f[5];if(rf)*rf=f[8];return true;
 }
 
 static void crsf_consume_frames(void)
@@ -186,8 +209,12 @@ static void crsf_consume_frames(void)
             crsf_to_controls(ch,controls);
             rx_stub_set_channels(controls,16,true);
         } else if (type_ptr[0] == CRSF_TYPE_LINK_STATS) {
-            uint8_t lq, rf;
-            if (crsf_parse_link_stats(g_rxbuf, frame_bytes, &lq, &rf)) rx_link_note_stats(lq, rf);
+            crsf_link_stats_t stats;
+            if (crsf_parse_link_stats_full(g_rxbuf, frame_bytes, &stats)) {
+                rx_link_note_stats_full(&stats);
+            } else {
+                uint8_t lq,rf;if(crsf_parse_link_stats(g_rxbuf,frame_bytes,&lq,&rf))rx_link_note_stats(lq,rf);
+            }
         }
 
         if (g_rxlen > frame_bytes) {

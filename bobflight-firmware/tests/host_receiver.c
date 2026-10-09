@@ -32,8 +32,11 @@ static void frame(uint8_t f[26]){frame_roll(f,172);}
 static void feed(const uint8_t *p,size_t n){assert(n+used<=sizeof(wire));memcpy(wire+used,p,n);used+=n;}
 /* CRSF LINK_STATISTICS 0x14: 10-byte payload, uplink LQ at payload byte 2,
  * rf_profile at payload byte 5 (4fps=0, 50fps=1, 150fps=2). */
+static void stats_full(uint8_t r1, uint8_t r2, uint8_t lq, int8_t snr, uint8_t ant, uint8_t rf){
+    uint8_t s[14]={0xc8,12,0x14,r1,r2,lq,(uint8_t)snr,ant,rf,3,70,98,5,0};s[13]=crsf_crc8(s+2,11);feed(s,14);
+}
 static void stats_rf(uint8_t lq,uint8_t rf){
-    uint8_t s[14]={0xc8,12,0x14,60,62,lq,9,0,rf,3,70,98,5,0};s[13]=crsf_crc8(s+2,11);feed(s,14);
+    stats_full(60, 62, lq, 9, 0, rf);
 }
 static void stats(uint8_t lq){stats_rf(lq,2);}
 /* Advance `ms` in 5 ms polls (the CRSF stall guard drains after >10 ms idle),
@@ -119,6 +122,59 @@ static void rf_mode_checks(void){
     /* Re-initialisation forgets rf_profile with the rest of the stats. */
     rx_init();feed(f,26);rx_poll();assert(rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE&&!rx_link_stats_present());
 }
+
+static void snapshot_checks(void){
+    uint8_t f[26];frame(f);
+    now=300000;used=0;rx_init();
+    rx_link_stats_snapshot_t snap;
+
+    /* Before any stats frame: !valid, !fresh, age = UINT32_MAX, no fabricated zeros for valid stat data */
+    assert(!rx_link_stats_snapshot(&snap));
+    assert(!snap.valid);
+    assert(!snap.fresh);
+    assert(snap.age_ms == UINT32_MAX);
+
+    /* Feed valid LINK_STATISTICS frame */
+    stats_full(70, 72, 95, 12, 1, 2);
+    rx_poll();
+    assert(rx_link_stats_snapshot(&snap));
+    assert(snap.valid);
+    assert(snap.fresh);
+    assert(snap.age_ms == 0);
+    assert(snap.rssi1_dbm == -70);
+    assert(snap.rssi2_dbm == -72);
+    assert(snap.uplink_lq == 95);
+    assert(snap.uplink_snr == 12);
+    assert(snap.active_antenna == 1);
+    assert(snap.rf_mode == 2);
+
+    /* Link-stat freshness is independent of RC frames: RC frames keep arriving, link stats age out */
+    run_ms(900, f);
+    assert(rx_link_stats_snapshot(&snap));
+    assert(snap.valid && snap.fresh && snap.age_ms == 900);
+
+    /* Cross 1000 ms staleness threshold: stats become stale even as RC frames continue */
+    run_ms(105, f);
+    assert(!rx_link_stats_snapshot(&snap));
+    assert(snap.valid);
+    assert(!snap.fresh);
+    assert(snap.age_ms == 1005);
+    assert(rx_frame_fresh()); /* RC frames still fresh */
+
+    /* Re-init clears snapshot validity */
+    rx_init();
+    assert(!rx_link_stats_snapshot(&snap));
+    assert(!snap.valid);
+    assert(!snap.fresh);
+    assert(snap.age_ms == UINT32_MAX);
+
+    /* Out-of-bounds antenna frame (antenna 2) is rejected */
+    stats_full(60, 62, 90, 10, 2, 1);
+    rx_poll();
+    assert(!rx_link_stats_snapshot(&snap));
+    assert(!snap.valid);
+}
+
 int main(void){
     uint8_t f[26];frame(f);rx_init();
     assert(!rx_frame_fresh());assert(rx_frame_age_ms()==UINT32_MAX);assert(rx_channels()[4]==0);
@@ -145,5 +201,6 @@ int main(void){
     assert(crsf_set_map("AETR"));
     link_gate_checks();
     rf_mode_checks();
+    snapshot_checks();
     return 0;
 }

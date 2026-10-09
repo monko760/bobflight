@@ -18,9 +18,8 @@ static uint32_t g_last_frame;
 static uint32_t g_frames;
 static const rx_protocol_t *g_proto;
 /* LINK_STATISTICS gate (see rx.h). */
-static bool g_stats_seen;
-static uint8_t g_stats_lq;
-static uint8_t g_stats_rf;
+static bool g_stats_seen,g_signal_stats_seen;
+static crsf_link_stats_t g_stats;
 static uint32_t g_stats_ms;
 /* Last valid RC frame, accepted or held back by the link gate. */
 static bool g_raw_seen;
@@ -30,8 +29,8 @@ static rx_loss_reason_t link_gate(uint32_t now)
 {
     if (!g_stats_seen) return RX_LOSS_NONE; /* absent: frames-only, as before */
     if ((uint32_t)(now - g_stats_ms) > RX_LINK_STATS_STALE_MS) return RX_LOSS_STATS_STALE;
-    if (g_stats_lq == 0u) return RX_LOSS_LQ_ZERO;
-    if (g_stats_rf == CRSF_RF_PROFILE_4FPS) return RX_LOSS_RF_MODE_LOW; /* fresh only: stale returned above */
+    if (g_stats.uplink_lq == 0u) return RX_LOSS_LQ_ZERO;
+    if (g_stats.rf_mode == CRSF_RF_PROFILE_4FPS) return RX_LOSS_RF_MODE_LOW; /* fresh only: stale returned above */
     return RX_LOSS_NONE;
 }
 
@@ -40,7 +39,9 @@ void rx_init(void)
     memset(g_channels, 0, sizeof(g_channels));
     g_fresh = false;
     g_last_frame=0; g_frames=0;
-    g_stats_seen=false; g_stats_lq=0; g_stats_rf=0; g_stats_ms=0;
+    g_stats_seen=false;g_signal_stats_seen=false;
+    memset(&g_stats, 0, sizeof(g_stats));
+    g_stats_ms=0;
     g_raw_seen=false; g_last_raw_frame=0;
     g_proto = &rx_crsf;
     if (g_proto->init) {
@@ -117,20 +118,26 @@ const char *rx_protocol_name(void)
 
 uint32_t rx_frame_count(void){return g_frames;}
 
-void rx_link_note_stats(uint8_t uplink_lq, uint8_t rf_profile)
+void rx_link_note_stats_full(const crsf_link_stats_t *stats)
 {
-    if (uplink_lq > 100u) return;
+    if (!stats || stats->uplink_lq > 100u || stats->active_antenna > 1u) return;
     g_stats_seen = true;
-    g_stats_lq = uplink_lq;
-    g_stats_rf = rf_profile;
+    g_signal_stats_seen=true;g_stats = *stats;
     g_stats_ms = hal_millis();
+}
+
+void rx_link_note_stats(uint8_t lq,uint8_t rf)
+{
+ if(lq>100u)return;
+ g_stats_seen=true;g_signal_stats_seen=false;
+ memset(&g_stats,0,sizeof g_stats);g_stats.uplink_lq=lq;g_stats.rf_mode=rf;g_stats_ms=hal_millis();
 }
 
 bool rx_link_stats_present(void) { return g_stats_seen; }
 
 int rx_link_lq(void)
 {
-    return (g_stats_seen && link_gate(hal_millis()) != RX_LOSS_STATS_STALE) ? (int)g_stats_lq : -1;
+    return (g_stats_seen && link_gate(hal_millis()) != RX_LOSS_STATS_STALE) ? (int)g_stats.uplink_lq : -1;
 }
 
 rx_loss_reason_t rx_loss_reason(void)
@@ -150,4 +157,31 @@ const char *rx_loss_reason_name(rx_loss_reason_t reason)
     case RX_LOSS_RF_MODE_LOW: return "rf-mode-low";
     default: return "no-frames";
     }
+}
+
+bool rx_link_stats_snapshot(rx_link_stats_snapshot_t *out)
+{
+    if (!out) return false;
+    uint32_t now = hal_millis();
+    out->valid = g_signal_stats_seen;
+    if (!g_signal_stats_seen) {
+        out->fresh = false;
+        out->age_ms = UINT32_MAX;
+        out->rssi1_dbm = 0;
+        out->rssi2_dbm = 0;
+        out->uplink_lq = 0;
+        out->uplink_snr = 0;
+        out->active_antenna = 0;
+        out->rf_mode = 0;
+        return false;
+    }
+    out->age_ms = (uint32_t)(now - g_stats_ms);
+    out->fresh = (out->age_ms <= RX_LINK_STATS_STALE_MS);
+    out->rssi1_dbm = g_stats.rssi1_dbm;
+    out->rssi2_dbm = g_stats.rssi2_dbm;
+    out->uplink_lq = g_stats.uplink_lq;
+    out->uplink_snr = g_stats.uplink_snr;
+    out->active_antenna = g_stats.active_antenna;
+    out->rf_mode = g_stats.rf_mode;
+    return out->fresh;
 }

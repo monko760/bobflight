@@ -1,6 +1,7 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 /** The offline mock has no IMU. Never invent fresh samples or successful calibration. */
 export function mockSensorReply(command: string, armed = false): string | null {
+  if(command === "barometer") return "barometer_api: 1\r\nbarometer_reason: mock-no-physical-sensor\r\nbarometer_valid: no\r\nbarometer_altitude_valid: no\r\nbarometer_end: 1\r\n";
   if(command === "flash_info") return "flash_probe_api: 1\r\nflash_state: unavailable\r\nflash_reason: mock-no-physical-flash\r\nflash_read_only: yes\r\nflash_recording_supported: no\r\nflash_info_end: 1\r\n";
   if (command === "sensors" || command === "calibration") {
     return [
