@@ -2,7 +2,7 @@
 # Reference config: https://raw.githubusercontent.com/betaflight/config/e1d87e7ecf6717bd3806a08400aeb892cd1d1fc3/configs/MTKS/MATEKF722HD/config.h
 # Manufacturer page: https://www.mateksys.com/?portfolio=f722-px
 # Pin facts only; independently authored IR. Not bench-verified on physical board.
-# STM32F722 sensor-only target (no motor output enabled, no SD card slot).
+# STM32F722 development target: normal DShot bench output, arming disabled, no SD slot.
 # HSE 8 MHz supported STM32F7X2 reference default; explicitly not measured.
 # Gyro: MPU6000 on SPI1 (PA5/6/7, CS PB2, DRDY/EXTI PC4). Reference CW180_DEG_FLIP.
 # Serial RX default: CRSF on UART2 (TX PA2, RX PA3).

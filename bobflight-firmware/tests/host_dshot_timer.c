@@ -32,9 +32,14 @@ bool hal_f7_dshot_ic_tc_irq_wanted(unsigned group){(void)group;return g_tc_wante
 void hal_f7_dshot_ic_quiesce(unsigned group){(void)group;g_quiesce_calls++;}
 #include "../src/hal/stm32f7/hal_tim_dma.c"
 
+#if defined(BOBFLIGHT_TEST_MATEK_DSHOT)
+static board_t board={.board_id="matek_f722_px",.motor_count=4,.motors={
+ {HAL_PIN_PACK(2,8),8,3},{HAL_PIN_PACK(2,9),8,4},{HAL_PIN_PACK(1,4),3,1},{HAL_PIN_PACK(1,5),3,2}}};
+#else
 static board_t board={.board_id="kakute_f7_hdv",.motor_count=4,.motors={
     {HAL_PIN_PACK(1,0),3,3},{HAL_PIN_PACK(1,1),3,4},
     {HAL_PIN_PACK(4,9),1,1},{HAL_PIN_PACK(4,11),1,2}}};
+#endif
 const board_t *board_get(void){return &board;}
 bool board_mmio_permitted(void){return true;}
 bool hal_gpio_configure(hal_pin_t p,const hal_gpio_cfg_t *cfg){(void)p;(void)cfg;return true;}
@@ -47,7 +52,7 @@ static void flush_io(void){
             tr[g][0x24/4]=0;*previous=0; /* write-only UG bit */
         }
         /* Observe any high PWM output during CPU setup, before counter start. */
-        if(!(tr[g][0]&1u) && (!g || (tr[g][0x44/4]&(1u<<15)))){
+        if(!(tr[g][0]&1u) && (!advanced[g] || (tr[g][0x44/4]&(1u<<15)))){
             for(unsigned c=0;c<4;c++)
                 if((tr[g][0x20/4]&(1u<<(c*4))) && active[g][c]>tr[g][0x24/4])early_high++;
         }
@@ -85,6 +90,14 @@ int main(void){
         handles[i]=hal_tim_dma_open_cfg(&cfg);CHECK(handles[i]);
     }
     flush_io();CHECK(!early_high);
+#if defined(BOBFLIGHT_TEST_MATEK_DSHOT)
+    CHECK(timers[0]==0x40010400u&&timers[1]==0x40000400u);
+    CHECK(dmas[0]==0x40026400u&&streams[0]==1&&channels[0]==7);
+    CHECK(dmas[1]==0x40026000u&&streams[1]==2&&channels[1]==5);
+    CHECK(motor_cc[0]==2&&motor_cc[1]==3&&motor_cc[2]==0&&motor_cc[3]==1);
+    CHECK(motor_af[0]==3&&motor_af[1]==3&&motor_af[2]==2&&motor_af[3]==2);
+    CHECK((fake_rcc.APB2ENR&2u)&&(fake_rcc.APB1ENR&2u));CHECK(tr[0][0x44/4]&(1u<<15));CHECK(!ic_coupled);
+#endif
     for(unsigned clock=0;clock<2;clock++)for(unsigned rate=0;rate<2;rate++){
         core_hz=clock?216000000u:168000000u;
         /* Change rates to force recomputation after changing the model clock. */
@@ -98,13 +111,14 @@ int main(void){
                 for(unsigned j=0;j<20;j++)words[i][j]=j<16?((pattern[(i+repeat)%4]>>(15-j))&1u?6:3):0;
                 CHECK(hal_tim_dma_start_burst(handles[i],words[i],20));
             }
-            flush_io();CHECK(!early_high); /* regression: baseline fails here */
+            flush_io();CHECK(!early_high);
+            for(unsigned m=0;m<4;m++)for(unsigned j=0;j<20;j++)CHECK(frames[motor_group[m]][j][motor_cc[m]]==(uint32_t)words[m][j]*periods[motor_group[m]]/8u);
             for(unsigned g=0;g<2;g++){
                 for(unsigned c=0;c<4;c++)CHECK(active[g][c]==0);
                 unsigned off=(unsigned)(stream(g)-dmas[g])/4;
                 CHECK(dr[g][off+1]==19u*4u);
                 CHECK(dr[g][off+3]==(uint32_t)(uintptr_t)&frames[g][1][0]);
-                CHECK(tr[g][0x2C/4]+1==hal_f7_timclk(g==1)/bit_rate);
+                CHECK(tr[g][0x2C/4]+1==hal_f7_timclk(apb2[g])/bit_rate);
                 for(unsigned j=0;j<20;j++){
                     const bool was_enabled=(dr[g][off]&1u)!=0;
                     timed_update(g);
@@ -122,6 +136,7 @@ int main(void){
             }
         }
     }
+#if !defined(BOBFLIGHT_TEST_MATEK_DSHOT)
     /* B2: TCIE only when a bidir capture is armed; quiesce before TX. */
     {
         uint16_t words[20]={0};
@@ -146,7 +161,13 @@ int main(void){
         hal_tim_dma_set_inverted(false);flush_io();
         CHECK(!(tr[0][0x20/4]&((1u<<9)|(1u<<13))) && !(tr[1][0x20/4]&((1u<<1)|(1u<<5))));
     }
+#else
+    CHECK(g_quiesce_calls==0);
+    /* Busy DMA must fail closed, cancel a partial frame, and latch zero duty. */
+    R(stream(0),0)|=1u;flush_io();uint16_t zero[20]={0};CHECK(!hal_tim_dma_start_burst(handles[0],zero,20));flush_io();CHECK(pending==0);
+    for(unsigned g=0;g<2;g++){CHECK(!(tr[g][0]&1));for(unsigned c=0;c<4;c++)CHECK(active[g][c]==0);}
+#endif
     stop();flush_io();CHECK(!early_high);
-    puts("PASS: real HAL setup stays low; all 16 bits + four idle slots follow timed updates at 168/216 MHz and DShot300/600, repeated frames and stop; TX DMA TC at slot 18 after the 16 data bits; TCIE only when bidir capture armed; bidir CCxP polarity");
+    puts("PASS: selected board real HAL setup stays low; all 16 bits + four idle slots follow timed updates at 168/216 MHz and DShot300/600, repeated frames and stop; TX DMA TC at slot 18 after the 16 data bits; TCIE only when bidir capture armed; bidir CCxP polarity");
     return 0;
 }

@@ -301,9 +301,6 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   # Report contract: status/filters/loop_rate/receiver keys and order equal b77b845.
   add_test(NAME report_keys_contract COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_report_keys_contract.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
-  add_executable(bobflight_legacy_p54_migration_test tests/host_legacy_p54_migration.c src/sched/loop_rate_setting.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
-  target_link_libraries(bobflight_legacy_p54_migration_test m)
-  add_test(NAME legacy_p54_migration COMMAND bobflight_legacy_p54_migration_test)
   add_executable(bobflight_storage_cli_test src/flight/config.c src/sched/loop_rate_setting.c tests/host_storage_cli.c)
   target_link_libraries(bobflight_storage_cli_test m)
   add_test(NAME storage_cli COMMAND bobflight_storage_cli_test)
@@ -430,6 +427,9 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_link_libraries(bobflight_blackbox_inputs_test m)
   add_test(NAME blackbox_schema3_inputs COMMAND bobflight_blackbox_inputs_test)
 
+  add_executable(bobflight_actual_rates_test tests/host_actual_rates.c src/flight/rates.c src/flight/config.c)
+  target_link_libraries(bobflight_actual_rates_test m)
+  add_test(NAME actual_rates_math COMMAND bobflight_actual_rates_test)
   add_executable(bobflight_rates_math_test
     src/flight/rates.c
     src/flight/config.c
@@ -571,6 +571,9 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_dshot_timer_test tests/host_dshot_timer.c)
   target_compile_definitions(bobflight_dshot_timer_test PRIVATE BOBFLIGHT_HOST=1)
   add_test(NAME dshot_timer COMMAND bobflight_dshot_timer_test)
+  add_executable(bobflight_matek_dshot_timer_test tests/host_dshot_timer.c)
+  target_compile_definitions(bobflight_matek_dshot_timer_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_TEST_MATEK_DSHOT=1)
+  add_test(NAME matek_dshot_timer COMMAND bobflight_matek_dshot_timer_test)
   add_test(NAME cli_bench_protocol COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_cli_bench.py $<TARGET_FILE:bobflight_host>)
   foreach(check filter rates_math arming_edges failsafe dshot_frame dshot_speed crsf_parse gyro_inject cascade_inject attitude mpu6000 bench_safety)

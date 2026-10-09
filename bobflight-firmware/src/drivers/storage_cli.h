@@ -19,9 +19,9 @@ static void cmd_storage(void)
     flight_enabled=1;
 #endif
     int n = snprintf(buf, sizeof(buf),
-        "storage_api: 1\r\nbackend: %s\r\nschema: 11\r\nstate: %s\r\n"
+        "storage_api: 1\r\nbackend: %s\r\nschema: 13\r\nstate: %s\r\n"
         "dirty: %u\r\ngeneration: %lu\r\nlast_error: %s\r\n"
-        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw\r\n"
+        "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates\r\n"
         "armed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nflight_enabled: %u\r\nstorage_end: 1\r\n",
         persist_backend(), persist_state(), persist_dirty() ? 1u : 0u,
         (unsigned long)persist_generation(), persist_last_error(),
@@ -57,7 +57,7 @@ static void cmd_config_export(bool full)
 {
     static const struct { const char *name; float value; } defaults[] = {
         {"rate_max_roll", 800.f}, {"rate_max_pitch", 800.f}, {"rate_max_yaw", 800.f},
-        {"rate_expo", .30f}, {"pid_roll_p", .002f}, {"pid_roll_i", .001f},
+        {"pid_roll_p", .002f}, {"pid_roll_i", .001f},
         {"pid_roll_d", .00005f}, {"pid_pitch_p", .002f}, {"pid_pitch_i", .001f},
         {"pid_pitch_d", .00005f}, {"pid_yaw_p", .002f}, {"pid_yaw_i", .001f},
         {"pid_yaw_d", .00005f},
@@ -69,16 +69,18 @@ static void cmd_config_export(bool full)
         /* Schema 9 RPM notch filter (independent keys, any order replays). */
         {"rpm_filter_harmonics", 0.f}, {"rpm_filter_min_hz", 100.f},
         {"rpm_filter_q_x100", 500.f}, {"motor_poles", 14.f},
-        {"align_board_roll",0.f},{"align_board_pitch",0.f},{"align_board_yaw",0.f}
+        {"align_board_roll",0.f},{"align_board_pitch",0.f},{"align_board_yaw",0.f},
+        {"rate_center_roll",200.f},{"rate_center_pitch",200.f},{"rate_center_yaw",200.f},
+        {"rate_expo_roll",.30f},{"rate_expo_pitch",.30f},{"rate_expo_yaw",.30f}
     };
-    /* Configurator CONFIG_EXPORT_MAX_BYTES: 2560 for schema 11 mounting keys.
+    /* Configurator CONFIG_EXPORT_MAX_BYTES: 3072 for fresh-install schema13.
      * Worst-case calibrated dump remains bounded and is tested in host_storage_cli. */
-    char out[2560]; size_t used = 0;
+    char out[3072]; size_t used = 0;
     const board_t *b = board_get();
     bool ok = export_append(out, sizeof(out), &used,
-        "# bobflight_config: 1\r\n# schema: 11\r\n# board: %s\r\n"
+        "# bobflight_config: 1\r\n# schema: 13\r\n# board: %s\r\n"
         "# firmware: %s\r\n# kind: %s\r\n# mode_count: %u\r\n"
-        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw\r\n"
+        "# scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates\r\n"
         "# excludes: gyro_calibration\r\n",
         b ? b->board_id : "unknown", BOBFLIGHT_VERSION_STRING, full ? "dump" : "diff", (unsigned)MODE_COUNT);
     gyro_calibration_info_t cal;gyro_calibration_info(&cal);

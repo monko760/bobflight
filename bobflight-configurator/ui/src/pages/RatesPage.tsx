@@ -1,225 +1,78 @@
-import { useCallback, useEffect, useState } from "react";
-import { useHost } from "../hooks/useHost";
-import {
-  SETTINGS_KEYS,
-  type SettingsKey,
-} from "../protocol";
-import { ensureMockConnected } from "../protocol/ensureConnected";
-import {
-  mockSettingsApi,
-  RATE_KEYS,
-  type RateKey,
-} from "../tuning/mockSettingsApi";
-import type { RatesConfig } from "../tuning/mockTuningStore";
-
-const MAX_KEYS: RateKey[] = ["rate_max_roll", "rate_max_pitch", "rate_max_yaw"];
-
-function emptyRates(): RatesConfig {
-  return {
-    rate_max_roll: 0,
-    rate_max_pitch: 0,
-    rate_max_yaw: 0,
-    rate_expo: 0,
-  };
-}
-
-function formatSettingValue(n: number): string {
-  if (Number.isInteger(n)) return String(n);
-  const s = n.toFixed(8).replace(/\.?0+$/, "");
-  return s.length ? s : "0";
-}
-
-function mapRatesFromAll(
-  all: Record<string, string>,
-): RatesConfig {
-  const next = emptyRates();
-  for (const key of RATE_KEYS) {
-    const raw = all[key];
-    if (raw === undefined) continue;
-    const n = Number(raw);
-    if (Number.isFinite(n)) next[key] = n;
-  }
-  return next;
-}
-
-/** FALLBACK ONLY — local mockSettingsApi when host settings throw / unavailable. */
-function loadRatesViaFallback(): RatesConfig {
-  const next = emptyRates();
-  for (const key of RATE_KEYS) {
-    const reply = mockSettingsApi.get(key);
-    const idx = reply.indexOf("=");
-    if (idx <= 0) throw new Error(reply === "unknown key" ? "unknown key" : reply);
-    const n = Number(reply.slice(idx + 1));
-    if (!Number.isFinite(n)) throw new Error(`get failed: ${reply}`);
-    next[key] = n;
-  }
-  return next;
-}
-
-function settingsErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/unknown key/i.test(msg)) return "unknown key";
-  if (/set failed/i.test(msg)) return "set failed";
-  if (/save failed/i.test(msg)) return "save failed";
-  return msg;
-}
-
-export function RatesPage() {
-  const { host } = useHost();
-  const [values, setValues] = useState<RatesConfig>(emptyRates);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [usingFallback, setUsingFallback] = useState(false);
-  const [ready, setReady] = useState(false);
-
-  const load = useCallback(async () => {
-    setErr(null);
-    try {
-      await ensureMockConnected(host);
-      const all = await host.getAllSettings();
-      setValues(mapRatesFromAll(all));
-      setUsingFallback(false);
-      setReady(true);
-    } catch (e) {
-      // FALLBACK: Protocol host settings unavailable — use local mockSettingsApi.
-      try {
-        setValues(loadRatesViaFallback());
-        setUsingFallback(true);
-        setReady(true);
-        setErr(
-          `Protocol settings unavailable (${settingsErrorMessage(e)}); using local mockSettingsApi fallback`,
-        );
-      } catch (fe) {
-        setErr(settingsErrorMessage(fe));
-        setReady(false);
-      }
-    }
-  }, [host]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  function updateField(key: RateKey, raw: string) {
-    const n = Number(raw);
-    setValues((prev) => ({
-      ...prev,
-      [key]: Number.isFinite(n) ? n : prev[key],
-    }));
-    setMsg(null);
-    setErr(null);
-  }
-
-  async function onSave() {
-    setErr(null);
-    setMsg(null);
-    if (usingFallback) {
-      for (const key of RATE_KEYS) {
-        const reply = mockSettingsApi.set(key, values[key]);
-        if (!reply.startsWith("ok ")) {
-          setErr(reply === "unknown key" || reply === "set failed" ? reply : "set failed");
-          return;
-        }
-      }
-      const saveReply = mockSettingsApi.save();
-      if (saveReply !== "saved") {
-        setErr(saveReply === "save failed" ? "save failed" : saveReply);
-        return;
-      }
-      setMsg("Saved in demo memory only—not on a controller.");
-      await load();
-      return;
-    }
-
-    try {
-      await ensureMockConnected(host);
-      for (const key of RATE_KEYS) {
-        await host.setSetting(key as SettingsKey, formatSettingValue(values[key]));
-      }
-      await host.saveSettings();
-      setMsg("Saved to controller flash and verified.");
-      await load();
-    } catch (e) {
-      setErr(settingsErrorMessage(e));
-    }
-  }
-
-  async function onDefaults() {
-    setErr(null);
-    setMsg(null);
-    if (usingFallback) {
-      const reply = mockSettingsApi.defaults("rates");
-      if (reply !== "defaults restored") {
-        setErr(reply);
-        return;
-      }
-      setMsg("defaults restored");
-      await load();
-      return;
-    }
-
-    try {
-      await ensureMockConnected(host);
-      // restoreDefaults resets all 12 keys (FW contract); re-load rates fields after.
-      await host.restoreDefaults();
-      setMsg("defaults restored");
-      await load();
-    } catch (e) {
-      setErr(settingsErrorMessage(e));
-    }
-  }
-
-  return (
-    <div className="panel">
-      <h2>Rates</h2>
-      <p className="muted">
-        Per-axis max rates plus shared expo via Protocol{" "}
-        <code>get/set/save/defaults</code> on mock transport. Keys:{" "}
-        {RATE_KEYS.filter((k) =>
-          (SETTINGS_KEYS as readonly string[]).includes(k),
-        ).join(", ")}
-        .
-      </p>
-
-      {!ready && !err && <p className="muted">Connecting / loading settings…</p>}
-
-      <div className="tuning-grid">
-        {MAX_KEYS.map((key) => (
-          <div key={key} className="tuning-field">
-            <label htmlFor={key}>{key}</label>
-            <input
-              id={key}
-              type="number"
-              step="1"
-              value={values[key]}
-              onChange={(e) => updateField(key, e.target.value)}
-            />
-          </div>
-        ))}
-        <div className="tuning-field">
-          <label htmlFor="rate_expo">rate_expo</label>
-          <input
-            id="rate_expo"
-            type="number"
-            step="0.01"
-            min="0"
-            max="1"
-            value={values.rate_expo}
-            onChange={(e) => updateField("rate_expo", e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="button" className="primary" onClick={() => void onSave()}>
-          Save
-        </button>
-        <button type="button" className="ghost" onClick={() => void onDefaults()}>
-          Defaults
-        </button>
-      </div>
-      {msg && <p className="muted">Last reply: {msg}</p>}
-      {err && <p className="fail">{err}</p>}
-    </div>
-  );
+import {useCallback,useEffect,useRef,useState} from 'react';
+import {useHost} from '../hooks/useHost';
+import {parseStorage,canSaveStorage,type StorageSnapshot} from '../protocol';
+import {RATES_DEFAULTS,getRates,type RatesConfig} from '../tuning/mockTuningStore';
+import {mockSettingsApi,type RateKey} from '../tuning/mockSettingsApi';
+import {AXES,rateAtStick,rateDraftValid,rateSaveEntries,readRateSettings} from '../tuning/actualRates';
+const errorText=(e:unknown)=>e instanceof Error?e.message:String(e);
+export function RatesPage(){
+ const {host,connectionStatus,postFlashGate}=useHost();
+ const [values,setValues]=useState<RatesConfig>({...RATES_DEFAULTS});
+ const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[preview,setPreview]=useState(false);
+ const [supported,setSupported]=useState(false),[storage,setStorage]=useState<StorageSnapshot|null>(null);
+ const [error,setError]=useState(''),[message,setMessage]=useState('');
+ const epoch=useRef(0);
+ const load=useCallback(async()=>{
+  const token=++epoch.current;setReady(false);setPreview(false);setStorage(null);setError('');setMessage('');setBusy(false);
+  if(connectionStatus!=='connected'){setError('Connect a controller, or choose Local preview.');return;}
+  if(postFlashGate){setError('Verify the controller after flashing before editing rates.');return;}
+  setBusy(true);
+  try{
+   const all=await host.getAllSettings();if(token!==epoch.current)return;
+   const read=readRateSettings(all);let capability:StorageSnapshot|null=null;
+   try{capability=parseStorage(await host.sendCommand('storage'));}catch(e){if(token===epoch.current)setError(`Storage capability unverified: ${errorText(e)}. Saving is disabled.`);}
+   if(token!==epoch.current)return;
+   const actual=!!capability&&capability.schema===13&&capability.lastError!=='fresh_install_required'&&capability.lastError!=='invalid_record';
+   if(!actual)throw Error('Fresh install required: Actual rates need schema13 with initialized configuration storage.');
+   setValues(read.values);setStorage(capability);setSupported(actual);setReady(true);
+  }catch(e){if(token===epoch.current){setError(errorText(e));setReady(false);}}
+  finally{if(token===epoch.current)setBusy(false);}
+ },[host,connectionStatus,postFlashGate]);
+ useEffect(()=>{void load();return()=>{epoch.current++;};},[load]);
+ const valid=ready&&supported&&rateDraftValid(values);
+ const canSave=valid&&!busy&&(preview||(!postFlashGate&&canSaveStorage(storage,connectionStatus==='connected',busy)));
+ function update(key:RateKey,raw:string){setValues(v=>({...v,[key]:raw.trim()===''?NaN:Number(raw)}));setMessage('');}
+ async function save(){
+  if(!canSave)return;
+  const token=epoch.current;setBusy(true);setError('');setMessage('');
+  try{
+   const entries=rateSaveEntries(values);
+   if(preview){for(const [k,v]of entries)if(!mockSettingsApi.set(k,v).startsWith('ok '))throw Error('Invalid local preview setting');setMessage('Saved to local preview memory only. No controller was changed.');return;}
+   for(const [k,v]of entries){if(token!==epoch.current||host.getConnectionStatus()!=='connected')throw Error('Connection changed; reload rates before continuing');await host.setSetting(k,v);}
+   if(token!==epoch.current)throw Error('Connection changed before save');
+   await host.saveSettings();if(token!==epoch.current)return;
+   const after=readRateSettings(await host.getAllSettings());if(token!==epoch.current)return;
+   for(const [k,v]of entries)if(Math.abs(after.values[k]-Number(v))>Math.max(1e-6,Math.abs(Number(v))*2e-6))throw Error(`Readback mismatch: ${k}`);
+   const verified=parseStorage(await host.sendCommand('storage'));if(token!==epoch.current)return;
+   if(verified.backend!=='flash'||verified.state!=='saved'||verified.dirty)throw Error('Final flash-save verification failed');
+   setValues(after.values);setStorage(verified);setMessage('Saved to controller flash and read back.');
+  }catch(e){if(token===epoch.current){setError(`${errorText(e)}. Some values may already be applied in RAM or saved. Reload before retrying.`);setReady(false);}}
+  finally{if(token===epoch.current)setBusy(false);}
+ }
+ function localPreview(){epoch.current++;setValues(getRates());setSupported(true);setPreview(true);setStorage(null);setBusy(false);setReady(true);setError('');setMessage('Local preview only. No controller reads or writes.');}
+ const ceiling=Math.max(100,...AXES.map(a=>Math.max(values[`rate_center_${a}`],values[`rate_max_${a}`])));
+ const colors=['#ef6464','#51b88a','#599be8'];
+ return <div className="panel">
+  <h2>Rates</h2><p className="muted">Actual rates: independent center sensitivity, maximum rate and expo for each axis.</p>
+  <div className="row"><button onClick={()=>void load()} disabled={busy}>Reload controller</button><button onClick={localPreview} disabled={busy}>Local preview</button></div>
+  {preview&&<p className="muted">Preview memory only. These are not controller readings.</p>}
+  <fieldset disabled={!ready||busy} style={{border:0,padding:0}}>
+   <table style={{width:'100%',marginTop:'1rem'}}><thead><tr><th>Axis</th><th>Center sensitivity (deg/s)</th><th>Max rate (deg/s)</th><th>Expo (%)</th></tr></thead><tbody>
+   {AXES.map(a=><tr key={a}><th style={{textTransform:'capitalize'}}>{a}</th>
+    <td><input aria-label={`${a} center sensitivity`} id={`rate_center_${a}`} type="number" min={0} max={2000} step={10} value={Number.isFinite(values[`rate_center_${a}`])?values[`rate_center_${a}`]:''} onChange={e=>update(`rate_center_${a}`,e.target.value)}/></td>
+    <td><input aria-label={`${a} max rate`} id={`rate_max_${a}`} type="number" min={10} max={2000} step={10} value={Number.isFinite(values[`rate_max_${a}`])?values[`rate_max_${a}`]:''} onChange={e=>update(`rate_max_${a}`,e.target.value)}/></td>
+    <td><input aria-label={`${a} expo percent`} id={`rate_expo_${a}`} type="number" min={0} max={100} step={1} value={Number.isFinite(values[`rate_expo_${a}`])?Number((values[`rate_expo_${a}`]*100).toFixed(6)):''} onChange={e=>update(`rate_expo_${a}`,e.target.value===''?'':String(Number(e.target.value)/100))}/></td>
+   </tr>)}</tbody></table>
+  </fieldset>
+  {AXES.filter(a=>values[`rate_center_${a}`]>values[`rate_max_${a}`]).map(a=><p className="fail" key={a}>{a}: center exceeds max. Like Betaflight Actual, the effective endpoint is {values[`rate_center_${a}`]} deg/s.</p>)}
+  {ready&&!valid&&<p className="fail">Enter finite values within the shown ranges.</p>}
+  {valid&&<><svg role="img" aria-label="Signed rate curves with 2 percent receiver deadband" viewBox="0 0 520 290" style={{width:'100%',maxWidth:720}}>
+   {[-1,0,1].map(v=><g key={v}><line x1={55} x2={495} y1={135-v*105} y2={135-v*105} stroke="currentColor" opacity={.2}/><text x={3} y={140-v*105} fill="currentColor" fontSize={12}>{Math.round(v*ceiling)}</text></g>)}
+   <line x1={275} x2={275} y1={30} y2={240} stroke="currentColor" opacity={.2}/>
+   {AXES.map((a,i)=><path key={a} data-axis={a} fill="none" stroke={colors[i]} strokeWidth={2} d={Array.from({length:101},(_,k)=>{const x=k/50-1,y=rateAtStick(values,a,x);return `${k?'L':'M'}${(55+k*4.4).toFixed(2)},${(135-y/ceiling*105).toFixed(2)}`;}).join(' ')}/>)}
+   <text x={55} y={260} fill="currentColor" fontSize={12}>-100%</text><text x={268} y={260} fill="currentColor" fontSize={12}>0</text><text x={460} y={260} fill="currentColor" fontSize={12}>100%</text><text x={125} y={285} fill="currentColor" fontSize={12}>Stick input (existing 2% deadband applied once)</text>
+  </svg><p>{AXES.map((a,i)=><span key={a} style={{color:colors[i],marginRight:20}}>{a}: {rateAtStick(values,a,1).toFixed(0)} deg/s endpoint</span>)}</p></>}
+  <div className="row"><button className="primary" disabled={!canSave} onClick={()=>void save()}>{preview?'Save preview':'Save to controller'}</button><button disabled={!ready||busy} onClick={()=>{setValues({...RATES_DEFAULTS});setMessage('Only the rate draft was reset. Nothing was sent or saved.');}}>Reset rate draft</button></div>
+  {message&&<p className="muted">{message}</p>}{error&&<p className="fail" role="alert">{error}</p>}
+ </div>;
 }

@@ -62,6 +62,7 @@ export {
   SCHEMA6_FLOAT_KEYS,
   SCHEMA8_FLOAT_KEYS,
   SCHEMA9_INT_KEYS,
+  ACTUAL_RATE_KEYS,
   isOptionalSettingsKey,
   DEFAULT_SETTINGS,
   DEFAULT_SETTING_VALUES,
@@ -193,4 +194,4 @@ export type { MotorDirectionMockScenario } from "./motor-direction-mock";
 
 export { F405_USB_DIAGNOSTIC_PROFILE, F405_DIAGNOSTIC_MARKERS, hasF405DiagnosticMarkers, validateF405DiagnosticImage, assertF405DfuLayout } from "./flasher/f405-diagnostic";
 
-export {isBoardAlignmentCommand,STORAGE_SCOPE_V11,STORAGE_PAYLOAD_BYTES_V11} from "./storage";
+export {isBoardAlignmentCommand,STORAGE_SCOPE_V13,STORAGE_PAYLOAD_BYTES_V13} from "./storage";

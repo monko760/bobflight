@@ -350,6 +350,11 @@ static void cmd_set(const char *key, const char *valstr)
             cli_write_str("set failed\r\n");
             return;
         }
+        /* Matek TX is implemented; its capture backend is not. Never claim RPM support. */
+#if defined(BOBFLIGHT_MCU)
+        const board_t *bidir_board=board_get();
+        if(on&&bidir_board&&!strcmp(bidir_board->board_id,"matek_f722_px")){cli_write_str("set failed: bidirectional DShot unavailable on this target\r\n");return;}
+#endif
         dshot_bidir_set_enabled(on);
         snprintf(buf, sizeof(buf), "ok dshot_bidir=%s\r\n", on ? "on" : "off");
         cli_write_str(buf);
