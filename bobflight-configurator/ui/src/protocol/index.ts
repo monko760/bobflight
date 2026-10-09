@@ -27,6 +27,7 @@ export {
   parseDefaultsReply,
   isSettingsKey,
   DEFAULT_SETTINGS,
+  validateSettingValue,ACTUAL_RATE_KEYS,
   SCHEMA5_FLOAT_KEYS,
   isR0bDshotCliCommand,
 } from "@bobflight/protocol";

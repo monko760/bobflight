@@ -1,3 +1,11 @@
+# Current schema 4
+
+See [Blackbox compatibility work](BLACKBOX-COMPATIBILITY.md) for the current field contract, sources, limitations and acceptance criteria.
+
+Schema 4 uses standard `gyroUnfilt[]`, `accSmooth[]`, `imuQuaternion[]`, `rssi`, and (only barometer-enabled builds) `baroAlt`. BobFlight-specific field names now use `bf` instead of `bobflight` to stay below stock Explorer's header-line limit. The file field definitions are authoritative; older files keep their original names. Configuration-storage schema 11 is unchanged.
+
+The following is retained as the **historical schema 3 contract**, not the schema produced by new builds.
+
 # Blackbox log fields: BobFlight log schema 3
 
 This page is the reference for the onboard `.BBL` files written by `blackbox start`. It covers the frame fields, units, bit orders, header keys and byte budget. Schema 3 is new in this change (it replaces schema 2). The encoder is original BobFlight code (`src/flight/blackbox_encode.c`) for the publicly readable Blackbox wire format. Every frame is a self-contained `I` frame: no `P` deltas and no predictors.

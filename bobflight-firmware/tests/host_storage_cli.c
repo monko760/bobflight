@@ -53,9 +53,9 @@ unsigned dshot_speed_kbps(void){return 300;}
 int main(void){
  config_init();board.rx_uart=BOARD_GENERATED_RX_UART;strcpy(board.board_id,"dummy");
  cmd_config_export(false);assert(strstr(output,"# kind: diff\r\n"));assert(!strstr(output,"\r\nset "));assert(!strstr(output,"\r\nmode_range "));assert(strstr(output,"# config_end: 1\r\n"));assert(!writes);
- output[0]=0;cmd_config_export(true);assert(strstr(output,"set rate_max_roll 800\r\n"));assert(strstr(output,"mode_range ANGLE 1 2 900 2100\r\n"));assert(strlen(output)<2048);assert(!strstr(output,"\r\nsave\r\n"));assert(!strstr(output,"\r\narm\r\n"));assert(strstr(output,"\r\ncontrol_mode angle\r\n"));assert(!writes);
+ output[0]=0;cmd_config_export(true);assert(strstr(output,"set rate_max_roll 800\r\n"));assert(strstr(output,"mode_range ANGLE 1 2 900 2100\r\n"));assert(strlen(output)<3072);assert(!strstr(output,"\r\nsave\r\n"));assert(!strstr(output,"\r\narm\r\n"));assert(strstr(output,"\r\ncontrol_mode angle\r\n"));assert(!writes);
  assert(config_set_key("rate_max_roll",555.f));modes[1]=(mode_config_t){false,12,1100,1450};map="TAER";
- output[0]=0;cmd_config_export(false);assert(strstr(output,"set rate_max_roll 555\r\n"));assert(strstr(output,"receiver_map TAER\r\n"));assert(strstr(output,"mode_range ANGLE 0 12 1100 1450\r\n"));assert(!strstr(output,"set rate_expo"));assert(!writes);
+ output[0]=0;cmd_config_export(false);assert(strstr(output,"set rate_max_roll 555\r\n"));assert(strstr(output,"receiver_map TAER\r\n"));assert(strstr(output,"mode_range ANGLE 0 12 1100 1450\r\n"));assert(!strstr(output,"set rate_expo "));assert(!strstr(output,"set rate_type "));assert(!writes);
  output[0]=0;dirty=true;cmd_storage();assert(strstr(output,"storage_api: 1\r\nbackend: flash\r\n"));assert(strstr(output,"dirty: 1\r\n"));assert(strstr(output,"storage_end: 1\r\n"));assert(!writes);
  output[0]=0;saved=false;cmd_save_config();assert(!strcmp(output,"save failed: write_error\r\n"));
  output[0]=0;saved=true;cmd_save_config();assert(!strcmp(output,"saved: flash verified\r\n"));
@@ -66,7 +66,7 @@ int main(void){
   * CONFIG_EXPORT_MAX_BYTES (2048) with at least 64 B headroom. The byte count
   * is printed and asserted (docs/MOTOR-DIRECTION.md records it). */
  {static const struct{const char*k;float v;}big[]={{"rate_max_roll",1234.56787f},{"rate_max_pitch",1234.56787f},{"rate_max_yaw",1234.56787f},
-   {"rate_expo",.0123456791f},{"pid_roll_p",1.23456791e-05f},{"pid_roll_i",1.23456791e-05f},{"pid_roll_d",1.23456791e-05f},{"pid_pitch_p",1.23456791e-05f},
+   {"rate_center_roll",1234.56787f},{"rate_center_pitch",1234.56787f},{"rate_center_yaw",1234.56787f},{"rate_expo_roll",.0123456791f},{"rate_expo_pitch",.0123456791f},{"rate_expo_yaw",.0123456791f},{"pid_roll_p",1.23456791e-05f},{"pid_roll_i",1.23456791e-05f},{"pid_roll_d",1.23456791e-05f},{"pid_pitch_p",1.23456791e-05f},
    {"pid_pitch_i",1.23456791e-05f},{"pid_pitch_d",1.23456791e-05f},{"pid_yaw_p",1.23456791e-05f},{"pid_yaw_i",1.23456791e-05f},{"pid_yaw_d",1.23456791e-05f},
    {"min_throttle",.0123456791f},{"gyro_lpf_hz",123.456787f},{"dterm_lpf_hz",123.456787f},{"gyro_notch1_cutoff_hz",123.456787f},{"gyro_notch1_hz",234.567886f},
    {"gyro_notch2_cutoff_hz",123.456787f},{"gyro_notch2_hz",234.567886f},{"rpm_filter_harmonics",3},{"rpm_filter_min_hz",200},{"rpm_filter_q_x100",1000},{"motor_poles",36}};
@@ -77,9 +77,9 @@ int main(void){
   if(!loop_rate_setting_set(8000)||!config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN)){fprintf(stderr,"settings refused\n");return 1;}
   long_cal=true;long_mode=true;output[0]=0;cmd_config_export(true);long_cal=false;long_mode=false;
   size_t len=strlen(output);
-  printf("calibrated worst-case schema 10 dump: %zu bytes (limit 2560, headroom %zu bytes)\n",len,(size_t)2560u-len);
-  if(strstr(output,"config export failed")||len<=1800||len+64>2560){fprintf(stderr,"FAIL: calibrated worst-case dump %zu bytes (need 1800 < len <= 2496: 64 B headroom under 2560, no 'config export failed')\n%s\n",len,output);return 1;}
-  assert(strstr(output,"# schema: 11\r\n")&&strstr(output,"set motor_direction props-in\r\nset loop_rate_hz 8000\r\n"));
+  printf("calibrated worst-case schema 13 dump: %zu bytes (limit 3072, headroom %zu bytes)\n",len,(size_t)3072u-len);
+  if(strstr(output,"config export failed")||len<=1800||len+64>3072){fprintf(stderr,"FAIL: calibrated worst-case dump %zu bytes (need 1800 < len <= 3008: 64 B headroom under 3072, no 'config export failed')\n%s\n",len,output);return 1;}
+  assert(strstr(output,"# schema: 13\r\n")&&strstr(output,"set motor_direction props-in\r\nset loop_rate_hz 8000\r\n"));
   assert(strstr(output,"# accel_calibrated: yes\r\n")&&strstr(output,"# accel_bias: -0.0012345")&&strstr(output,"# config_end: 1\r\n"));
   assert(strstr(output,"control_mode horizon\r\n")&&strstr(output,"mode_range ARM 1 12 1100 2100\r\n"));
   /* diff: motor_direction only when it is not the default props-out; dump always. */

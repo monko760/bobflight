@@ -1,7 +1,7 @@
 # Matek F722-PX bring-up
 
 This target is for the F722-PX, not the F722-WPX. It is not flight-qualified.
-Motor output, battery/current ADC, barometer, FrSky OSD, external flash logging,
+Motor output, battery/current ADC, FrSky OSD, external flash logging,
 SD logging and receiver telemetry transmission are not implemented here.
 Normal arming, receiver freshness, sensor health and failsafe rules are unchanged.
 
@@ -103,3 +103,9 @@ the factory target. For ICs up with stock front unchanged, use roll 180, pitch 0
 yaw 0. See [mounting configuration and tests](../../docs/BOARD-ALIGNMENT.md),
 including the schema-11 downgrade limitation. Save, reboot, verify all axes, then
 level-calibrate and Save again. Do not confuse changed mounting with a scale fix.
+
+## Blackbox / barometer development candidate
+
+The target now includes bounded I2C1 on PB8/PB9 and BMP280 background acquisition. `barometer` reports chip address, sample age, compensated pressure/temperature and startup-relative altitude. The altitude reference is the first 32 valid pressure samples, not GPS altitude or altitude hold. Physical detection, pull-ups and timing remain unverified.
+
+`flash_info` reads SPI2 JEDEC ID and status only (PB13/PB14/PC3, CS PB12). It cannot erase, program or record. External NOR logging is still unavailable. See [the compatibility ledger](../../docs/BLACKBOX-COMPATIBILITY.md). Do not install this development branch as a qualified update while the documented throughput regressions remain.

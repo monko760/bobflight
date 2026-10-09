@@ -33,7 +33,7 @@ int main(int argc,char **argv){
   now+=1000;pid_set_dt(.001f);pid_update(gyro,setpoint,&out);
   if(j%2==0){
    pid_trace_t trace;assert(pid_trace_read(&trace));flight_log_sample_t s={.iteration=j,.time_us=(uint32_t)now,.dt_us=j?1000:0,.armed=1,.mode=1,.pid_valid=1,.gyro_valid=1,.rx_fresh=1,.output_healthy=1};
-   memcpy(s.gyro_raw,raw,sizeof raw);memcpy(s.gyro,gyro,sizeof gyro);memcpy(s.setpoint,setpoint,sizeof setpoint);memcpy(s.motor,motor,sizeof motor);memcpy(s.rc,rc,sizeof rc);memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);s.pid_output[0]=out.roll;s.pid_output[1]=out.pitch;s.pid_output[2]=out.yaw;
+   memcpy(s.gyro_raw,raw,sizeof raw);memcpy(s.gyro,gyro,sizeof gyro);memcpy(s.setpoint,setpoint,sizeof setpoint);memcpy(s.motor,motor,sizeof motor);memcpy(s.rc,rc,sizeof rc);s.setpoint_throttle=rc[3];memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);s.pid_output[0]=out.roll;s.pid_output[1]=out.pitch;s.pid_output[2]=out.yaw;
    size_t n=blackbox_frame(expected+expected_len,sizeof expected-expected_len,&s);assert(n);expected_len+=n;
   }
   bb_capture_observe(now,raw,gyro,setpoint,&out,motor,rc,true,1,0,true,true,true);poll_n(40);

@@ -1,4 +1,4 @@
-import {isBoardAlignmentCommand} from "@bobflight/protocol";
+import {isBoardAlignmentCommand,isSettingsKey,validateSettingValue} from "@bobflight/protocol";
 /**
  * Re-export protocol types; keep BobFlightHost + ALLOWED_CLI_COMMANDS for UI.
  */
@@ -54,6 +54,10 @@ export function parseCliInput(raw: string): CliCommand | null {
   if (/[\x00-\x1f\x7f]/.test(raw)) return null; // reject multiline/control injection
   const cmd = raw.trim().toLowerCase().replace(/ +/g, " ");
   if(isBoardAlignmentCommand(cmd))return cmd as CliCommand;
+  const rateGet=/^get (rate_(?:max|center|expo)_(?:roll|pitch|yaw))$/.exec(cmd);
+  if(rateGet&&isSettingsKey(rateGet[1]))return cmd as CliCommand;
+  const rateSet=/^set (rate_(?:max|center|expo)_(?:roll|pitch|yaw)) (-?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)$/.exec(cmd);
+  if(rateSet&&isSettingsKey(rateSet[1])&&validateSettingValue(rateSet[1],Number(rateSet[2])))return cmd as CliCommand;
   // Preserve the existing explicit bench command spelling restriction.
   if ((cmd === "bench_switch" || cmd === "bench_stop") && raw.trim() !== cmd) return null;
   if (/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) return cmd as CliCommand;

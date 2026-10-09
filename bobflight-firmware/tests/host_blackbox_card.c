@@ -30,6 +30,14 @@ static void fixture(void){
  uint8_t *fat=sector(32);put32(fat,0x0ffffff8);put32(fat+4,0x0fffffff);put32(fat+8,0x0fffffff);put32(fat+12,0x0fffffff);memcpy(sector(32+FAT_SECTORS),fat,512);
  uint8_t *root=sector(DATA_LBA);memcpy(root,"KEEP    TXT",11);root[11]=0x20;put16(root+26,3);put32(root+28,9);memcpy(keep_entry,root,32);memcpy(sector(DATA_LBA+32),"Keep me.\n",9);memcpy(keep_data,sector(DATA_LBA+32),512);
 }
+static void imu_fixture(bb_capture_extra_t *x){
+ const float a[3]={.25f,-.5f,1.f},d[3]={20.f,-10.f,35.f};
+ memcpy(x->accel_g,a,sizeof a);memcpy(x->attitude_deg,d,sizeof d);x->accel_valid=x->attitude_valid=true;
+ x->link_valid=1;x->rssi_dbm[0]=-60;x->rssi_dbm[1]=-75;x->link_lq=97;x->link_snr=-8;x->link_antenna=1;x->link_rf_mode=2;x->link_age_ms=3;
+#if BLACKBOX_HAS_BAROMETER
+ x->baro_valid=x->baro_alt_valid=1;x->baro_pressure_pa=100653.25f;x->baro_temp_c=25.0825f;x->baro_reference_pa=101000.f;x->baro_alt_cm=-123.4f;x->baro_age_ms=5;x->baro_sample=32;
+#endif
+}
 int main(int argc,char **argv){
  fixture();config_init();pid_init();fatlog_io_t io={NULL,CARD_SECTORS,read_begin,write_begin,poll};blackbox_metadata_t m={500,1000,300,"0.2.0-real-card-fixture",config_get()};
  assert(bb_session_start(&session,&io,&m,now));
@@ -41,10 +49,16 @@ int main(int argc,char **argv){
  for(unsigned j=0;j<1200;j++){
   now+=1000;pid_set_dt(.001f);pid_update(gyro,sp,&out);
   if(j%2==0){pid_trace_t trace;assert(pid_trace_read(&trace));flight_log_sample_t s={.iteration=j,.time_us=(uint32_t)(now-epoch),.dt_us=j?1000:0,.armed=1,.mode=1,.pid_valid=1,.gyro_valid=1,.rx_fresh=1,.output_healthy=1};
-   memcpy(s.gyro_raw,raw,sizeof raw);memcpy(s.gyro,gyro,sizeof gyro);memcpy(s.setpoint,sp,sizeof sp);memcpy(s.motor,motor,sizeof motor);memcpy(s.rc,rc,sizeof rc);memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);s.pid_output[0]=out.roll;s.pid_output[1]=out.pitch;s.pid_output[2]=out.yaw;
+   memcpy(s.gyro_raw,raw,sizeof raw);memcpy(s.gyro,gyro,sizeof gyro);memcpy(s.setpoint,sp,sizeof sp);memcpy(s.motor,motor,sizeof motor);memcpy(s.rc,rc,sizeof rc);s.setpoint_throttle=rc[3];
+   const float a[3]={.25f,-.5f,1.f},d[3]={20.f,-10.f,35.f};memcpy(s.accel_g,a,sizeof a);memcpy(s.attitude_deg,d,sizeof d);s.accel_valid=s.attitude_valid=1;
+ s.link_valid=1;s.rssi_dbm[0]=-60;s.rssi_dbm[1]=-75;s.link_lq=97;s.link_snr=-8;s.link_antenna=1;s.link_rf_mode=2;s.link_age_ms=3;
+#if BLACKBOX_HAS_BAROMETER
+ s.baro_valid=s.baro_alt_valid=1;s.baro_pressure_pa=100653.25f;s.baro_temp_c=25.0825f;s.baro_reference_pa=101000.f;s.baro_alt_cm=-123.4f;s.baro_age_ms=5;s.baro_sample=32;
+#endif
+   memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);s.pid_output[0]=out.roll;s.pid_output[1]=out.pitch;s.pid_output[2]=out.yaw;
    size_t n=blackbox_frame(expected+expected_len,sizeof expected-expected_len,&s);assert(n);expected_len+=n;
   }
-  bb_capture_observe(now,raw,gyro,sp,&out,motor,rc,true,1,0,true,true,true);background(200);
+  bb_capture_ctx_t ctx={.fill=imu_fixture};bb_capture_observe_ex(now,raw,gyro,sp,&out,motor,rc,true,1,0,true,true,true,&ctx);background(200);
  }
  bb_session_stop(&session);
  for(unsigned i=0;i<500000&&bb_session_busy(&session);i++){now+=10;bb_session_poll(&session,now);}

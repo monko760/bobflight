@@ -19,8 +19,11 @@ static bool valid(const flight_log_sample_t *s){
   if(!isfinite(s->gyro_raw[a])||!isfinite(s->gyro[a])||!isfinite(s->setpoint[a])||!isfinite(s->p[a])||!isfinite(s->i[a])||!isfinite(s->d[a])||!isfinite(s->pid_output[a]))return false;
   if(!isfinite(s->rc[a])||s->rc[a]<-1.f||s->rc[a]>1.f)return false;
  }
+ for(unsigned a=0;a<3;a++){
+  if((s->accel_valid&&!isfinite(s->accel_g[a]))||(s->attitude_valid&&(!isfinite(s->attitude_deg[a])||fabsf(s->attitude_deg[a])>360.f)))return false;
+ }
  for(unsigned m=0;m<4;m++)if(!isfinite(s->motor[m])||s->motor[m]<0.f||s->motor[m]>1.f)return false;
- return isfinite(s->rc[3])&&s->rc[3]>=0.f&&s->rc[3]<=1.f;
+ return isfinite(s->rc[3])&&s->rc[3]>=0.f&&s->rc[3]<=1.f&&isfinite(s->setpoint_throttle)&&s->setpoint_throttle>=0.f&&s->setpoint_throttle<=1.f;
 }
 void recorder_reset(void){
  if(active)return;

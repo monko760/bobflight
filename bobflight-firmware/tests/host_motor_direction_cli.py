@@ -41,8 +41,8 @@ lines=run(['diff','set motor_direction props-in','diff','dump','defaults','diff'
 sets=[l for l in lines if l.startswith('set motor_direction')]
 assert sets==['set motor_direction props-in','set motor_direction props-in'],sets
 assert 'motor_direction=props-out' in lines,lines
-assert values(lines,'schema')==['11'] and values(lines,'# schema')==['11']*4,lines
-assert all(s.endswith(',motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw') for s in values(lines,'scope')+values(lines,'# scope')),lines
+assert values(lines,'schema')==['13'] and values(lines,'# schema')==['13']*4,lines
+assert all(s.endswith(',motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates') for s in values(lines,'scope')+values(lines,'# scope')),lines
 
 # An accepted set makes storage dirty; a refused one does not.
 lines=run(['save','storage','set motor_direction bogus','storage','set motor_direction props-in','storage'])

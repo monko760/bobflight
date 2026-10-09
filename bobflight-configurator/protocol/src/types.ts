@@ -50,6 +50,7 @@ export type CliCommand =
   | "disarm"
   | "reboot"
   | "bl" | "bl discard"
+  | "barometer" | "flash_info"
   | "sensors"
   | `get align_board_${"roll"|"pitch"|"yaw"}`
   | `set align_board_${"roll"|"pitch"|"yaw"} ${number}`

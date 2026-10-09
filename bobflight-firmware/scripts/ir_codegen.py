@@ -103,6 +103,33 @@ def parse_ir(raw: str, fallback_id: str) -> dict:
         pr = re.search(r"protocol_default:\s*([A-Za-z0-9_]+)", body)
         if pr:
             proto = pr.group(1)
+    for key in ("flash_spi_bus","flash_cs_pin","flash_sck_pin","flash_miso_pin","flash_mosi_pin"):
+        if len(re.findall(r"^[ \t]*"+key+r":[ \t]*[^\r\n]*$", raw, re.M))>1:
+            raise ValueError("duplicate flash field: "+key)
+    flash_spi = int(_field(raw,"flash_spi_bus","0"))
+    flash_pins = [_field(raw,"flash_"+k+"_pin") for k in ("cs","sck","miso","mosi")]
+    if flash_spi:
+        if flash_spi != 2 or mcu != "STM32F722" or flash_pins != ["PB12","PB13","PB14","PC3"]:
+            raise ValueError("unsupported flash SPI routing")
+        used = [_field(raw,"vbat_pin"),_field(raw,"current_pin"),_field(raw,"led0_pin"),cs,exti,_field(raw,"sck_pin"),_field(raw,"miso_pin"),_field(raw,"mosi_pin"),tx,rx]
+        used += [c["pin"] for c in _channel_pins(raw)]
+        used += [_field(raw,"sd_"+k+"_pin") for k in ("cs","sck","miso","mosi","detect")]
+        if spi == flash_spi or int(_field(raw,"sd_spi_bus","0")) == flash_spi or any(p in used for p in flash_pins):
+            raise ValueError("flash SPI resource conflict")
+    elif any(flash_pins):
+        raise ValueError("flash pins require explicit bus")
+    for key in ("baro_i2c_bus","baro_scl_pin","baro_sda_pin"):
+        if len(re.findall(r"^[ \t]*"+key+r":[ \t]*[^\r\n]*$",raw,re.M))>1:
+            raise ValueError("duplicate barometer field: "+key)
+    baro_i2c=int(_field(raw,"baro_i2c_bus","0"))
+    baro_pins=[_field(raw,"baro_scl_pin"),_field(raw,"baro_sda_pin")]
+    if baro_i2c:
+        if baro_i2c!=1 or mcu!="STM32F722" or baro_pins!=["PB8","PB9"]:
+            raise ValueError("unsupported barometer I2C routing")
+        taken=[cs,exti,tx,rx]+flash_pins+[_field(raw,k) for k in ("sck_pin","miso_pin","mosi_pin","vbat_pin","current_pin","led0_pin","sd_cs_pin","sd_sck_pin","sd_miso_pin","sd_mosi_pin","sd_detect_pin")]
+        taken += [c["pin"] for c in _channel_pins(raw)]
+        if any(pin in taken for pin in baro_pins):raise ValueError("barometer I2C resource conflict")
+    elif any(baro_pins):raise ValueError("barometer pins require explicit bus")
     led0 = _field(raw, "led0_pin")
     return {
         "status": status,
@@ -125,6 +152,10 @@ def parse_ir(raw: str, fallback_id: str) -> dict:
         "mosi": _field(raw, "mosi_pin"),
         "align": align,
         "motors": _channel_pins(raw),
+        "baro_i2c": baro_i2c,
+        "baro_pins": baro_pins,
+        "flash_spi": flash_spi,
+        "flash_pins": flash_pins,
         "sd_spi": int(_field(raw,"sd_spi_bus","0")),
         "sd_cs": _field(raw,"sd_cs_pin"),
         "sd_sck": _field(raw,"sd_sck_pin"),
@@ -185,6 +216,14 @@ def render(src: Path, ir: dict) -> str:
         f"#define BOARD_GENERATED_IR_VERIFIED  {verified}",
         f"#define BOARD_GENERATED_IR_BF_DERIVED {bf}",
         "",
+        f"#define BOARD_GENERATED_BARO_I2C {ir['baro_i2c'] if pack else 0}u",
+        f"#define BOARD_GENERATED_BARO_SCL {pin(ir['baro_pins'][0])}",
+        f"#define BOARD_GENERATED_BARO_SDA {pin(ir['baro_pins'][1])}",
+        f"#define BOARD_GENERATED_FLASH_SPI {ir['flash_spi'] if pack else 0}u",
+        f"#define BOARD_GENERATED_FLASH_CS {pin(ir['flash_pins'][0])}",
+        f"#define BOARD_GENERATED_FLASH_SCK {pin(ir['flash_pins'][1])}",
+        f"#define BOARD_GENERATED_FLASH_MISO {pin(ir['flash_pins'][2])}",
+        f"#define BOARD_GENERATED_FLASH_MOSI {pin(ir['flash_pins'][3])}",
         f"#define BOARD_GENERATED_SD_SPI {ir['sd_spi'] if pack else 0}u",
         f"#define BOARD_GENERATED_SD_CS {pin(ir['sd_cs'])}",
         f"#define BOARD_GENERATED_SD_SCK {pin(ir['sd_sck'])}",

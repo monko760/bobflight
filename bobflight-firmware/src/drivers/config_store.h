@@ -1,47 +1,16 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 #ifndef BOBFLIGHT_CONFIG_STORE_H
 #define BOBFLIGHT_CONFIG_STORE_H
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-typedef enum { CONFIG_STORE_OK=0,CONFIG_STORE_EMPTY,CONFIG_STORE_UNSUPPORTED,CONFIG_STORE_INVALID,CONFIG_STORE_IO_ERROR } config_store_result_t;
+#define CONFIG_STORE_SCHEMA 13u
+#define CONFIG_STORE_PAYLOAD_BYTES 256u
+typedef enum {CONFIG_STORE_OK=0,CONFIG_STORE_EMPTY,CONFIG_STORE_UNSUPPORTED,CONFIG_STORE_INVALID,CONFIG_STORE_IO_ERROR,CONFIG_STORE_INCOMPATIBLE} config_store_result_t;
 bool config_store_supported(void);
 config_store_result_t config_store_load(uint32_t board_id,void *payload,size_t bytes);
 config_store_result_t config_store_save(uint32_t board_id,const void *payload,size_t bytes);
 uint32_t config_store_generation(void);
-const char *config_store_backend(void);
-/* v2 is 128 bytes; accepts and zero-extends only schema1/96-byte records.
- * Save migrates to the alternate slot and commits last; never erases legacy first. */
-config_store_result_t config_store_load_v2(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v2(uint32_t board_id,const void *payload,size_t bytes);
-/* v3 is 160 bytes; accepts schema1/96 and schema2/128 with zero extension. */
-config_store_result_t config_store_load_v3(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v3(uint32_t board_id,const void *payload,size_t bytes);
-/* v4 is 176 bytes; accepts schema1/2/3 with zero extension. Adds min_throttle+airmode. */
-config_store_result_t config_store_load_v4(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v4(uint32_t board_id,const void *payload,size_t bytes);
-/* v5 is 184 bytes; accepts schema1/2/3/4 with zero extension. Adds gyro_lpf_hz+dterm_lpf_hz. */
-config_store_result_t config_store_load_v5(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v5(uint32_t board_id,const void *payload,size_t bytes);
-/* v6 is 188 bytes; accepts schema1/2/3/4/5 with zero extension. Adds pid_yaw_d. */
-config_store_result_t config_store_load_v6(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v6(uint32_t board_id,const void *payload,size_t bytes);
-/* v7 is 192 bytes; accepts schema1..6 with zero extension. Adds loop_rate_hz. */
-config_store_result_t config_store_load_v7(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v7(uint32_t board_id,const void *payload,size_t bytes);
-/* v8 is 208 bytes; accepts schema1..7 with zero extension. Adds the two manual gyro notches. */
-config_store_result_t config_store_load_v8(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v8(uint32_t board_id,const void *payload,size_t bytes);
-/* v9 is 224 bytes; accepts schema1..8 with zero extension. Adds the RPM notch filter. */
-config_store_result_t config_store_load_v9(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v9(uint32_t board_id,const void *payload,size_t bytes);
-/* v10 is 256 bytes (MAX_PAYLOAD); accepts schema1..9 with zero extension. Adds
- * motor_direction (S4) at 228..231; 224..227 and 232..255 are reserved zero so the
- * commit block stays 32-byte aligned (HEADER+256), the same record shape as G1's
- * schema 10 (gyro_rate_hz at 224..227), so either order of landing keeps one layout. */
-/* Schema 11: same 256-byte envelope, aircraft mounting + calibration-frame angles. */
-config_store_result_t config_store_load_v11(uint32_t board_id,void *payload,size_t len);
-config_store_result_t config_store_save_v11(uint32_t board_id,const void *payload,size_t len);
-config_store_result_t config_store_load_v10(uint32_t board_id,void *payload,size_t bytes);
-config_store_result_t config_store_save_v10(uint32_t board_id,const void *payload,size_t bytes);
 uint32_t config_store_loaded_schema(void);
+const char *config_store_backend(void);
 #endif

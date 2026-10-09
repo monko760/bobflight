@@ -17,7 +17,7 @@
  *
  * Validation (config.c config_set_key):
  *   rate_max_*: 10..2000
- *   rate_expo:  0..1
+ *   rate_expo_*: 0..1; rate_center_*: 0..2000
  *   other pid_*: 0..10, must be finite
  *   gyro_lpf_hz / dterm_lpf_hz: 0=off else 10..1000 — FW Lead+Flight lock 2026-09-22
  *   min_throttle: 0..0.2; airmode: 0|1
@@ -57,6 +57,9 @@ export const SCHEMA9_INT_KEYS = ["rpm_filter_harmonics", "rpm_filter_min_hz", "r
 export type Schema9IntKey = (typeof SCHEMA9_INT_KEYS)[number];
 
 /** Keys an older FC may not have; a missing one is omitted, never defaulted. */
+/** Actual per-axis profile; current firmware is required. */
+export const ACTUAL_RATE_KEYS = ['rate_center_roll','rate_center_pitch','rate_center_yaw','rate_expo_roll','rate_expo_pitch','rate_expo_yaw'] as const;
+export type ActualRateKey = (typeof ACTUAL_RATE_KEYS)[number];
 export function isOptionalSettingsKey(k: string): k is Schema8FloatKey | Schema9IntKey {
   return (SCHEMA8_FLOAT_KEYS as readonly string[]).includes(k) || (SCHEMA9_INT_KEYS as readonly string[]).includes(k);
 }
@@ -68,7 +71,6 @@ export const SETTINGS_KEYS = [
   "rate_max_roll",
   "rate_max_pitch",
   "rate_max_yaw",
-  "rate_expo",
   "pid_roll_p",
   "pid_roll_i",
   "pid_roll_d",
@@ -83,6 +85,7 @@ export const SETTINGS_KEYS = [
   ...SCHEMA5_FLOAT_KEYS,
   ...SCHEMA8_FLOAT_KEYS,
   ...SCHEMA9_INT_KEYS,
+  ...ACTUAL_RATE_KEYS,
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -121,7 +124,8 @@ export function formatFwFloat(n: number): string {
 
 /** Numeric DEF_* from FW config.c (store as numbers internally). */
 export const DEFAULT_SETTING_VALUES: Readonly<Record<SettingsKey, number>> = {
-  rate_max_roll: 800, rate_max_pitch: 800, rate_max_yaw: 800, rate_expo: 0.3,
+  rate_center_roll:200,rate_center_pitch:200,rate_center_yaw:200,rate_expo_roll:.3,rate_expo_pitch:.3,rate_expo_yaw:.3,
+  rate_max_roll: 800, rate_max_pitch: 800, rate_max_yaw: 800,
   pid_roll_p: 0.002, pid_roll_i: 0.001, pid_roll_d: 0.00005,
   pid_pitch_p: 0.002, pid_pitch_i: 0.001, pid_pitch_d: 0.00005,
   pid_yaw_p: 0.002, pid_yaw_i: 0.001, pid_yaw_d: 0.00005,
@@ -131,7 +135,8 @@ export const DEFAULT_SETTING_VALUES: Readonly<Record<SettingsKey, number>> = {
 };
 
 export const DEFAULT_SETTINGS: Readonly<Record<SettingsKey, string>> = {
-  rate_max_roll: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_roll), rate_max_pitch: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_pitch), rate_max_yaw: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_yaw), rate_expo: formatFwFloat(DEFAULT_SETTING_VALUES.rate_expo),
+  rate_center_roll:"200",rate_center_pitch:"200",rate_center_yaw:"200",rate_expo_roll:"0.3",rate_expo_pitch:"0.3",rate_expo_yaw:"0.3",
+  rate_max_roll: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_roll), rate_max_pitch: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_pitch), rate_max_yaw: formatFwFloat(DEFAULT_SETTING_VALUES.rate_max_yaw),
   pid_roll_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_p), pid_roll_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_i), pid_roll_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_roll_d), pid_pitch_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_p), pid_pitch_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_i), pid_pitch_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_pitch_d), pid_yaw_p: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_p), pid_yaw_i: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_i), pid_yaw_d: formatFwFloat(DEFAULT_SETTING_VALUES.pid_yaw_d), min_throttle: formatFwFloat(DEFAULT_SETTING_VALUES.min_throttle), airmode: formatFwFloat(DEFAULT_SETTING_VALUES.airmode), gyro_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.gyro_lpf_hz), dterm_lpf_hz: formatFwFloat(DEFAULT_SETTING_VALUES.dterm_lpf_hz),
   gyro_notch1_hz: "0", gyro_notch1_cutoff_hz: "0", gyro_notch2_hz: "0", gyro_notch2_cutoff_hz: "0",
   rpm_filter_harmonics: "0", rpm_filter_min_hz: "100", rpm_filter_q_x100: "500", motor_poles: "14",
@@ -140,8 +145,9 @@ export function cloneDefaultSettings(): Record<SettingsKey,string> { return { ..
 export function cloneDefaultSettingValues(): Record<SettingsKey,number> { return { ...DEFAULT_SETTING_VALUES }; }
 export function validateSettingValue(key: SettingsKey, value: number): boolean {
   if (!Number.isFinite(value)) return false;
+  if(key.startsWith("rate_center_"))return value>=0&&value<=2000;
+  if(key.startsWith("rate_expo_"))return value>=0&&value<=1;
   if (key.startsWith("rate_max_")) return value >= 10 && value <= 2000;
-  if (key === "rate_expo") return value >= 0 && value <= 1;
   if (key === "min_throttle") return value >= 0 && value <= 0.2;
   if (key === "airmode") return value === 0 || value === 1;
   if (key === "gyro_lpf_hz" || key === "dterm_lpf_hz") return value === 0 || (value >= 10 && value <= 1000);

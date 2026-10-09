@@ -294,6 +294,7 @@ void loop_mixer_dshot(void)
     if(recorder_active()){
         /* Cheap context every PID loop (events); eRPM/filter flags only for logged samples. */
         bb_capture_ctx_t bb_ctx;bb_inputs_context(&bb_ctx);
+        bb_ctx.mixer_throttle=throttle;bb_ctx.mixer_throttle_valid=true;
         bb_capture_observe_ex(last_pid_us,g_gyro_raw,g_gyro_filt,g_setpoint,&g_pid,g_motors,rc,
             arming_state()==ARM_ARMED,(uint8_t)g_effective_mode,(uint8_t)failsafe_stage(),
             sample_ok,rx_frame_fresh(),dshot_is_healthy(),&bb_ctx);

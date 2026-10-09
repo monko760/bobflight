@@ -5,7 +5,7 @@
  * clock: 13.5 MHz SPI bytes, per-call CPU cost, card read latency, per-sector
  * write busy time and periodic multi-ms stalls. A table of loop configurations
  * (1000/1, 8000/2, 8000/1) with separate gyro-only and PID slot costs captures
- * through the schema 3 bb_capture_observe_ex path (decimate first); the
+ * through the schema 4 bb_capture_observe_ex path (decimate first); the
  * background blackbox poll runs between slots like main.c + scheduler_run.
  * The requested rate is the build's BLACKBOX_RATE_DEFAULT_HZ (500 by default;
  * a second CTest target builds this file with 1000u).
@@ -203,6 +203,9 @@ static double model_t;
 static void model_fill(bb_capture_extra_t *x){
  vt_ns+=1000u; /* 4 telemetry reads + RPM snapshot, logged samples only */
  for(unsigned m=0;m<4;m++)x->erpm[m]=(uint32_t)(21000.0+9000.0*sin(model_t*3.0+m));
+ x->accel_valid=x->attitude_valid=true;x->accel_g[2]=1.f;
+ x->attitude_deg[0]=(float)(20*sin(model_t));x->attitude_deg[1]=(float)(10*cos(model_t));x->attitude_deg[2]=(float)(80*sin(model_t*.3));
+ x->link_valid=1;x->rssi_dbm[0]=-60;x->rssi_dbm[1]=-75;x->link_lq=97;x->link_snr=-8;x->link_antenna=1;x->link_rf_mode=2;x->link_age_ms=3;
  x->telem_ok=0xF;x->filter_flags=bb_filter_flags_pack(true,false,3u,3u);
 }
 static void probe(char *dst,size_t cap){output[0]=0;assert(cmd_blackbox("blackbox status"));snprintf(dst,cap,"%s",output);}
@@ -215,7 +218,7 @@ static result_t run(const loop_cfg_t *loop,const card_model_t *model,double seco
  bool burst_done=false,early_done=false,mid_done=false;const uint64_t mid_us=seconds>=10.0?5000000u:(uint64_t)(seconds*5e5);
  const uint64_t period_us=1000000u/loop->gyro_hz;const double pid_dt=(double)loop->denom/(double)loop->gyro_hz;
  const uint64_t cli_overhead_ns=loop->bg_ns;
- bb_capture_ctx_t ctx={bb_loop_code(loop->gyro_hz/loop->denom),false,0,model_fill};
+ bb_capture_ctx_t ctx={bb_loop_code(loop->gyro_hz/loop->denom),false,0,model_fill,0.f,false};
  uint64_t end_us=(uint64_t)(seconds*1e6);bool stopped=false;uint32_t max_overrun=0,max_late=0,stalls=0;unsigned pid_n=0,slot=0;
  uint64_t rec_start_us=0,rec_end_us=0;
  while(blackbox_cli_busy()){
@@ -343,7 +346,7 @@ int main(int argc,char **argv){
  if(argc>1){status_out=fopen(argv[1],"w");assert(status_out);}
  if(argc>2){f2_out=fopen(argv[2],"w");assert(f2_out);}
  char want[256];
- printf("requested rate %u Hz (BLACKBOX_RATE_DEFAULT_HZ), schema 3 frame bound %u B\n",(unsigned)REQ,(unsigned)BLACKBOX_FRAME_MAX_BYTES);
+ printf("requested rate %u Hz (BLACKBOX_RATE_DEFAULT_HZ), schema 4 frame bound %u B\n",(unsigned)REQ,(unsigned)BLACKBOX_FRAME_MAX_BYTES);
  /* Idle status before any session: api 2, effective == requested == default. */
  output[0]=0;assert(cmd_blackbox("blackbox status"));check_status_contract(output);save_status(output);save_f2("idle",output);
  assert(strstr(output,"blackbox_missed_pct: 0.0\r\nblackbox_logged_hz: unavailable\r\nblackbox_missed_state: ok\r\nblackbox_end: 1\r\n"));
@@ -364,7 +367,7 @@ int main(int argc,char **argv){
   assert(r.max_late_us<=25);      /* gyro slot lateness bound (model: <= 2 x background overhead) */
   assert(r.sector_reads<r.sector_writes*3u/2u); /* one readback per data write, no FAT rescan */
   size_t n=extract(file_buf,sizeof file_buf);assert(n==r.bytes&&n>13&&!memcmp(file_buf+n-13,"E\xff" "End of log",13));
-  assert(strstr((char*)file_buf,"\nH BobFlight log_schema:3\n"));
+  assert(strstr((char*)file_buf,"\nH BobFlight log_schema:4\n"));
   snprintf(want,sizeof want,"\nH BobFlight loop_rate_hz:%u gyro_hz:%u pid_denom:%u\n",(unsigned)loop_hz,(unsigned)lp->gyro_hz,(unsigned)lp->denom);assert(strstr((char*)file_buf,want));
   const double bpf=(double)(n-r.header_len-13u)/r.frames;assert(bpf>40.0&&bpf<=(double)BLACKBOX_FRAME_MAX_BYTES);
   if(REQ==1000u&&loop_hz==8000u){
@@ -515,7 +518,7 @@ int main(int argc,char **argv){
   printf("  F2 status boundaries: 0/0 -> 0.0 ok; 1.00 %% -> 1.0 ok; 1.04 %% -> 1.0 ok; 1.05 %% -> 1.1 high; 100 %% -> 100.0 high\n");}
  if(f2_out)assert(!fclose(f2_out));
  if(status_out)assert(!fclose(status_out));
- printf("PASS blackbox throughput model @ %u Hz requested: realistic-card drop matrix over 1000/1, 8000/2, 8000/1 (schema 3 frames, ring peak <= 32 KiB, gyro lateness <= 25 us%s); one threshold-card halving per loop with the header patched; harsh foreground; very slow card floors at 125 Hz; due-slot auto-rate trigger (500 Hz build); missed 0 / effective == requested at 1k/4k/8k and injected stalls reported as missed; F2 missed_pct/logged_hz/missed_state (stall > 1 %% high, missed burst leaves the rate alone, reset at start); status api 2 contract\n",
+ printf("PASS blackbox throughput model @ %u Hz requested: realistic-card drop matrix over 1000/1, 8000/2, 8000/1 (schema 4 frames, ring peak <= 32 KiB, gyro lateness <= 25 us%s); one threshold-card halving per loop with the header patched; harsh foreground; very slow card floors at 125 Hz; due-slot auto-rate trigger (500 Hz build); missed 0 / effective == requested at 1k/4k/8k and injected stalls reported as missed; F2 missed_pct/logged_hz/missed_state (stall > 1 %% high, missed burst leaves the rate alone, reset at start); status api 2 contract\n",
   (unsigned)REQ,REQ==1000u?"; 8000/1 honestly auto-lowers to 500 Hz":"");
  return 0;
 }

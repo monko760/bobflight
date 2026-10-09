@@ -35,7 +35,7 @@ typedef struct {
  uint32_t requested_hz,header_hz,rate_lowerings;const char *rate_reason;
  bool stop_requested,end_created,seen_armed,patch_done;
  blackbox_metadata_t meta;uint32_t header_tail_hash;
- char header[4096];size_t header_len;
+ char header[BLACKBOX_HEADER_MAX_BYTES];size_t header_len;
  uint8_t sector[512],packet[BB_SESSION_PACKET_BYTES];
  size_t ring_head,ring_tail,ring_count,ring_peak;
  uint64_t window_start_us;uint32_t window_lost0,window_attempted0,settle_windows;

@@ -10,7 +10,7 @@ failsafe_stage_t failsafe_stage(void){return override?FAILSAFE_STAGE_HOLD:FAILSA
 /* Schema 3 gather stubs: prove the production hook passes the context every
  * PID loop and reads the slow inputs only for samples that will be logged. */
 #include "drivers/blackbox_inputs.h"
-static bb_capture_ctx_t test_ctx={4,false,7,NULL};
+static bb_capture_ctx_t test_ctx={4,false,7,NULL,0.f,false};
 static bb_capture_extra_t test_extra={{123456u,0u,99u,250000u},0x9u,0x1Du};
 static unsigned fills,contexts;
 void bb_inputs_fill(bb_capture_extra_t *x){fills++;*x=test_extra;}
@@ -54,5 +54,10 @@ int main(void){
  tick(1000);tick(1000);CHECK(recorder_pop(&s));CHECK(s.events==0); /* cleared once written */
  fresh=false;tick(1000);fresh=true;tick(1000);CHECK(recorder_pop(&s));CHECK(s.events&BB_EVENT_RX_LOST);
  bb_capture_end();CHECK(!recorder_active());
+ /* Same production task: override zero must not be replaced by pilot .8. */
+ CHECK(prime(CONTROL_MODE_ACRO));rc[3]=.8f;CHECK(bb_capture_begin(1000,now));
+ tick(1000);CHECK(recorder_pop(&s));CHECK(NEAR(s.setpoint_throttle,.8f)&&NEAR(s.rc[3],.8f));
+ override=true;fresh=false;tick(1000);CHECK(recorder_pop(&s));
+ CHECK(s.setpoint_throttle==0.f&&NEAR(s.rc[3],.8f)&&!s.rx_fresh);bb_capture_end();override=false;fresh=true;
  puts("PASS actual cascade capture hook: existing control regression unchanged; real rate/PID trace, post-mixer requested outputs, low-throttle reset, disarm stop, cadence and timestamps; schema 3 context every loop, slow inputs only when logged, events latched across decimated loops and cleared when written");return 0;
 }

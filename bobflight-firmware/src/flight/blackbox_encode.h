@@ -16,10 +16,17 @@ typedef struct {
  uint32_t gyro_hz, pid_denom; /* scheduler at session start; 0 = unknown */
 } blackbox_metadata_t;
 /* BobFlight log schema: per-frame bobflightSchema and header "H BobFlight log_schema". */
-#define BLACKBOX_LOG_SCHEMA 3u
+#define BLACKBOX_LOG_SCHEMA 4u
 /* I-frame fields and the proven worst-case encoded frame: the 'I' tag plus at
  * most 5 bytes per field (32-bit unsigned/zigzag varint, 7 payload bits/byte). */
-#define BLACKBOX_FIELD_COUNT 54u
+#if defined(BOBFLIGHT_BARO)
+#define BLACKBOX_HAS_BAROMETER 1u
+#else
+#define BLACKBOX_HAS_BAROMETER 0u
+#endif
+#define BLACKBOX_HEADER_MAX_BYTES 5120u
+#define BLACKBOX_ERPM_INDEX (62u+8u*BLACKBOX_HAS_BAROMETER)
+#define BLACKBOX_FIELD_COUNT (71u+8u*BLACKBOX_HAS_BAROMETER)
 #define BLACKBOX_VARINT_MAX_BYTES 5u
 #define BLACKBOX_FRAME_MAX_BYTES (1u + BLACKBOX_FIELD_COUNT * BLACKBOX_VARINT_MAX_BYTES)
 /* The rate-dependent header block (I/P interval + BobFlight log rate line) has

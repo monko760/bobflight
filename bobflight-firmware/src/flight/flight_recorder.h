@@ -23,6 +23,7 @@ typedef struct {
     float gyro_raw[3];
     float gyro[3];
     float setpoint[3];
+    float setpoint_throttle; /* Actual throttle supplied to mixer [0.0, 1.0] */
     float p[3];
     float i[3];
     float d[3];
@@ -40,6 +41,17 @@ typedef struct {
     uint8_t filter_flags;   /* BB_FILTER_* bits (0..127) */
     uint8_t events;         /* BB_EVENT_* bits latched since the previous logged frame (0..127) */
     uint8_t loop_code;      /* target loop Hz / 250 (0 = unknown, 1..32) */
+    float accel_g[3], attitude_deg[3]; /* body acceleration and actual estimator Euler values */
+    uint8_t accel_valid, attitude_valid;
+ int16_t rssi_dbm[2];
+ uint8_t link_lq,link_antenna,link_rf_mode,link_valid;
+ int8_t link_snr;
+ uint32_t link_age_ms;
+ float baro_pressure_pa,baro_temp_c,baro_alt_cm,baro_reference_pa;
+ uint32_t baro_age_ms,baro_sample;
+ uint8_t baro_valid,baro_alt_valid;
+
+
     uint32_t overruns;      /* scheduler overruns since the session started */
 } flight_log_sample_t;
 
@@ -72,7 +84,9 @@ static inline bool flight_log_sample_flags_valid(const flight_log_sample_t *s)
     return s && s->armed <= 1u && s->mode <= 2u && s->failsafe <= 2u && s->pid_valid <= 1u &&
            s->gyro_valid <= 1u && s->rx_fresh <= 1u && s->output_healthy <= 1u &&
            s->telem_ok <= BB_TELEM_OK_MAX && s->filter_flags <= BB_FILTER_FLAGS_MAX &&
-           s->events <= BB_EVENTS_MAX && s->loop_code <= BB_LOOP_CODE_MAX;
+           s->events <= BB_EVENTS_MAX && s->loop_code <= BB_LOOP_CODE_MAX &&
+           s->accel_valid <= 1u && s->attitude_valid <= 1u && s->link_valid <= 1u && s->baro_valid <= 1u && s->baro_alt_valid <= 1u && (!s->baro_alt_valid||s->baro_valid) &&
+           (!s->link_valid || (s->link_lq <= 100u && s->link_antenna <= 1u && s->rssi_dbm[0]>=-255 && s->rssi_dbm[0]<=0 && s->rssi_dbm[1]>=-255 && s->rssi_dbm[1]<=0));
 }
 
 typedef struct {
