@@ -403,6 +403,13 @@ int main(void){
  }
 
 
+ /* Matek codec: saved UART3 must restore over the UART2 boot default; OSD UART6 is invalid. */
+ strcpy(board.board_id,"matek_f722_px");board.rx_uart=2;exists=false;
+ armed=bench=calibrating=read_failure=write_failure=false;supported=true;memset(&cal,0,sizeof cal);
+ persist_init();assert(board_select_rx_uart(3));assert(crsf_set_map("TAER"));assert(persist_save());
+ board.rx_uart=2;persist_init();assert(persist_load());assert(board.rx_uart==3&&!strcmp(crsf_map(),"TAER"));
+ for(unsigned u=5;u<=7;u++){put32(image+48,u);assert(!persist_load());assert(board.rx_uart==3);}
+ put32(image+48,3);assert(persist_load());puts("PASS Matek UART3/TAER cold-restore and unsupported UART5/6/7 atomic refusal");
  supported=false;cal.accel_valid=true;before=saves;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"ram-only"));
  puts("PASS actual six-face solver -> codec -> cold restore, candidate/gyro exclusion, atomic malformed-cal refusal, dirty/save/error state, old-settings migration and unsupported target");
  puts("PASS codec offsets, validated atomic restore, repeated boot-init roundtrip, dirty tracking, guards, failed writes/readback, malformed fields and scope");

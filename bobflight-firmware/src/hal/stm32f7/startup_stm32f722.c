@@ -56,7 +56,11 @@ static void early_nop_busywait(volatile uint32_t n)
  * Earliest PA2 setup — crude GPIOA MMIO only (IR-assumed led0 = PA2).
  * No board_* / no HAL.
  */
-#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_TARGET_MATEKF722PX)
+#define EARLY_LED_GPIO_BASE 0x40020000u /* GPIOA, official target LED0 */
+#define EARLY_LED_PORT 0u
+#define EARLY_LED_PIN 14u
+#elif defined(BOBFLIGHT_TARGET_TMOTORF7V2)
 #define EARLY_LED_GPIO_BASE 0x40020800u /* GPIOC */
 #define EARLY_LED_PORT 2u
 #define EARLY_LED_PIN 14u

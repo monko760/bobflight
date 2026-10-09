@@ -130,7 +130,7 @@ int main(void){
  before=transfers;polls(5);now+=500;gyro_health_poll(200);CHECK(transfers==before);
  /* ICM42688 path: chip-ID check only. */
  memset(regs,0,sizeof regs);strcpy(b.board_id,"dummy");strcpy(b.gyro_chip,"ICM42688");regs[0x75]=0x47;arming_init();gyro_init();
-#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX)
  /* This target binds the MPU6000 revision only (gyro.c probe): an ICM ID stays unbound, nothing to check. */
  CHECK(!gyro_is_healthy()&&gyro_health()==GYRO_HEALTH_OK);
 #else

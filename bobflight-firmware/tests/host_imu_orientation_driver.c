@@ -40,19 +40,19 @@ static uint32_t legacy_binding(void) {
  return h;
 }
 int main(void) {
- const char *names[]={"CW0_DEG","CW90_DEG","CW180_DEG","CW270_DEG"};
+ const char *names[]={"CW0_DEG","CW90_DEG","CW180_DEG","CW270_DEG","CW180_DEG_FLIP"};
  /* Independent explicit expected vectors, not a call to the transform under test. */
- const float expected_g[4][3]={{10,-20,30},{-20,-10,30},{-10,20,30},{20,10,30}};
- const float expected_a[4][3]={{.5f,.25f,1},{.25f,-.5f,1},{-.5f,-.25f,1},{-.25f,.5f,1}};
+ const float expected_g[5][3]={{10,-20,30},{-20,-10,30},{-10,20,30},{20,10,30},{10,20,-30}};
+ const float expected_a[5][3]={{.5f,.25f,1},{.25f,-.5f,1},{-.5f,-.25f,1},{-.25f,.5f,1},{.5f,-.25f,-1}};
  b.gyro_spi_bus=4;b.gyro_cs_pin=HAL_PIN_PACK(4,4);strcpy(b.gyro_chip,"MPU6000");
- for(unsigned rotation=0;rotation<4;rotation++) {
+ for(unsigned rotation=0;rotation<5;rotation++) {
   memset(regs,0,sizeof(regs));regs[0x75]=0x68;regs[0x3a]=1;
   strcpy(b.gyro_align,names[rotation]);gyro_init();CHECK(healthy&&gyro_is_healthy());
   float bias[3]={0,0,0},scale[3]={1,1,1};
   uint32_t current_binding=gyro_accel_calibration_binding(),old_binding=legacy_binding();
   CHECK(current_binding!=0);
   CHECK(gyro_accel_restore_valid(bias,scale,current_binding));
-  if(rotation==0||rotation==3) {
+  if(rotation==0||rotation==3||rotation==4) {
    CHECK(current_binding==old_binding);
    CHECK(!gyro_accel_legacy_orientation_valid(bias,scale,old_binding));
   } else {
@@ -76,7 +76,7 @@ int main(void) {
   CHECK(gyro_sample(d));CHECK(gyro_diagnostics()->sample_seq==seq);
   for(unsigned axis=0;axis<3;axis++)CHECK(fabsf(d[axis]-expected_g[rotation][axis])<.01f);
   /* Board configuration is immutable until reinit: no per-sample reparsing. */
-  strcpy(b.gyro_align,names[(rotation+1)%4]);regs[0x3a]=1;now++;
+  strcpy(b.gyro_align,names[(rotation+1)%5]);regs[0x3a]=1;now++;
   CHECK(gyro_sample(d));
   for(unsigned axis=0;axis<3;axis++)CHECK(fabsf(d[axis]-expected_g[rotation][axis])<.01f);
  }

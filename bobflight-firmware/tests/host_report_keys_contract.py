@@ -87,7 +87,7 @@ def main():
         print(json.dumps({board: capture(exe)}, indent=1))
         return
     exe, board = sys.argv[1], sys.argv[2]
-    golden = json.load(open(GOLDEN))[board]
+    golden = json.load(open(GOLDEN))['tmotor_f7_v2' if board=='matek_f722_px' else board]
     golden = s2_expected_receiver(golden)
     got = capture(exe)
     golden = s3_expected_status(golden)

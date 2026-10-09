@@ -1,11 +1,11 @@
 import {StoragePanel} from "../components/StoragePanel";
 import { useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
-import type { CliCommand } from "../protocol";
+import { parsePorts, type CliCommand } from "../protocol";
 import { parseReceiver, type ReceiverReading, type ReceiverMap } from "../protocol/receiver";
 import { ReceiverLinkReadout } from "../components/ReceiverLinkReadout";
 
-const ports=[1,2,3,4,6,7] as const;
+
 const names=["Roll","Pitch","Yaw","Throttle",...Array.from({length:12},(_,i)=>`AUX${i+1}`)];
 const linkLabels={unbound:"UART unavailable",waiting:"Waiting for valid channel frames",live:"Receiving live controls",lost:"Receiver signal lost"};
 
@@ -14,6 +14,7 @@ export function ReceiverPage() {
   const connected=connectionStatus==="connected" && !postFlashGate;
   const [reading,setReading]=useState<ReceiverReading|null>(null);
   const [uart,setUart]=useState<number|null>(null);
+  const [ports,setPorts]=useState<number[]>([]);
   const [map,setMap]=useState<ReceiverMap|null>(null);
   const [error,setError]=useState("");
   const [reply,setReply]=useState("");
@@ -23,19 +24,28 @@ export function ReceiverPage() {
   const epoch=useRef(0), chain=useRef<Promise<unknown>>(Promise.resolve());
   function accept(next:ReceiverReading) {
     setReading(next);setReceivedAt(performance.now());setError("");
-    setUart(old=>old??(ports.includes(next.uart as typeof ports[number])?next.uart:6));
+    setUart(old=>old??next.uart);
     setMap(old=>old??next.map);
   }
   useEffect(()=>{
     const id=++epoch.current;
     let timer:ReturnType<typeof setTimeout>;
-    setReading(null);setUart(null);setMap(null);setReply("");setError("");setPending(false);
+    setReading(null);setUart(null);setPorts([]);setMap(null);setReply("");setError("");setPending(false);
     if(!connected)return;
+    let portsLoaded=false;
     const watchdog=setInterval(()=>setClock(performance.now()),100);
     function poll() {
       chain.current=chain.current.catch(()=>{}).then(async()=>{
         if(id!==epoch.current)return;
         try {
+          if(!portsLoaded){
+            try {
+              const available=parsePorts(await host.sendCommand("ports"));
+              if(id!==epoch.current)return;
+              setPorts(available.ports.filter(p=>p.selectable && p.id!==0).map(p=>p.id));
+            } catch { if(id===epoch.current)setPorts([]); }
+            portsLoaded=true;
+          }
           const next=parseReceiver(await host.sendCommand("receiver"));
           if(id===epoch.current)accept(next);
         } catch(e) { if(id===epoch.current){setReading(null);setError(String(e));} }
@@ -48,7 +58,7 @@ export function ReceiverPage() {
   const live=responding && reading?.link==="live";
   const editable=responding && reading?.armed===0 && reading?.bench_active===0 && !pending;
   async function apply(cmd:CliCommand) {
-    if(!editable)return;
+    if(!editable || (cmd.startsWith("receiver_uart ") && !ports.includes(Number(cmd.split(" ")[1]))))return;
     const id=epoch.current;
     setPending(true);setReply("");
     const job=chain.current.catch(()=>{}).then(async()=>{
@@ -92,16 +102,17 @@ export function ReceiverPage() {
       </select>
     </p>
     <p id="receiver-protocol-help" className="muted">CRSF is the only supported receiver protocol for now. It is fixed in firmware, so no separate protocol Apply or Save is needed. UART and channel-order changes still require Apply, then Save to controller.</p>
-    <label>Receiver TX wire connects to board pad <select value={uart??6} disabled={!editable} onChange={e=>setUart(Number(e.target.value))}>
+    <label>Receiver TX wire connects to board pad <select id="receiver-uart" value={uart??0} disabled={!editable||!ports.length} onChange={e=>setUart(Number(e.target.value))}>
+      {!ports.includes(uart??0)&&<option value={uart??0} disabled>{uart===null?"Awaiting board UARTs":`Current UART${uart} (fixed)`}</option>}
       {ports.map(n=><option key={n} value={n}>R{n} / UART{n}</option>)}
     </select></label>{" "}
-    <button disabled={!editable||uart===null} onClick={()=>void apply(`receiver_uart ${uart}` as CliCommand)}>Apply UART</button>
+    <button disabled={!editable||uart===null||!ports.includes(uart)} onClick={()=>void apply(`receiver_uart ${uart}` as CliCommand)}>Apply UART</button>
     <p><label>Transmitter channel order <select value={map??"AETR"} disabled={!editable} onChange={e=>setMap(e.target.value as ReceiverMap)}>
       <option value="AETR">AETR — Roll, Pitch, Throttle, Yaw</option>
       <option value="TAER">TAER — Throttle, Roll, Pitch, Yaw</option>
     </select></label>{" "}
     <button disabled={!editable||map===null} onClick={()=>void apply(`receiver_map ${map}` as CliCommand)}>Apply mapping</button></p>
-    <p className="muted">CRSF uses 420000 baud. Defaults: UART6 and AETR. Configure the receiver’s serial output as CRSF. Settings changes require disarmed motors and no active bench test. Apply each change, then Save to controller to keep it after reboot.</p>
+    <p className="muted">CRSF uses 420000 baud. UART choices come from the connected board; channel order defaults to AETR. Configure the receiver’s serial output as CRSF. Settings changes require disarmed motors and no active bench test. Apply each change, then Save to controller to keep it after reboot.</p>
     {reply&&<p role="status">{reply}</p>}
     <h3>Mapped controls</h3>
     {!live&&<p>Channel bars are hidden until valid, recent RC frames arrive. Last-known positions are not live controls.</p>}

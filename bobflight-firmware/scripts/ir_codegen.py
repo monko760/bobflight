@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 PACKABLE = {"bf-derived", "verified", "golden", "ready"}
-IMU_ORIENTATIONS = {"CW0_DEG", "CW90_DEG", "CW180_DEG", "CW270_DEG"}
+IMU_ORIENTATIONS = {"CW0_DEG", "CW90_DEG", "CW180_DEG", "CW270_DEG", "CW180_DEG_FLIP"}
 
 
 def _pin_pack(token: str) -> str:

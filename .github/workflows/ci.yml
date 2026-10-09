@@ -10,7 +10,7 @@ jobs:
   firmware-host:
     strategy:
       matrix:
-        board: [dummy, kakute_f7_hdv, tmotor_f7_v2]
+        board: [dummy, kakute_f7_hdv, tmotor_f7_v2, matek_f722_px]
     name: Firmware — host build + tests (${{ matrix.board }})
     runs-on: ubuntu-latest
     defaults:
@@ -47,6 +47,30 @@ jobs:
             bobflight-firmware/build/bobflight.elf
             bobflight-firmware/build/bobflight.hex
             bobflight-firmware/build/bobflight.bin
+
+  firmware-matek:
+    name: Matek F722-PX firmware and storage model
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+          python3 -m pip install unicorn pyelftools
+      - name: ARM storage execution model
+        run: python3 tests/test_f722_flash.py
+      - name: Build and verify sparse HEX
+        run: |
+          cmake -B build-matek -DCMAKE_TOOLCHAIN_FILE=cmake/stm32f722.cmake -DBOBFLIGHT_BOARD=matek_f722_px -DBOBFLIGHT_HOST_SMOKE=OFF
+          cmake --build build-matek -j 2
+          cmake --build build-matek --target check_bootloader_image
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bobflight-matek-f722-px
+          path: bobflight-firmware/build-matek/bobflight.hex
 
   configurator:
     name: Configurator — typecheck, smoke, build

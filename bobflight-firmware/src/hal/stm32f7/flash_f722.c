@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0
- * STM32F745 1 MiB, RM0385 flash chapter: sectors 6/7, x8 programming.
+ * STM32F722 512 KiB, RM0431: sectors 1/2 (16 KiB each), x8 programming.
  * Blocking bench-only operations. Same-bank instruction fetches may stall;
  * no assertion of real-time service or a wall-clock timeout while BSY is set.
  * Caller MUST be disarmed, motor-bench stopped, calibration inactive.
@@ -7,7 +7,7 @@
 #include "hal/hal.h"
 #include "board/board.h"
 #include <string.h>
-#if defined(BOBFLIGHT_CONFIG_FLASH_F745) && defined(BOBFLIGHT_HAVE_CMSIS)
+#if defined(BOBFLIGHT_CONFIG_FLASH_F722) && defined(BOBFLIGHT_HAVE_CMSIS)
 #include "hal_f7_priv.h"
 #include "flash_watchdog.h"
 #include "flight/arming.h"
@@ -17,17 +17,17 @@
 #define FLASH_KEYR REG32(0x40023C04u)
 #define FLASH_SR REG32(0x40023C0Cu)
 #define FLASH_CR REG32(0x40023C10u)
-#define CFG_BASE 0x08080000u
-#define SLOT_BYTES 0x40000u
+#define CFG_BASE 0x08004000u
+#define SLOT_BYTES 0x4000u
 #define BUSY (1u<<16)
 #define LOCK (1u<<31)
-#define ERRORS 0xF2u
+#define ERRORS 0x1F2u
 static bool bounds(uint32_t off,size_t n){return off<=2u*SLOT_BYTES&&n<=2u*SLOT_BYTES-off;}
 bool hal_flash_supported(void){
  const board_t*b=board_get();
- return b&&board_mmio_permitted()&&!strcmp(b->board_id,"kakute_f7_hdv")&&
-  (REG32(0xE0042000u)&0xFFFu)==0x449u&&
-  *(volatile const uint16_t *)(uintptr_t)0x1FF0F442u==1024u;
+ return b&&board_mmio_permitted()&&!strcmp(b->board_id,"matek_f722_px")&&
+  (REG32(0xE0042000u)&0xFFFu)==0x452u&&
+  *(volatile const uint16_t *)(uintptr_t)0x1FF07A22u==512u;
 }
 bool hal_flash_geometry(hal_flash_geometry_t*g){if(!g||!hal_flash_supported())return false;*g=(hal_flash_geometry_t){{0,SLOT_BYTES},{SLOT_BYTES,SLOT_BYTES},1};return true;}
 const char *hal_flash_backend(void){return hal_flash_supported()?"flash":"unsupported";}
@@ -52,15 +52,16 @@ bool hal_flash_erase_slot(unsigned slot){
   * the controller with an unverified longer timeout. */
  if(!flash_iwdg_begin(wd,&saved))for(;;){}
  flash_context_t c=enter();bool ok=unlock();
- if(ok){FLASH_SR=ERRORS|1u;FLASH_CR=(1u<<1)|((6u+slot)<<3);FLASH_CR|=1u<<16;__DSB();ok=idle()&&!(FLASH_SR&ERRORS);}
+ if(ok){FLASH_SR=ERRORS|1u;FLASH_CR=(1u<<1)|((1u+slot)<<3);FLASH_CR|=1u<<16;__DSB();ok=idle()&&!(FLASH_SR&ERRORS);}
  if(!(FLASH_SR&BUSY)){FLASH_CR=LOCK;FLASH_SR=ERRORS|1u;}
  if(!flash_iwdg_end(wd,&saved))for(;;){}
  leave(c);return ok;
 }
 bool hal_flash_write(uint32_t off,const void *src,size_t n){
  if(!src||!bounds(off,n)||!hal_flash_supported())return false;
+ if(arming_state()==ARM_ARMED||bench_motor_active()||gyro_manual_calibration_active())return false;
  /* Reject aliasing the flash source: this routine expects a RAM record. */
- uintptr_t source=(uintptr_t)src;if(source<0x20000000u||source>=0x40000000u||n>0x40000000u-source)return false;
+ uintptr_t source=(uintptr_t)src;if(source<0x20000000u||source>=0x20040000u||n>0x20040000u-source)return false;
  const uint8_t *p=src;flash_context_t c=enter();bool ok=unlock();
  for(size_t i=0;ok&&i<n;i++){
   volatile uint8_t *dst=(volatile uint8_t *)(uintptr_t)(CFG_BASE+off+i);
@@ -72,11 +73,4 @@ bool hal_flash_write(uint32_t off,const void *src,size_t n){
  if(!(FLASH_SR&BUSY)){FLASH_CR=LOCK;FLASH_SR=ERRORS|1u;}
  leave(c);return ok;
 }
-#elif !defined(BOBFLIGHT_CONFIG_FLASH_F722)
-bool hal_flash_geometry(hal_flash_geometry_t*g){(void)g;return false;}
-bool hal_flash_supported(void){return false;}
-const char *hal_flash_backend(void){return "unsupported";}
-bool hal_flash_erase_slot(unsigned slot){(void)slot;return false;}
-bool hal_flash_read(uint32_t off,void *dst,size_t n){(void)off;if(dst&&n)memset(dst,255,n);return false;}
-bool hal_flash_write(uint32_t off,const void *src,size_t n){(void)off;(void)src;(void)n;return false;}
 #endif

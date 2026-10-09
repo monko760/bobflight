@@ -76,6 +76,19 @@
     },
     {
       "schema_version": 1,
+      "id": "matek_f722_px",
+      "mcu": "stm32f722",
+      "ir": "boards/matek-ir/matek_f722_px.yaml",
+      "support": "sensor-only",
+      "capabilities": {
+        "motor_output": false,
+        "usb_cdc": true,
+        "sd_logging": false
+      },
+      "display_name": "Matek F722-PX"
+    },
+    {
+      "schema_version": 1,
       "id": "tmotor_f7_v2",
       "mcu": "stm32f722",
       "ir": "boards/tmotor-ir/tmotor_f7_v2.yaml",

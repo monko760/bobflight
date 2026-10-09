@@ -319,7 +319,7 @@ static bool clock_pll_lock(bool use_hse, uint32_t hse_mhz, bool target_216)
 /** Try 168 (Scale1, no OD) first, then 216+OD. Sets g_usb_clk_src on success. */
 static bool clock_try_pll_path(bool use_hse, uint32_t hse_mhz)
 {
-#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX)
     /* Conservative F722 first bring-up: Scale 1, 168 MHz / PLLQ 48 MHz.
      * Do not introduce a 216 MHz / overdrive fallback for this new target. */
     clock_pwr_scale1_od(false);
@@ -329,7 +329,7 @@ static bool clock_try_pll_path(bool use_hse, uint32_t hse_mhz)
         g_usb_clk_src = use_hse ? "hse-pll" : "hsi-pll";
         return true;
     }
-#if !defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if !defined(BOBFLIGHT_TARGET_TMOTORF7V2) && !defined(BOBFLIGHT_TARGET_MATEKF722PX)
     clock_pll_off();
     clock_pwr_scale1_od(true);
     if (clock_pll_lock(use_hse, hse_mhz, true)) {

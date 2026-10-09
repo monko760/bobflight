@@ -70,7 +70,7 @@ static uint32_t get32(const uint8_t *p){uint32_t v=0;for(unsigned i=0;i<4;i++)v|
 static void put16(uint8_t *p,uint16_t v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
 static uint16_t get16(const uint8_t *p){return (uint16_t)(p[0]|((uint16_t)p[1]<<8));}
 static uint32_t board_tag(void){const board_t *b=board_get();uint32_t h=2166136261u;if(!b)return 0;for(const unsigned char *p=(const unsigned char *)b->board_id;*p;p++)h=(h^*p)*16777619u;return h;}
-static bool valid_uart(uint32_t u){const board_t *b=board_get();if(!b)return false;if(strcmp(b->board_id,"kakute_f7_hdv"))return u==b->rx_uart;return u==1||u==2||u==3||u==4||u==6||u==7;}
+static bool valid_uart(uint32_t u){const board_t *b=board_get();if(!b)return false;if(!strcmp(b->board_id,"matek_f722_px"))return u>=1&&u<=4;if(strcmp(b->board_id,"kakute_f7_hdv"))return u==b->rx_uart;return u==1||u==2||u==3||u==4||u==6||u==7;}
 static bool decode(const uint8_t *p,float values[12],mode_config_t modes[MODE_COUNT]){
  for(unsigned i=0;i<12;i++){uint32_t bits=get32(p+i*4);memcpy(&values[i],&bits,4);float v=values[i];
   if(!isfinite(v)||(i<3?(v<10.f||v>2000.f):i==3?(v<0.f||v>1.f):(v<0.f||v>10.f)))return false;

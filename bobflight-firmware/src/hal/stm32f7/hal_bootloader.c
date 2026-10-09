@@ -16,7 +16,7 @@
 static volatile bl_cookie_t boot_cookie __attribute__((section(".noinit"),aligned(8)));
 static bool rom_device_eligible(void){
  uint32_t device=REG32(0xE0042000u)&0xFFFu;
-#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX)
  return device==0x452u&&REG16(0x1FF07A22u)==512u;
 #elif defined(BOBFLIGHT_CONFIG_FLASH_F745)
  return device==0x449u&&REG16(0x1FF0F442u)==1024u;
@@ -25,7 +25,7 @@ static bool rom_device_eligible(void){
 #endif
 }
 static bool rom_vectors_ok(void){
-#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX)
  const uint32_t ram_end=0x20040000u;
 #else
  const uint32_t ram_end=0x20050000u;
@@ -35,8 +35,12 @@ static bool rom_vectors_ok(void){
 bool hal_bootloader_supported(void){
  const board_t *b=board_get();
  if(!b||!board_mmio_permitted())return false;
-#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX)
+#if defined(BOBFLIGHT_TARGET_MATEKF722PX)
+ if(strcmp(b->board_id,"matek_f722_px"))return false;
+#else
  if(strcmp(b->board_id,"tmotor_f7_v2"))return false;
+#endif
 #elif defined(BOBFLIGHT_CONFIG_FLASH_F745)
  if(strcmp(b->board_id,"kakute_f7_hdv"))return false;
 #else

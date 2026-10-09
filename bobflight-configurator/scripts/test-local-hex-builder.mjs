@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createBuildMiddleware, resolveBuildProfile } from './local-hex-builder.mjs';
 const selection=(boardId='mltempf4',extra={})=>({boardId,customMcu:'',customFlash:'',customHse:'',...extra});
-for(const id of ['kakute_f7_hdv','tmotor_f7_v2','mltempf4'])assert.equal(resolveBuildProfile(selection(id)).boardId,id);
+for(const id of ['kakute_f7_hdv','tmotor_f7_v2','matek_f722_px','mltempf4'])assert.equal(resolveBuildProfile(selection(id)).boardId,id);
 assert(resolveBuildProfile(selection('custom_f405xg_usb',{customMcu:'STM32F405',customFlash:'1024',customHse:'8000000'})).diagnostic);
 for(const bad of [null,[],{},selection('dummy'),selection('../kakute_f7_hdv'),selection('stm32h743'),selection('mltempf4',{flags:'-DARM=1'}),selection('custom_f405xg_usb'),selection('custom_f405xg_usb',{customMcu:'STM32F405',customFlash:'512',customHse:'8000000'})])assert.throws(()=>resolveBuildProfile(bad));
 let starts=0,finish,aborted=false;

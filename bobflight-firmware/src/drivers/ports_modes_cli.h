@@ -71,6 +71,16 @@ static void cmd_ports(void)
                 cli_write_str(buf);
             }
         }
+    } else if (b && strcmp(b->board_id, "matek_f722_px") == 0) {
+        static const kakute_uart_pin_map_t pins[] = {
+            {1,"PA9","PA10"},{2,"PA2","PA3"},{3,"PC10","PC11"},{4,"PA0","PA1"}
+        };
+        for (size_t i=0;i<sizeof(pins)/sizeof(pins[0]);i++) {
+            n=snprintf(buf,sizeof(buf),"port: %u,UART%u,%s,%s,%s,1\r\n",
+                pins[i].uart,pins[i].uart,pins[i].tx_pin,pins[i].rx_pin,
+                pins[i].uart==rx_uart?"crsf":"none");
+            if(n>0&&(size_t)n<sizeof(buf))cli_write_str(buf);
+        }
     } else if (b && !b->is_dummy && rx_uart > 0) {
         /* Other boards expose only actual IR RX nonselectable */
         n = snprintf(buf, sizeof(buf),

@@ -18,6 +18,11 @@ static inline bool gyro_spi_map(const board_t *b,unsigned index,uintptr_t *base,
     b->gyro_miso_pin==HAL_PIN_PACK(0,6)&&b->gyro_mosi_pin==HAL_PIN_PACK(0,7)){
   *base=0x40013000u;*enable=1u<<12;return true;
  }
+ if(!strcmp(b->board_id,"matek_f722_px")&&index==1u&&
+    b->gyro_cs_pin==HAL_PIN_PACK(1,2)&&b->gyro_sck_pin==HAL_PIN_PACK(0,5)&&
+    b->gyro_miso_pin==HAL_PIN_PACK(0,6)&&b->gyro_mosi_pin==HAL_PIN_PACK(0,7)){
+  *base=0x40013000u;*enable=1u<<12;return true;
+ }
  return false;
 }
 #endif

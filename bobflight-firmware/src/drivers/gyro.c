@@ -244,7 +244,7 @@ static bool probe_and_configure(const char *chip_str)
     uint8_t id;
     const bool fast = loop_rate_board_fast(board_get());
     g_kind = GYRO_CHIP_NONE;
-#if defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX)
     /* Initial target intentionally supports the MPU6000 revision only.
      * Other TMOTORF7V2 revisions must not silently use another driver's setup. */
     id=gyro_whoami_inv();
