@@ -32,3 +32,12 @@ serial_rx:
   uart: 2
   pins: {tx: PA2, rx: PA3}
   protocol_default: CRSF
+
+# External NOR pin facts from the pinned MATEKF722HD reference above.
+# Read-only JEDEC/status probe only; no erase/program/log storage backend yet.
+# PC3 is MOSI; PB15 is camera control, not flash MOSI.
+flash_spi_bus: 2
+flash_cs_pin: PB12
+flash_sck_pin: PB13
+flash_miso_pin: PB14
+flash_mosi_pin: PC3

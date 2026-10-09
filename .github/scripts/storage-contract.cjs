@@ -57,3 +57,5 @@ for(let schema=1;schema<=14;schema++)if(schema!==13){assert.throws(()=>parseStor
 for(const axis of ['roll','pitch','yaw'])for(const parameter of ['center','max','expo'])assert(backups[3].raw.includes(`set rate_${parameter}_${axis} `));
 for(const removed of ['rate_type','rate_expo'])assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# config_end: 1',`set ${removed} 0\r\n# config_end: 1`),'dump'));
 console.log('PASS Actual-only nine-key export, schema1..12/future rejection, removed legacy keys refused');
+
+const badRate=spawnSync(binary,[],{input:'get rate_center_roll\nset rate_center_roll 123junk\nget rate_center_roll\n',encoding:'utf8'});assert.equal(badRate.status,0);assert.match(badRate.stdout,/set failed/);const rateReads=[...badRate.stdout.matchAll(/^rate_center_roll=(\S+)/gm)].map(m=>Number(m[1]));assert.deepEqual(rateReads,[200,200],'malformed rate input must not change configuration');

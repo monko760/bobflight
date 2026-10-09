@@ -37,7 +37,7 @@ import { RPM_GATE_ATTEMPTS, RPM_GATE_DELAY_MS, readRpm, rpmView, type RpmSnapsho
 import { CommandGate, GATE_BUSY_MESSAGE, isGateBusy } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { RPM_FILTER_MOCK_SCENARIOS, type RpmFilterMockScenario } from "../../protocol/src/rpm-filter-mock";
-import { STORAGE_SCOPE_V8, STORAGE_SCOPE_V9 } from "../../protocol/src/storage";
+import { STORAGE_SCOPE_V13 } from "../../protocol/src/storage";
 import type { CliCommand, SettingsKey } from "../src/protocol";
 
 const { container } = installFakeDom();
@@ -100,7 +100,7 @@ async function click(el: FakeElement) { flushSync(() => reactProps(el).onClick({
 
 // ---- host rig -----------------------------------------------------------------
 const storageReply = (schema: number) => ["storage_api: 1", "backend: flash", `schema: ${schema}`, "state: saved", "dirty: 0",
-  "generation: 2", "last_error: none", `scope: ${schema >= 9 ? STORAGE_SCOPE_V9 : STORAGE_SCOPE_V8}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n") + "\r\n";
+  "generation: 2", "last_error: none", `scope: ${schema === 13 ? STORAGE_SCOPE_V13 : "unsupported"}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n") + "\r\n";
 
 interface RigOpts { rpmReport?: string; schema?: number; getValue?: Partial<Record<string, string>>; }
 async function mockHost(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
@@ -122,7 +122,7 @@ async function mockHost(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
     sendCommand: async (cmd: CliCommand) => {
       ops.push(cmd);
       if (cmd === "rpm_filter" && o.rpmReport !== undefined) return o.rpmReport;
-      if (cmd === "storage") { loads++; return storageReply(o.schema ?? (scenario === "old-fc" ? 8 : 9)); }
+      if (cmd === "storage") { loads++; return storageReply(o.schema ?? (scenario === "old-fc" ? 8 : 13)); }
       const gate = gates.get(cmd);
       if (gate) await gate;
       return mock.sendCommand(cmd);
@@ -939,7 +939,7 @@ async function main() {
     assert.ok(/This FC does not report the RPM filter \(older firmware\)/.test(rpmSection()), rpmSection());
     assert.equal(testId("settings-busy"), null);
     assert.equal(testId("rpm-busy"), null);
-    assert.ok(!OLDER.test(notchSection()), `schema 8 has the notches: ${notchSection()}`);
+    assert.ok(OLDER.test(notchSection()), `incompatible schema 8 must also disable notch editing: ${notchSection()}`);
     for (const k of rpmInputs) { assert.equal(input(k).value, "unknown", k); assert.ok(isDisabled(input(k)), `${k} read-only`); }
     root.unmount(); await t.mock.disconnect();
   });

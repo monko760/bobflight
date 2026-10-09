@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { REFRESH_CONFIRM_MESSAGE, requestRefresh, shouldConfirmRefresh, storageDirty, browserConfirm } from "../src/components/storageRefresh";
-import { parseStorage, STORAGE_SCOPE_V6 } from "../../protocol/src/storage";
+import { parseStorage, STORAGE_SCOPE_V13 } from "../../protocol/src/storage";
 import { BenchController, type BenchState } from "../src/motors/benchController";
 import { storageBlocked } from "../src/motors/motorsStorage";
 import type { CliCommand, ConnectionStatus, ParsedStatus } from "../src/protocol/types";
@@ -19,8 +19,8 @@ function harness(answer: boolean) {
 }
 // Controller `storage` status reply (same shape the firmware emits).
 const storageReply = (dirty: 0 | 1) => [
-  "storage_api: 1", "backend: flash", "schema: 6", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty}`,
-  "generation: 3", "last_error: none", `scope: ${STORAGE_SCOPE_V6}`, "armed: 0", "bench_active: 0",
+  "storage_api: 1", "backend: flash", "schema: 13", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty}`,
+  "generation: 3", "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0",
   "calibration_active: 0", "flight_enabled: 0", "storage_end: 1",
 ].join("\r\n") + "\r\n";
 // Same FakeHost pattern as test-motor-bench.ts: healthy disarmed bench firmware, honest empty eRPM.

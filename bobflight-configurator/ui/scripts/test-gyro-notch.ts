@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { parseCliInput } from "../src/protocol/types";
 import { GYRO_NOTCH_MOCK_SCENARIOS, type GyroNotchMockScenario } from "../../protocol/src/gyro-notch-mock";
-import { STORAGE_SCOPE_V7, STORAGE_SCOPE_V8 } from "../../protocol/src/storage";
+import { STORAGE_SCOPE_V13 } from "../../protocol/src/storage";
 import { REFRESH_CONFIRM_MESSAGE, requestRefresh } from "../src/components/storageRefresh";
 import {
   applyNotch, draftDirty, draftFromRow, draftPair, draftProblem, loadedPair, notchesSupported, notchRows, readNotches, requestFiltersReload,
@@ -21,7 +21,7 @@ async function mockHost(scenario: GyroNotchMockScenario) {
   return host;
 }
 const storageReply = (schema: string, dirty = "0") => ["storage_api: 1", "backend: flash", `schema: ${schema}`, `state: ${dirty === "1" ? "dirty" : "saved"}`, `dirty: ${dirty}`, "generation: 2",
-  "last_error: none", `scope: ${schema === "8" ? STORAGE_SCOPE_V8 : STORAGE_SCOPE_V7}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n");
+  "last_error: none", `scope: ${schema === "13" ? STORAGE_SCOPE_V13 : ""}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n");
 const report = (r1: string, a1 = "no") => `filters_api: 1\r\nfilters_sample_hz: 4000\r\ngyro_notch1_active: ${a1}\r\ngyro_notch1_reason: ${r1}\r\ngyro_notch2_active: no\r\ngyro_notch2_reason: off\r\nfilters_end: 1\r\n`;
 /** Scripted FC: values map, custom `filters`/`storage` replies, records every line. */
 function fakeHost(values: Partial<Record<string, string>>, opts: { filters?: string; storage?: string; setReply?: (k: string, v: string) => string | null } = {}) {
@@ -52,7 +52,7 @@ async function main() {
     }
   });
 
-  await test("older FC (keys missing or schema < 8): disabled rows, unknown — never 0 or off", async () => {
+  await test("older FC (keys missing or non-13 schema): disabled rows, unknown — never 0 or off", async () => {
     const host = await mockHost("old-fc");
     const all = await host.getAllSettings();
     assert.equal((all as Record<string, string | undefined>).gyro_notch1_hz, undefined, "missing, not 0");
@@ -63,13 +63,17 @@ async function main() {
       assert.equal(draftDirty(r, { enabled: true, center: "200", cutoff: "150" }), false, "old FC rows cannot be edited");
     }
     await host.disconnect();
-    // Keys answer but storage says schema 7: still unsupported.
+    // Keys answer but storage says non-13 (e.g. schema 7 or 8): still unsupported (reports schema 0).
     const v = { gyro_notch1_hz: "0", gyro_notch1_cutoff_hz: "0", gyro_notch2_hz: "0", gyro_notch2_cutoff_hz: "0" };
     const s7 = await readNotches(fakeHost(v, { filters: report("off"), storage: storageReply("7") }).host);
-    assert.equal(s7.schema, 7); assert.equal(notchesSupported(s7), false);
+    assert.equal(s7.schema, 0); assert.equal(notchesSupported(s7), false);
     assert.ok(notchRows(s7).every((r) => r.center === "unknown" && r.reason === "unknown"));
     const s8 = await readNotches(fakeHost(v, { filters: report("off"), storage: storageReply("8") }).host);
-    assert.equal(s8.schema, 8); assert.equal(notchesSupported(s8), true);
+    assert.equal(s8.schema, 0); assert.equal(notchesSupported(s8), false);
+    const current = await readNotches(fakeHost(v, { filters: report("off"), storage: storageReply("13") }).host);
+    assert.equal(current.schema, 13); assert.equal(notchesSupported(current), true);
+    const s13 = await readNotches(fakeHost(v, { filters: report("off"), storage: storageReply("13") }).host);
+    assert.equal(s13.schema, 13); assert.equal(notchesSupported(s13), true);
     // One key missing: unknown.
     const partial = await readNotches(fakeHost({ ...v, gyro_notch2_cutoff_hz: undefined }, { filters: report("off") }).host);
     assert.equal(notchesSupported(partial), false);
@@ -159,10 +163,6 @@ async function main() {
     for (const l of ["filters", "get gyro_notch1_hz", "set gyro_notch2_cutoff_hz 150"]) assert.ok(parseCliInput(l), l);
   });
 
-  // FiltersPage behaviour (cells, Save order, refused set, #54 reload guard) is covered by the render test
-  // scripts/test-filters-page.tsx (npm run test:filters-page), not by source regexes.
-
-  // SettingsKey type stays in sync with the notch keys.
   const k: SettingsKey = "gyro_notch2_cutoff_hz"; void k;
   console.log(`gyro-notch UI: ${passed} passed`);
 }
