@@ -80,7 +80,7 @@ bool board_ir_load_dummy(board_t *out)
 bool board_init(void)
 {
     bool loaded=board_ir_load_dummy(&g_board);
-#if defined(BOBFLIGHT_MCU) && defined(BOBFLIGHT_TARGET_TMOTORF7V2)
+#if defined(BOBFLIGHT_MCU) && (defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX))
     /* RM0431 F72x/73x device family + ST F722 FLASHSIZE register.
      * Not proof of board identity; reject wrong family/capacity before peripherals. */
     target_mcu_ok=((*(volatile const uint32_t *)(uintptr_t)0xE0042000u & 0xFFFu)==0x452u);
@@ -103,6 +103,17 @@ bool board_pins_live(void)
 }
 
 bool board_select_rx_uart(unsigned uart){
+    if(!strcmp(g_board.board_id,"matek_f722_px")){
+        hal_pin_t rx,tx;
+        switch(uart){
+        case 1:rx=HAL_PIN_PACK(0,10);tx=HAL_PIN_PACK(0,9);break;
+        case 2:rx=HAL_PIN_PACK(0,3);tx=HAL_PIN_PACK(0,2);break;
+        case 3:rx=HAL_PIN_PACK(2,11);tx=HAL_PIN_PACK(2,10);break;
+        case 4:rx=HAL_PIN_PACK(0,1);tx=HAL_PIN_PACK(0,0);break;
+        default:return false; /* UART5 lacks a driver; UART6 belongs to Pixel OSD. */
+        }
+        g_board.rx_uart=uart;g_board.rx_pin=rx;g_board.tx_pin=tx;return true;
+    }
     if(strcmp(g_board.board_id,"kakute_f7_hdv"))return false;
     hal_pin_t rx,tx;
     switch(uart){

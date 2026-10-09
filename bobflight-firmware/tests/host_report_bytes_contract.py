@@ -71,7 +71,9 @@ def main():
         print(json.dumps({sys.argv[3]: capture(sys.argv[2])}, indent=1))
         return
     exe, board = sys.argv[1], sys.argv[2]
-    golden = json.load(open(GOLDEN))[board]
+    # New target inherits the exact sensor-only wire format; only its board ID differs.
+    golden = json.load(open(GOLDEN))['tmotor_f7_v2' if board=='matek_f722_px' else board]
+    if board=='matek_f722_px': golden={k:v.replace('tmotor_f7_v2','matek_f722_px') for k,v in golden.items()}
     got = capture(exe)
     gs, ls = mask_counters(s3_expected_status(golden['status'])), mask_counters(got['status'])
     if gs != ls:

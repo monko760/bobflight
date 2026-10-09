@@ -12,7 +12,7 @@ class OrientationIR(unittest.TestCase):
     def parse(self, extra, status='ready'):
         return parse_ir('status: '+status+'\nboard_id: synthetic\nfamily: STM32F722\n'+extra,'synthetic')
     def test_four_rotations(self):
-        for name in ('CW0_DEG','CW90_DEG','CW180_DEG','CW270_DEG'):
+        for name in ('CW0_DEG','CW90_DEG','CW180_DEG','CW270_DEG','CW180_DEG_FLIP'):
             with self.subTest(name=name):self.assertEqual(self.parse('gyro_align: '+name+'\n')['align'],name)
     def test_quoted(self):
         self.assertEqual(self.parse('gyro_align: "CW90_DEG"\n')['align'],'CW90_DEG')

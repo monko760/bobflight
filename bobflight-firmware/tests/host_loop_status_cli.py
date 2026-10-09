@@ -18,7 +18,7 @@ for key in ['board','ir','mcu','usb_clk','gyro_ok','gyro_bind','dshot_bound','rx
             'failsafe','loop','flight_mode','gyro_calibrated','gyro_dps','accel_g','attitude_deg',
             'rx_uart','rx_fresh','rx_frames','channels','motor_output']:
     assert sum(1 for l in lines if l.startswith(key+': '))==1,(key,text)
-expected={'dummy':'1000','tmotor_f7_v2':'1000','kakute_f7_hdv':'4000'}[board]
+expected={'dummy':'1000','tmotor_f7_v2':'1000','matek_f722_px':'1000','kakute_f7_hdv':'4000'}[board]
 target=one('loop_target_hz')
 assert target==expected,(board,target)
 loop=[l for l in lines if l.startswith('loop: ')][0]

@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const LIMIT = 8 * 1024 * 1024;
-const known = ['kakute_f7_hdv', 'tmotor_f7_v2', 'mltempf4', 'custom_f405xg_usb'];
+const known = ['matek_f722_px', 'kakute_f7_hdv', 'tmotor_f7_v2', 'mltempf4', 'custom_f405xg_usb'];
 export function resolveBuildProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k=>!['boardId','customMcu','customFlash','customHse'].includes(k))) throw new Error('Only board/profile selections are accepted.');
   for (const key of ['boardId','customMcu','customFlash','customHse']) if (typeof input[key] !== 'string' || input[key].length > 64) throw new Error('Invalid board/profile fields.');
@@ -18,7 +18,7 @@ export function resolveBuildProfile(input) {
   const diagnostic = input.boardId === 'mltempf4' || input.boardId === 'custom_f405xg_usb';
   if (input.boardId === 'custom_f405xg_usb' && (input.customMcu !== 'STM32F405' || input.customFlash !== '1024' || input.customHse !== '8000000')) throw new Error('Custom builds currently require F405xG / 1024 KiB / 8 MHz. Other MCU and routing combinations are not implemented.');
   return Object.freeze({ boardId:input.boardId, diagnostic, profile:diagnostic?'f405-usb-diagnostic':'main',
-    label:diagnostic?'Experimental USB-only reference image; no sensors, motors, storage or bl command.':input.boardId==='tmotor_f7_v2'?'T-Motor F7 V2 sensor-only firmware; no motor output.':'Kakute F7 HDV development firmware; not flight-qualified.' });
+    label:diagnostic?'Experimental USB-only reference image; no sensors, motors, storage or bl command.':input.boardId==='matek_f722_px'?'Matek F722-PX sensor/CRSF bring-up with settings storage; no motor output, OSD or onboard blackbox logging.':input.boardId==='tmotor_f7_v2'?'T-Motor F7 V2 sensor-only firmware; no motor output.':'Kakute F7 HDV development firmware; not flight-qualified.' });
 }
 async function buildEnvironment(repo) {
   const env={...process.env};const original=env.PATH||env.Path||'';

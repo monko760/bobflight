@@ -8,7 +8,7 @@ import {BOARD_OPTIONS} from '../src/flasher/types';
 import {GENERATED_BOARD_MCU} from '../../protocol/src/flasher/board-targets.generated';
 assert.equal(catalog.schema_version,1);
 assert.equal(boardsForFamily('F4').length,0); assert.equal(boardsForFamily('H7').length,0);
-assert.equal(boardsForFamily('F7').length,2);
+assert.equal(boardsForFamily('F7').length,3);
 assert.equal(mcuForBoard('unknown'),undefined);
 assert.equal(mcuForBoard('tmotor_f7_v2')?.part,'STM32F722');
 assert.equal(catalog.boards.find(b=>b.id==='tmotor_f7_v2')?.capabilities.motor_output,false);

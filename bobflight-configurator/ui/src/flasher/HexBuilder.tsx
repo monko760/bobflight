@@ -53,7 +53,7 @@ export function isBoardSupported(
   const board = catalog.boards.find((b) => b.id === boardId);
   if (board) {
     const mcu = catalog.mcus.find((m) => m.id === board.mcu);
-    if (["kakute_f7_hdv", "tmotor_f7_v2"].includes(boardId) && board.support !== "host-only" && mcu && mcu.family === "F7" && mcu.status === "implemented") {
+    if (["kakute_f7_hdv", "tmotor_f7_v2", "matek_f722_px"].includes(boardId) && board.support !== "host-only" && mcu && mcu.family === "F7" && mcu.status === "implemented") {
       return { supported: true, isF405Diagnostic: false };
     }
     return {

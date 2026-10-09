@@ -16,7 +16,7 @@ motor=(root/'src/hal/stm32f7/hal_tim_dma.c').read_text();assert 'strcmp(b->board
 adc=(root/'src/hal/stm32f7/hal_adc.c').read_text();assert 'strcmp(board_get()->board_id,"kakute_f7_hdv")' in adc
 flash=(root/'src/hal/stm32f7/hal_flash.c').read_text();assert 'BOBFLIGHT_CONFIG_FLASH_F745' in flash;assert '!strcmp(b->board_id,"kakute_f7_hdv")' in flash
 assert 'if(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv" AND BOBFLIGHT_TARGET_MCU STREQUAL "STM32F745")' in cm
-clock=(root/'src/hal/stm32f7/hal_clock.c').read_text();assert '#if !defined(BOBFLIGHT_TARGET_TMOTORF7V2)\n    clock_pll_off();\n    clock_pwr_scale1_od(true);' in clock
+clock=(root/'src/hal/stm32f7/hal_clock.c').read_text();assert '#if !defined(BOBFLIGHT_TARGET_TMOTORF7V2) && !defined(BOBFLIGHT_TARGET_MATEKF722PX)\n    clock_pll_off();\n    clock_pwr_scale1_od(true);' in clock
 startup=(root/'src/hal/stm32f7/startup_stm32f722.c').read_text();assert '#define EARLY_LED_GPIO_BASE 0x40020800u' in startup;assert '#define EARLY_LED_PIN 14u' in startup
 assert '(volatile uint32_t *)0x40020014u' not in startup
 board=(root/'src/board/ir_load.c').read_text();assert '0x452u' in board and '0x1FF07A22u==512u' in board

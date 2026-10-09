@@ -23,6 +23,11 @@ int main(void){
   }
   strcpy(b.board_id,"unknown");assert(!gyro_spi_map(&b,b.gyro_spi_bus,&base,&en));
  }
+ board_t matek=make_board(true);strcpy(matek.board_id,"matek_f722_px");matek.gyro_cs_pin=HAL_PIN_PACK(1,2);
+ uintptr_t matek_base=0;uint32_t matek_en=0;
+ assert(gyro_spi_map(&matek,1,&matek_base,&matek_en));assert(matek_base==0x40013000u&&matek_en==(1u<<12));
+ for(unsigned pin=0;pin<16;pin++)if(pin!=2){matek.gyro_cs_pin=HAL_PIN_PACK(1,pin);assert(!gyro_spi_map(&matek,1,&matek_base,&matek_en));}
+ matek.gyro_cs_pin=HAL_PIN_PACK(0,4);assert(!gyro_spi_map(&matek,1,&matek_base,&matek_en));
  uintptr_t base;uint32_t en;
  assert(!gyro_spi_map(NULL,1,&base,&en));
  puts("PASS actual gyro SPI selector: F722 SPI1, F745 SPI4, invalid pins/index/board refused");

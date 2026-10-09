@@ -7,6 +7,7 @@ Flasher Stage 2 selects the board. Stage 3 can now **Build HEX**, load the resul
 | Selection | Built image |
 |---|---|
 | Kakute F7 HDV | Existing development main firmware, unchanged arming/failsafe policy |
+| Matek F722-PX | Sensor/CRSF candidate with nonvolatile Save; no motor output, OSD or onboard logging |
 | T-Motor F7 V2 | Existing sensor-only main firmware, no motor output |
 | Motolab Tempest F4 / MLTEMPF4 | Experimental USB-only diagnostic |
 | Custom / unknown | That same F405xG USB reference profile, only after selecting STM32F405, 1024 KiB and 8 MHz HSE |
@@ -34,3 +35,5 @@ F7 outputs pass the existing independent image check and provenance publisher. F
 ## Checks
 
 `npm run test:local-builder` covers endpoint restrictions and UI build flow; normal flasher journey/safety suites continue to run. Test on Windows as well before treating a new toolchain installation as qualified. First use should build/download without flashing, check the selected board/profile/revision, then follow the normal USB-only/props-off flashing procedure if an installation is intended.
+
+Matek installation, sparse-HEX settings layout and hardware checks: [bring-up guide](../bobflight-firmware/boards/matek-ir/BRINGUP.md).
