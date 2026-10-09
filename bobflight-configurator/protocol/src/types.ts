@@ -53,6 +53,7 @@ export type CliCommand =
   | "sensors"
   | "calibration"
   | "calibration_cancel"
+  | "calibrate_accel level"
   | "calibrate_accel start"
   | "calibrate_accel apply"
   | "calibrate_accel cancel"

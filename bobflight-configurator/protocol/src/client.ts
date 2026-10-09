@@ -64,7 +64,7 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "disarm",
   "reboot", "bl", "bl discard",
   "calibrate_gyro", "sensors", "calibration", "calibration_cancel",
-  "calibrate_accel start", "calibrate_accel apply", "calibrate_accel cancel",
+  "calibrate_accel level", "calibrate_accel start", "calibrate_accel apply", "calibrate_accel cancel",
   "calibrate_accel +x", "calibrate_accel -x", "calibrate_accel +y",
   "calibrate_accel -y", "calibrate_accel +z", "calibrate_accel -z",
   "motor_seq",

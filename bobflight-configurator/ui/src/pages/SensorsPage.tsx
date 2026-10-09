@@ -31,6 +31,7 @@ export function SensorsPage() {
 
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [copyResult,setCopyResult]=useState("");
+  const [storagePending,setStoragePending]=useState(false);
   useEffect(()=>{
     if(snapshot?.cal_apply_detail && !snapshot.accel_calibrated)setShowDiagnostics(true);
   },[snapshot?.cal_apply_detail,snapshot?.accel_calibrated]);
@@ -80,10 +81,11 @@ export function SensorsPage() {
     fresh,
     propsOff,
     stationary,
-    pending,
+    pending: pending || storagePending,
   };
 
   const gyroGate = checkActionGates("gyro_cal", gateCtx);
+  const levelGate = checkActionGates("accel_level", gateCtx);
   const accelStartGate = checkActionGates("accel_start", gateCtx);
   const accelFaceGate = checkActionGates("accel_face", gateCtx);
   const accelApplyGate = checkActionGates("accel_apply", gateCtx);
@@ -101,7 +103,7 @@ export function SensorsPage() {
   return (
     <div className="panel">
       <h2>Live Sensors & Calibration</h2>
-      <StoragePanel requiredScope="accel_calibration" blocked={pending||!fresh} revision={snapshot?.accel_calibrated?1:0}/>
+      <StoragePanel requiredScope="accel_calibration" onPending={setStoragePending} blocked={pending||!fresh||snapshot?.cal_manual===true} revision={snapshot?.cal_state==="complete"?2:snapshot?.accel_calibrated?1:0}/>
       <p>
         Move the quad gently. Gyro measures rotation speed; acceleration includes gravity.
       </p>
@@ -275,7 +277,7 @@ export function SensorsPage() {
                 <th>Axis</th>
                 <th>Gyro (°/s)</th>
                 <th>Accel (g)</th>
-                <th>Raw Accel (g)</th>
+                <th>Before correction (g)</th>
               </tr>
             </thead>
             <tbody>
@@ -325,6 +327,20 @@ export function SensorsPage() {
 
       {calState==="gyro" && <p className="muted">Keep still while samples accumulate, or use Cancel gyro calibration above. Cancel preserves applied coefficients but discards unfinished face captures.</p>}
 
+      <h3 style={{marginTop:"28px"}}>Accelerometer level calibration</h3>
+      <p>Place the board upright on a known level surface and keep it still. This applies a stationary offset so that level reads 0, 0, +1 g. Gravity is retained; scale is not measured by a single pose.</p>
+      <p>Gyro calibration subtracts stationary rotation bias automatically. Level calibration is separate, replaces accelerometer offsets and resets scales to 1. Previous applied coefficients survive a failed or cancelled attempt.</p>
+      <button disabled={!levelGate.allowed} onClick={()=>void command("calibrate_accel level")}>Calibrate accelerometer level</button>
+      {calState==="accel_level" && <>
+        <span role="status"> Collecting stationary level samples: {calSamples}/{calRequired}. {calReason}</span>
+        <button disabled={!accelCancelGate.allowed} onClick={()=>void command("calibration_cancel")}>Cancel level calibration</button>
+      </>}
+      {!levelGate.allowed && calState!=="accel_level" && <p className="muted">{levelGate.reasons.join("; ")}</p>}
+      <p role="status">{!fresh?"Calibration status unavailable":snapshot?.cal_manual?"Calibration session active. Previously applied correction is retained until success.":snapshot?.calibration_storage==="flash-verified"?"Accelerometer correction saved in flash. This is not flight qualification.":snapshot?.calibration_storage==="unsaved"?"Accelerometer correction applied in RAM. Use Save to controller to keep it after power loss.":snapshot?.accel_calibrated?"Accelerometer correction applied; storage status: "+snapshot.calibration_storage:"No accelerometer correction applied."}</p>
+      <p>Gyro offset applied: {fresh?(snapshot?.gyro_bias_applied===undefined?"not separately reported":snapshot.gyro_bias_applied?"yes":"no"):"unavailable"}. Gyro readiness can be temporarily withheld during any manual calibration session.</p>
+      {snapshot?.cal_apply_detail && <p role="status">Calibration result: {snapshot.cal_apply_detail}</p>}
+      <details>
+      <summary>Advanced: six-face offset and scale calibration</summary>
       {/* Accelerometer 6-Face Calibration Section */}
       <h3 style={{ marginTop: "28px" }}>Accelerometer 6-Face Calibration</h3>
 
@@ -346,7 +362,7 @@ export function SensorsPage() {
         <ul style={{ margin: "0", paddingLeft: "20px" }}>
           <li>
             <strong>RAW Selected Signed Axis Dominates:</strong> When capturing each face, align the
-            physical RAW sensor axis directly vertical (+X, -X, +Y, -Y, +Z, -Z) against gravity. Do
+            aligned, pre-correction axis directly vertical (+X, -X, +Y, -Y, +Z, -Z) against gravity. Do
             not rely on assumed board frame front alignment, as board rotation settings may differ.
           </li>
           <li>
@@ -359,14 +375,10 @@ export function SensorsPage() {
             can stage bounded raw measurements, but Apply requires all six stationary
             faces to agree on one offset/scale solution. Gyro bias calibration is separate from accelerometer calibration;
             a calibrated gyro does not mean the accelerometer or flight checks passed.
-            A large accepted offset needs hardware investigation, not flight testing.
+            A large accepted offset needs investigation; it is not proof of bad hardware or flight qualification.
           </li>
           <li>
-            <strong>Apply, then Save:</strong> On schema-2 Holybro firmware, successful six-face Apply
-            updates RAM; use Save to controller above, then Refresh storage.
-            Verify <code>flash-verified</code> calibration after a full power cycle. Gyro bias is
-            recalibrated at startup, not saved. Older firmware and the T-Motor diagnostic target
-            remain RAM-only. Raw measurements and incomplete candidates are never saved.
+            <strong>Apply, then Save:</strong> Successful Apply updates RAM. Use Save to controller only when the connected firmware advertises flash storage, then verify after a full power cycle. Gyro bias is recalibrated at startup, not saved. Pre-correction samples and incomplete candidates are never saved.
           </li>
         </ul>
       </div>
@@ -484,6 +496,8 @@ export function SensorsPage() {
         })}
       </div>
 
+      </details>
+
       {reply && (
         <p role="status" style={{ marginTop: "8px" }}>
           Command response: <code>{reply}</code>
@@ -528,8 +542,10 @@ export function SensorsPage() {
               Hex Readbacks: Gyro Config <code>{snapshot.mpu_gyro_config ?? "N/A"}</code> | Accel
               Config <code>{snapshot.mpu_accel_config ?? "N/A"}</code>
             </p>
+            <p>Sensor-frame counts before rotation: <code>{snapshot.accel_counts?.join(" ") ?? "Not reported by this firmware"}</code>. Counts/g: {snapshot.accel_counts_per_g ?? "not reported"}.</p>
+            <p>Acceleration register bytes: <code>{snapshot.accel_register_bytes ?? "not reported"}</code>. The g-valued before-correction readings are already scaled and aligned.</p>
             <p>Calibration policy: <strong>{snapshot.cal_bench_relaxed===true?"RELAXED BENCH ONLY — never flight-qualified":snapshot.cal_bench_relaxed===false?"Standard checks":"Not reported by this firmware"}</strong></p>
-            <h4>Captured raw faces (g) — not applied coefficients</h4>
+            <h4>Captured aligned pre-correction faces (g), not applied coefficients</h4>
             {snapshot.cal_raw_faces ? <table style={{width:"100%",textAlign:"left"}}>
               <thead><tr><th>Face</th><th>Raw X</th><th>Raw Y</th><th>Raw Z</th></tr></thead>
               <tbody>{AXIS_FACES.map(face=>{
@@ -537,7 +553,7 @@ export function SensorsPage() {
                 return <tr key={face.key}><td>{face.shortLabel}</td>{v?v.map((n,i)=><td key={i}>{formatFloat(n,5)}</td>):<td colSpan={3}>{isFaceCaptured(snapshot.cal_faces,face.index)?"Unavailable":"Not captured"}</td>}</tr>;
               })}</tbody>
             </table>:<p>Staged numerical diagnostics unavailable from this firmware.</p>}
-            <p>Candidate bias (g): {snapshot.cal_candidate_valid?formatVector(snapshot.cal_candidate_bias!,5):"Unavailable until a finite six-face solve"}</p>
+            <p>Candidate bias (g): {snapshot.cal_candidate_valid?formatVector(snapshot.cal_candidate_bias!,5):"Unavailable until a finite calibration solve"}</p>
             <p>Candidate scale: {snapshot.cal_candidate_valid?formatVector(snapshot.cal_candidate_scale!,5):"Unavailable"}. Candidates are not necessarily accepted.</p>
             <button disabled={!snapshot.rawText} onClick={async()=>{
               try{await navigator.clipboard.writeText(snapshot.rawText??"");setCopyResult("Diagnostic report copied");}

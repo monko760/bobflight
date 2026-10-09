@@ -20,7 +20,9 @@ typedef struct {
     bool config_ok;
     uint8_t gyro_config, accel_config;
     const char *chip;
-    float raw_acc_g[3];
+    float raw_acc_g[3]; /* aligned, scaled, before calibration */
+    uint8_t accel_register_bytes[6];
+    int16_t accel_counts[3]; /* signed sensor-frame output registers, before alignment */
     /* Configured sensor output data rate (0 = unknown) and the SPI clock used
      * for sensor/interrupt register reads (0 = left at the config clock). */
     uint32_t odr_hz, spi_read_hz;
@@ -32,7 +34,7 @@ typedef struct {
     float candidate_bias[3],candidate_scale[3],face_mean[6][3];
     unsigned samples, required, faces;
     int face;
-    bool accel_valid;
+    bool accel_valid,gyro_bias_valid;
     float gyro_bias[3], accel_bias[3], accel_scale[3];
 } gyro_calibration_info_t;
 
@@ -47,6 +49,7 @@ void gyro_calibration_info(gyro_calibration_info_t *info);
  * These are nonblocking sessions; Apply is RAM, explicit save persists validated accel on supported boards. */
 bool gyro_start_manual_calibration(void);
 bool gyro_start_accel_calibration(void);
+bool gyro_start_accel_level_calibration(void);
 bool gyro_capture_accel_face(unsigned face);
 bool gyro_apply_accel_calibration(void);
 void gyro_cancel_manual_calibration(void);

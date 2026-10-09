@@ -39,13 +39,27 @@ static void cmd_sensors(bool details)
     n=snprintf(buf,sizeof(buf),"cal_apply_detail: %s\r\n",c.apply_detail?c.apply_detail:"");
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
     cli_write_str(buf);
+    n=snprintf(buf,sizeof(buf),"calibration_api: 2\r\ncal_accel_level_supported: %s\r\ngyro_bias_applied: %s\r\naccel_raw_frame: aligned-pre-correction\r\n",
+        d->config_ok && d->chip && !strcmp(d->chip,"MPU6K-class")?"yes":"no",c.gyro_bias_valid?"yes":"no");
+    if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
+    cli_write_str(buf);
     if(details) {
+        n=snprintf(buf,sizeof(buf),"accel_counts: %d %d %d\r\naccel_counts_frame: sensor\r\naccel_counts_per_g: %u\r\n",
+            (int)d->accel_counts[0],(int)d->accel_counts[1],(int)d->accel_counts[2],
+            d->chip && !strcmp(d->chip,"MPU6K-class")?4096u:0u);
+        if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
+        cli_write_str(buf);
         n=snprintf(buf,sizeof(buf),"sensor_chip: %s\r\nmpu_gyro_config: 0x%02x\r\nmpu_accel_config: 0x%02x\r\n"
             "gyro_bias: %.5f %.5f %.5f\r\naccel_bias: %.6f %.6f %.6f\r\naccel_scale: %.6f %.6f %.6f\r\n",
             d->chip,(unsigned)d->gyro_config,(unsigned)d->accel_config,
             (double)c.gyro_bias[0],(double)c.gyro_bias[1],(double)c.gyro_bias[2],
             (double)c.accel_bias[0],(double)c.accel_bias[1],(double)c.accel_bias[2],
             (double)c.accel_scale[0],(double)c.accel_scale[1],(double)c.accel_scale[2]);
+        if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
+        cli_write_str(buf);
+        n=snprintf(buf,sizeof(buf),"accel_register_bytes: %02x %02x %02x %02x %02x %02x\r\n",
+            d->accel_register_bytes[0],d->accel_register_bytes[1],d->accel_register_bytes[2],
+            d->accel_register_bytes[3],d->accel_register_bytes[4],d->accel_register_bytes[5]);
         if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
         cli_write_str(buf);
         cli_write_str("cal_diagnostics_version: 1\r\n");
@@ -88,7 +102,8 @@ static bool cmd_sensor_command(const char *line)
     } else if(strncmp(line,"calibrate_accel ",16)==0) {
         const char *arg=line+16;bool ok=false;
         if(calibration_allowed()) {
-            if(strcmp(arg,"start")==0)ok=gyro_start_accel_calibration();
+            if(strcmp(arg,"level")==0)ok=gyro_start_accel_level_calibration();
+            else if(strcmp(arg,"start")==0)ok=gyro_start_accel_calibration();
             else if(strcmp(arg,"apply")==0)ok=gyro_apply_accel_calibration();
             else {
                 const char *faces[]={"+x","-x","+y","-y","+z","-z"};

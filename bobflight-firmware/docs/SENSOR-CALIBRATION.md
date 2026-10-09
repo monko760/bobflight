@@ -20,33 +20,54 @@ reads without new hardware data do not advance the telemetry sample sequence
 or calibration. A held sample can serve the cascade for at most 20 ms; the
 original acquisition timestamp remains unchanged.
 
-**All coefficients are RAM-only and disappear on reboot/power loss.** The MCU
-flash HAL remains a stub. Neither the calibration UI nor its Apply button
-claims to save to flash. No new flash writes or persistent config schema are
-introduced. Existing applied coefficients survive cancellation or failed
-recalibration within the same boot.
+**Applied accelerometer offsets/scales can be saved on targets advertising a flash backend.**
+Apply/calibration changes RAM only. Use explicit `save` (or Save to controller),
+then confirm the stored correction after a full power cycle. Gyro bias is measured
+again at startup, not persisted. Existing applied coefficients survive failed or
+cancelled attempts. No persistence schema or arming-policy change is introduced.
 
-## Workflow
+## Default workflow (calibration API 2)
 
-1. Open Sensors, confirm props removed and the board stationary. Verify fresh
-   healthy readings and configuration diagnostics. Gyro bias normally calibrates
-   at startup; the button starts a new explicit stationary window.
-2. For acceleration, start a six-face session. For each signed raw axis (+X,
-   -X, +Y, -Y, +Z, -Z), orient the selected axis physically vertical and check that its raw reading
-   has the selected sign and dominates the other axes, then capture without
-   moving it. Unknown offsets can move the readings away from exactly ±1 g/zero. Raw means uncalibrated values after the existing board-axis rotation; it
-   does not mean a guessed nose/wing/upside-down mounting direction.
-3. Only after all six faces pass, Apply installs the diagonal bias/scale
-   solution atomically. Verify corrected acceleration near 1 g in multiple
-   orientations. Re-run gyro calibration while still if needed. Cancel stops
-   either session without wiping previous applied coefficients.
+1. Props removed, USB-only, board secured and stationary. Wait for the startup
+   gyro window. Gyro calibration measures stationary angular-rate bias and
+   subtracts it on every sample. It does not zero gravity.
+2. Confirm a known level, upright pose. **Calibrate accelerometer level** uses
+   1000 distinct millisecond samples and at least 1000 ms. The known reference
+   is `(0,0,+1 g)` after board alignment. It computes `bias = mean - reference`
+   and resets scales to 1; accepted offsets apply automatically in RAM.
+3. Explicitly Save to controller if flash storage is supported. Verify after
+   full power removal. A successful calibration is not flight qualification.
+4. Six-face offset/scale characterization remains under **Advanced**, with its
+   existing capture and joint Apply checks unchanged.
 
-Gyro windows require at least 1000 distinct millisecond samples and at least
+A level pose determines an offset only. It cannot independently establish sensor
+scale, cross-axis response, correct mounting, or that the operator's surface is
+truly level. Capture requires each horizontal component <=0.2 g, Z between
++0.7 and +1.3 g, norm between 0.7 and 1.3 g, and the existing motion/variance
+checks. Applied bias remains within the existing 0.3 g component/vector bounds.
+**Negative aligned Z aborts with an orientation diagnostic.** It is not absorbed
+into a nearly 2 g offset and does not select a new rotation automatically.
+The Matek upright -Z discrepancy remains unresolved in this change.
+
+Success is atomic. Failure, timeout, unsafe/stale data or cancellation retains
+previous applied coefficients. No flash operation, allocation, blocking delay or
+extra SPI read is added to calibration sample processing. Save remains outside
+the timed sample loop. Existing mode-aware arming/failsafe checks are unchanged.
+
+### Gyro offset versus readiness
+
+`gyro_bias_applied` reports whether an established gyro bias is being applied.
+`gyro_calibrated` retains its existing readiness meaning, which is withheld
+while a manual sensor session is active. Thus starting accelerometer calibration
+can display readiness `no` without removing the last good gyro correction.
+The UI now explains these separately rather than calling that a lost offset.
+
+Gyro and level-offset windows require at least 1000 distinct millisecond samples and at least
 1000 elapsed milliseconds. Face windows require 500 samples and 500 ms.
 Movement, gaps over 20 ms and invalid pose reset collection. Gyro rates must
 be within ±5 dps; standard deviations must be at most 0.2 dps for gyro and
 0.02 g for acceleration. Collection times out after 30 seconds; a six-face
-session expires at 5 minutes. These timing/movement guards are unchanged.
+session expires at 5 minutes. The existing timing/movement thresholds are retained.
 
 ### Raw acquisition versus corrected validation
 
@@ -59,18 +80,16 @@ Raw accel variance is used rather than variance after a possibly incorrect
 calibration. No single gyro window can prove the absence of slow constant
 rotation or constant acceleration: physically secure the stationary board.
 
-This does **not** mark acceleration calibrated or qualify flight. The MCU
-pre-arm path now explicitly requires `gyro_flight_ready()`: completed gyro
-bias, an accepted accelerometer solution, healthy verified recent IMU data,
-and corrected gravity within 0.9–1.1 g. The bench build still unconditionally
-refuses arming. Existing RX/throttle/failsafe guards remain in force. Attitude
+This does **not** mark acceleration calibrated or qualify flight. Existing mode-aware readiness is unchanged: Acro uses the established gyro-only
+path, while leveling modes additionally require the existing accelerometer checks.
+Targets built bench-only still refuse flight arming. Existing RX/throttle/failsafe guards remain in force. Attitude
 preview is only a visual estimate, not a flight-readiness indicator.
 
 Accelerometer staging retains the prior raw envelope: norm 0.6–1.5 g, selected
 signed component 0.6–1.4 g, orthogonal components within ±0.4 g. Capture is
 not approval of the sensor. Accelerometer solve/Apply limits below are unchanged.
 
-Apply still requires every face. The diagonal solve is
+Advanced six-face Apply still requires every face. The diagonal solve is
 `bias=(positive+negative)/2`, `scale=2/(positive-negative)`, corrected value
 `(raw-bias)*scale`. It never normalizes individual samples to unit length.
 Validation is joint and atomic:
@@ -196,7 +215,7 @@ Applied coefficients remain untouched until every existing Apply check passes.
 - `sensors`: bounded key:value snapshot ending in `sensors_end: 1`.
 - `calibration`: snapshot plus applied coefficients/register diagnostics,
   ending in `calibration_end: 1`.
-- `calibrate_gyro`, `calibrate_accel start`, `calibrate_accel <signed-axis>`,
+- `calibrate_gyro`, `calibrate_accel level`, `calibrate_accel start`, `calibrate_accel <signed-axis>`,
   `calibrate_accel apply`, `calibration_cancel` / `calibrate_accel cancel`.
 
 Mutation requests require disarmed state, stopped motors, a connected USB
@@ -267,3 +286,24 @@ or flight qualification is claimed.
 Review scope: the parent completed the source/guard review and regression checks
 above. The background reviewer was stopped before returning a completed report;
 no independent final-patch or license-audit signoff is claimed.
+
+## Diagnostic API 2 and compatibility
+
+Both snapshots advertise `calibration_api: 2`, `cal_accel_level_supported`,
+`gyro_bias_applied` and `accel_raw_frame: aligned-pre-correction`. The default
+level action is disabled if that capability is absent, unsupported or stale.
+Old firmware retains its existing gyro/six-face workflow; no unsupported command
+is silently sent. Active level sessions report `cal_state: accel_level`.
+
+Detailed `calibration` replies additionally include `accel_register_bytes` (six
+sensor output bytes as acquired), `accel_counts` (signed sensor-frame values),
+`accel_counts_frame: sensor` and `accel_counts_per_g` (4096 for supported MPU6K).
+The same sample is converted and aligned before `accel_raw_g`; that historical
+field is **not untouched sensor counts**. Unsupported chips report counts/g 0.
+No independent SPI transaction is introduced to obtain these fields.
+`cal_candidate_valid` means finite candidate coefficients, not successful Apply.
+
+Betaflight behavior reference (facts only, no code copied):
+[accelerometer pipeline](https://github.com/betaflight/betaflight/blob/master/src/main/sensors/acceleration.c)
+and [gyro pipeline](https://github.com/betaflight/betaflight/blob/master/src/main/sensors/gyro.c).
+The independent implementation keeps BobFlight's explicit Save and guard policy.

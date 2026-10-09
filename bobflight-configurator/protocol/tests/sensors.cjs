@@ -30,7 +30,7 @@ async function main(){
   const sensors=await client.sendCommand('sensors');
   assert.match(sensors,/sensors_end: 1/);assert.match(sensors,/sample_seq: 0/);assert.match(sensors,/sensor_config_ok: no/);
   const diagnostics=await client.sendCommand('calibration');assert.match(diagnostics,/calibration_end: 1/);assert.match(diagnostics,/ram-only/);
-  for(const cmd of ['calibrate_gyro','calibrate_accel start','calibrate_accel +x','calibrate_accel -x','calibrate_accel +y','calibrate_accel -y','calibrate_accel +z','calibrate_accel -z','calibrate_accel apply']){
+  for(const cmd of ['calibrate_gyro','calibrate_accel level','calibrate_accel start','calibrate_accel +x','calibrate_accel -x','calibrate_accel +y','calibrate_accel -y','calibrate_accel +z','calibrate_accel -z','calibrate_accel apply']){
     assert.match(await client.sendCommand(cmd),/refused: mock IMU unavailable/);
   }
   for(const cmd of ['calibration_cancel','calibrate_accel cancel']) assert.match(await client.sendCommand(cmd),/no calibration active/);

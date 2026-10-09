@@ -568,9 +568,11 @@ bool gyro_sample(float dps[3])
         if (!gyro_spi_read_regs(0x3Bu, raw, 14)) {
             g_healthy=false; arming_set_gyro_healthy(false); return false;
         }
-        g_acc[0]=(float)be16(raw)/4096.f;
-        g_acc[1]=(float)be16(raw+2)/4096.f;
-        g_acc[2]=(float)be16(raw+4)/4096.f;
+        memcpy(g_diag.accel_register_bytes,raw,6);
+        for(unsigned axis=0;axis<3;axis++) {
+            g_diag.accel_counts[axis]=be16(raw+axis*2u);
+            g_acc[axis]=(float)g_diag.accel_counts[axis]/4096.f;
+        }
         x=be16(raw+8); y=be16(raw+10); z=be16(raw+12);
         break;
     }
@@ -786,6 +788,11 @@ bool gyro_start_manual_calibration(void) {
     if(g_manual || !manual_sensor_ready())return false;
     sc_begin_gyro(&g_cal,hal_millis());g_manual=true;gyro_calibration_touch();return true;
 }
+bool gyro_start_accel_level_calibration(void) {
+    if(g_manual || !manual_sensor_ready() || g_kind!=GYRO_CHIP_MPU6K ||
+       !g_cal.gyro_valid || g_cal.mode==SC_GYRO)return false;
+    sc_begin_accel_level(&g_cal,hal_millis());g_manual=true;gyro_calibration_touch();return true;
+}
 bool gyro_start_accel_calibration(void) {
     if(g_manual || !manual_sensor_ready())return false;
     sc_begin_accel(&g_cal,hal_millis());g_manual=true;gyro_calibration_touch();return true;
@@ -804,6 +811,7 @@ void gyro_calibration_info(gyro_calibration_info_t *info) {
     info->apply_detail=g_cal.apply_detail;
     float bias2=0.f;for(unsigned i=0;i<3;i++)bias2+=g_cal.accel_bias[i]*g_cal.accel_bias[i];
     if(g_cal.accel_valid&&bias2>0.01f&&!g_cal.apply_detail[0])info->apply_detail="Applied/restored accelerometer correction has a large offset; calibration storage is not flight qualification.";
+    info->gyro_bias_valid=g_cal.gyro_valid;
     info->candidate_valid=g_cal.candidate_valid;
     memcpy(info->candidate_bias,g_cal.candidate_bias,sizeof(info->candidate_bias));
     memcpy(info->candidate_scale,g_cal.candidate_scale,sizeof(info->candidate_scale));

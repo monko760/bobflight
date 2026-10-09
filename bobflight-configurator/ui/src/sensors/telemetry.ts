@@ -2,6 +2,12 @@
 
 export interface SensorSnapshot {
   sensors_version: number;
+  calibration_api?: number;
+  cal_accel_level_supported?: boolean;
+  gyro_bias_applied?: boolean;
+  accel_counts?: [number,number,number];
+  accel_counts_per_g?: number;
+  accel_register_bytes?: string;
   sample_seq: number;
   sample_ms: number;
   sensor_age_ms: number;
@@ -89,7 +95,7 @@ export function parseKeyValueSnapshot(rawText:string):SensorSnapshot|null {
   const boolKeys=["gyro_ok","gyro_calibrated","accel_calibrated","motor_active","sensor_config_ok","attitude_ready","cal_manual"];
   if(boolKeys.some(k=>kv[k]!=="yes" && kv[k]!=="no"))return null;
   if(kv.arm!=="armed" && kv.arm!=="disarmed")return null;
-  if(!["idle","gyro","accel_wait","accel_collect","complete","error"].includes(kv.cal_state))return null;
+  if(!["idle","gyro","accel_wait","accel_collect","accel_level","complete","error"].includes(kv.cal_state))return null;
   if(!["ram-only","not-calibrated","unsaved","flash-verified","host-sim","error"].includes(kv.calibration_storage) || kv.cal_reason===undefined)return null;
   if(["unsaved","flash-verified","host-sim"].includes(kv.calibration_storage)&&kv.accel_calibrated!=="yes")return null;
   if(kv.calibration_storage==="not-calibrated"&&kv.accel_calibrated!=="no")return null;
@@ -127,6 +133,22 @@ export function parseKeyValueSnapshot(rawText:string):SensorSnapshot|null {
       } else if(kv[key]!==undefined)return null;
     }
   }
+  if(kv.calibration_api!==undefined){
+    if(kv.calibration_api!=="2" || !["yes","no"].includes(kv.cal_accel_level_supported) ||
+       !["yes","no"].includes(kv.gyro_bias_applied) || kv.accel_raw_frame!=="aligned-pre-correction")return null;
+    snapshot.calibration_api=2;snapshot.cal_accel_level_supported=kv.cal_accel_level_supported==="yes";
+    snapshot.gyro_bias_applied=kv.gyro_bias_applied==="yes";
+  } else if(kv.cal_state==="accel_level")return null;
+  if(kv.accel_counts!==undefined){
+    const counts=parseThreeFloats(kv.accel_counts);
+    if(kv.calibration_end!=="1" || kv.accel_counts_frame!=="sensor" ||
+       counts.some(n=>!Number.isInteger(n)||n < -32768 || n > 32767) || !["0","4096"].includes(kv.accel_counts_per_g))return null;
+    snapshot.accel_counts=counts;snapshot.accel_counts_per_g=Number(kv.accel_counts_per_g);
+  }
+  if(kv.accel_register_bytes!==undefined){
+    if(!/^[0-9a-f]{2}( [0-9a-f]{2}){5}$/i.test(kv.accel_register_bytes))return null;
+    snapshot.accel_register_bytes=kv.accel_register_bytes;
+  }
   snapshot.mpu_gyro_config=kv.mpu_gyro_config;snapshot.mpu_accel_config=kv.mpu_accel_config;snapshot.sensor_chip=kv.sensor_chip;
   return snapshot;
 }
@@ -156,7 +178,7 @@ export interface ActionGateResult {
 }
 
 export function checkActionGates(
-  action: "gyro_cal" | "accel_start" | "accel_face" | "accel_apply" | "accel_cancel",
+  action: "gyro_cal" | "accel_level" | "accel_start" | "accel_face" | "accel_apply" | "accel_cancel",
   ctx: ActionGateContext
 ): ActionGateResult {
   const reasons: string[] = [];
@@ -181,11 +203,18 @@ export function checkActionGates(
     if (!ctx.snapshot.gyro_ok) reasons.push("Gyro sensor health check failed");
 
     if(ctx.snapshot.sensor_config_ok!==true)reasons.push("Sensor configuration is not verified");
-    if(action==="gyro_cal" || action==="accel_start") {
-      if(ctx.snapshot.cal_manual || ["accel_wait","accel_collect"].includes(ctx.snapshot.cal_state))reasons.push("Cancel or finish the active calibration session first");
+    if(action==="gyro_cal" || action==="accel_start" || action==="accel_level") {
+      if(ctx.snapshot.cal_manual || ["accel_wait","accel_collect","accel_level"].includes(ctx.snapshot.cal_state))reasons.push("Cancel or finish the active calibration session first");
       else if(action==="gyro_cal" && ctx.snapshot.cal_state==="gyro")reasons.push("Gyro calibration is already running; use Cancel gyro calibration to stop it");
     } else if(!ctx.snapshot.cal_manual || ctx.snapshot.cal_state!=="accel_wait")reasons.push("Start a six-face session and wait for the current capture");
 
+    if(action==="accel_level") {
+      if(ctx.snapshot.calibration_api!==2 || ctx.snapshot.cal_accel_level_supported!==true)reasons.push("Firmware does not advertise level calibration; update required");
+      if(!ctx.snapshot.gyro_calibrated || ctx.snapshot.cal_state==="gyro")reasons.push("Wait for gyro calibration to finish");
+      const [x,y,z]=ctx.snapshot.accel_raw_g;
+      if(![x,y,z].every(Number.isFinite) || z<0.7 || z>1.3 || Math.abs(x)>0.2 || Math.abs(y)>0.2)
+        reasons.push(z<=0?"Upright board reports negative Z: resolve board alignment before level calibration":"Place the board level and upright within the capture limits");
+    }
     if (action === "accel_apply") {
       if (!areAllFacesCaptured(ctx.snapshot.cal_faces)) {
         reasons.push(`All 6 faces must be captured first (${countCapturedFaces(ctx.snapshot.cal_faces)}/6 collected)`);
