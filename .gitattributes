@@ -1,0 +1,4 @@
+# The catalog generator writes LF. Keep these outputs identical after checkout
+# and generation, including on Windows with core.autocrlf=true.
+bobflight-configurator/protocol/src/flasher/board-targets.generated.ts text eol=lf
+bobflight-configurator/ui/src/targets/catalog.generated.json text eol=lf
