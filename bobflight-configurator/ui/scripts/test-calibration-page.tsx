@@ -4,6 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {installFakeDom} from './fixtures/fakeDom';
 import {SensorsPage} from '../src/pages/SensorsPage';
 import {setSnapshot,calls,setFailure,setConditions} from './fixtures/calibrationUiStub';
+import {aircraftProjection,QUADX_MOTORS} from '../src/sensors/aircraftView';
 import type {SensorSnapshot} from '../src/sensors/telemetry';
 const {container}=installFakeDom();const root=createRoot(container as never);
 const base:SensorSnapshot={sensors_version:1,sample_seq:1,sample_ms:1,sensor_age_ms:0,gyro_ok:true,gyro_calibrated:true,accel_calibrated:false,gyro_dps:[0,0,0],accel_g:[0,0,.87],accel_raw_g:[0,0,.87],attitude_deg:[0,0,0],attitude_ready:true,arm:'disarmed',motor_active:false,cal_state:'idle',cal_manual:false,cal_samples:0,cal_required:0,cal_faces:0,cal_face:-1,cal_reason:'idle',calibration_storage:'not-calibrated',sensor_config_ok:true,calibration_api:2,cal_accel_level_supported:true,gyro_bias_applied:true};
@@ -13,6 +14,45 @@ function disabled(label:string){const el=button(label);return el.disabled||el.ha
 function click(label:string){const b=button(label);assert(!disabled(label));const k=Object.keys(b).find(k=>k.startsWith('__reactProps$'));assert.ok(k);(b as any)[k].onClick();}
 const settle=async()=>{await new Promise(r=>setImmediate(r));flushSync(()=>{});};
 try {
+ // Renderer is telemetry-only. Rotating it must never send motor/config commands.
+ const near=(actual:number,expected:number)=>assert.ok(Math.abs(actual-expected)<1e-6,`${actual} != ${expected}`);
+ const nose=(yaw:number)=>aircraftProjection(0,0,yaw)(145,0);
+ near(nose(0)[0],240);assert(nose(0)[1]<160);
+ assert(nose(90)[0]>240);near(nose(90)[1],160);
+ near(nose(180)[0],240);assert(nose(180)[1]>160);
+ assert(nose(-90)[0]<240);near(nose(-90)[1],160);
+ assert.deepEqual(QUADX_MOTORS.map(m=>[m.number,m.position]),[[1,'rear-right'],[2,'front-right'],[3,'rear-left'],[4,'front-left']]);
+ // Independent expanded rotation matrix catches applying yaw before body tilt.
+ const rad=Math.PI/180,r=30*rad,p=20*rad,y=75*rad,x=90,v=-90;
+ const worldX=x*Math.cos(y)*Math.cos(p)+v*(Math.cos(y)*Math.sin(p)*Math.sin(r)-Math.sin(y)*Math.cos(r));
+ const worldY=x*Math.sin(y)*Math.cos(p)+v*(Math.sin(y)*Math.sin(p)*Math.sin(r)+Math.cos(y)*Math.cos(r));
+ const worldZ=-x*Math.sin(p)+v*Math.cos(p)*Math.sin(r);
+ const projected=aircraftProjection(30,20,75)(x,v);near(projected[0],240+worldY*.88);near(projected[1],160-worldX*.58+worldZ*.7);
+ const find=(key:string,value:string)=>container.findAll(e=>e.getAttribute(key)===value)[0];
+ for(const yaw of [0,90,180,-90]){
+  render({yaw_reference:'gyro-relative',attitude_deg:[0,0,yaw]});
+  for(const m of QUADX_MOTORS){assert.equal(find('data-motor',String(m.number)).getAttribute('data-position'),m.position);assert.equal(find('data-label',`motor-${m.number}`).textContent,`M${m.number}`);}
+  assert.equal(find('data-label','front').textContent,'FRONT');assert.equal(find('data-label','back').textContent,'BACK');
+  assert.equal(find('data-yaw-readout','true').textContent,`${yaw.toFixed(1)}°`);
+  assert.equal(find('data-aircraft-view','true').getAttribute('data-attitude-ready'),'true');
+  assert.deepEqual(calls,[]);
+ }
+ for(const roll of [0,45,90,180])for(const pitch of [-40,0,45]){
+  render({yaw_reference:'gyro-relative',attitude_deg:[roll,pitch,90]});
+  const labels=container.findAll(e=>e.hasAttribute('data-label')).map(g=>g.findAll(e=>e.tagName.toUpperCase()==='RECT')[0]);assert.equal(labels.length,6);
+  for(let i=0;i<labels.length;i++)for(let j=i+1;j<labels.length;j++){
+   const dx=Math.abs(Number(labels[i].getAttribute('x'))-Number(labels[j].getAttribute('x'))),dy=Math.abs(Number(labels[i].getAttribute('y'))-Number(labels[j].getAttribute('y')));
+   assert(dx>=60||dy>=24,'motor/direction labels must remain separate');
+  }
+ }
+ render({yaw_reference:undefined,attitude_deg:[0,0,50]});assert.equal(find('data-yaw-readout','true').textContent,'—');assert.ok(container.textContent.includes('update the controller firmware'));
+ for(const conditions of [{fresh:false},{connected:false}]){
+  setConditions(conditions);render({yaw_reference:'gyro-relative',attitude_deg:[0,0,90]});assert.equal(find('data-aircraft-view','true').getAttribute('data-attitude-ready'),'false');assert.equal(container.findAll(e=>e.hasAttribute('data-motor')).length,0);assert.equal(find('data-yaw-readout','true').textContent,'—');setConditions();
+ }
+ for(const overrides of [{attitude_ready:false},{gyro_ok:false},{attitude_deg:[0,0,NaN] as [number,number,number]}]){
+  render({yaw_reference:'gyro-relative',...overrides});assert.equal(find('data-aircraft-view','true').getAttribute('data-attitude-ready'),'false');
+ }
+ console.log('PASS rendered aircraft: quarter-turn yaw, body-to-world tilt order, logical M1-M4, front/back, nonoverlapping labels, legacy/stale/disconnect/invalid refusal, no commands');
  render();assert.equal(disabled('Calibrate accelerometer level'),false);
  const b=button('Calibrate accelerometer level');const key=Object.keys(b).find(k=>k.startsWith('__reactProps$'));assert.ok(key);(b as any)[key].onClick();assert.deepEqual(calls,['calibrate_accel level']);
  assert.equal(container.findAll(e=>e.tagName==='DETAILS')[0].hasAttribute('open'),false);

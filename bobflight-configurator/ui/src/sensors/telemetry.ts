@@ -25,6 +25,8 @@ export interface SensorSnapshot {
   arm: "armed" | "disarmed";
   motor_active: boolean;
   attitude_ready?: boolean;
+  /** Optional capability: missing/unknown means legacy yaw is not supported. */
+  yaw_reference?: "gyro-relative";
   cal_manual?: boolean;
   cal_state: "idle" | "gyro" | "accel_wait" | "accel_collect" | "complete" | "error" | string;
   cal_samples: number;
@@ -110,6 +112,7 @@ export function parseKeyValueSnapshot(rawText:string):SensorSnapshot|null {
   if(Object.values(vectors).some(v=>v.some(n=>!Number.isFinite(n)||Math.abs(n)>10000)))return null;
   const snapshot:SensorSnapshot={sensors_version:1,...nums,...vectors,arm:kv.arm,
     gyro_ok:kv.gyro_ok==="yes",gyro_calibrated:kv.gyro_calibrated==="yes",accel_calibrated:kv.accel_calibrated==="yes",
+    yaw_reference:kv.yaw_reference==="gyro-relative"?"gyro-relative":undefined,
     motor_active:kv.motor_active==="yes",sensor_config_ok:kv.sensor_config_ok==="yes",attitude_ready:kv.attitude_ready==="yes",cal_manual:kv.cal_manual==="yes",
     cal_state:kv.cal_state,cal_face:Number(kv.cal_face),cal_reason:kv.cal_reason,calibration_storage:kv.calibration_storage,rawText};
   for(const key of ["gyro_bias","accel_bias","accel_scale"] as const)if(kv[key]!==undefined){

@@ -5,7 +5,7 @@ export function mockSensorReply(command: string, armed = false): string | null {
     return [
       "sensors_version: 1", "sample_seq: 0", "sample_ms: 0", "sensor_age_ms: 4294967295",
       "gyro_ok: no", "gyro_calibrated: no", "accel_calibrated: no",
-      "gyro_dps: 0 0 0", "accel_g: 0 0 0", "accel_raw_g: 0 0 0", "attitude_deg: 0 0 0",
+      "gyro_dps: 0 0 0", "accel_g: 0 0 0", "accel_raw_g: 0 0 0", "attitude_deg: 0 0 0", "yaw_reference: gyro-relative",
       `arm: ${armed ? "armed" : "disarmed"}`, "motor_active: no", "attitude_ready: no", "cal_manual: no", "cal_state: idle",
       "cal_samples: 0", "cal_required: 0", "cal_faces: 0", "cal_face: -1",
       "cal_reason: mock IMU unavailable", "calibration_storage: ram-only", "sensor_config_ok: no",

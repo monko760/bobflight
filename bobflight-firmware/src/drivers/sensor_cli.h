@@ -22,7 +22,7 @@ static void cmd_sensors(bool details)
         "sensors_version: 1\r\nsample_seq: %lu\r\nsample_ms: %lu\r\nsensor_age_ms: %lu\r\n"
         "gyro_ok: %s\r\ngyro_calibrated: %s\r\naccel_calibrated: %s\r\n"
         "gyro_dps: %.3f %.3f %.3f\r\naccel_g: %.4f %.4f %.4f\r\n"
-        "accel_raw_g: %.4f %.4f %.4f\r\nattitude_deg: %.2f %.2f %.2f\r\nattitude_ready: %s\r\n"
+        "accel_raw_g: %.4f %.4f %.4f\r\nattitude_deg: %.2f %.2f %.2f\r\nattitude_ready: %s\r\nyaw_reference: gyro-relative\r\n"
         "arm: %s\r\nmotor_active: %s\r\ncal_state: %s\r\ncal_samples: %u\r\ncal_required: %u\r\n"
         "cal_faces: %u\r\ncal_face: %d\r\ncal_reason: %s\r\ncal_manual: %s\r\n"
         "calibration_storage: %s\r\nsensor_config_ok: %s\r\n",
