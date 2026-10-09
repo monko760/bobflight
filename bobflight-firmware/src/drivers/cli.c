@@ -86,7 +86,7 @@ static void cmd_help(void)
         "  defaults - restore defaults (no auto-save)\r\n"
         "  sensors / calibration - live samples / calibration diagnostics\r\n"
         "  calibrate_gyro - stationary bias calibration (RAM until reboot)\r\n"
-        "  calibrate_accel <start|+x|-x|+y|-y|+z|-z|apply|cancel> - six-face calibration\r\n"
+        "  calibrate_accel <level|start|+x|-x|+y|-y|+z|-z|apply|cancel> - level offset or advanced six-face calibration\r\n"
         "  calibration_cancel - cancel, retaining applied coefficients\r\n"
         "  receiver_uart <1|2|3|4|6|7> - apply port; explicit save for persistence\r\n"
         "  receiver - CRSF diagnostics and 16 mapped controls\r\n"

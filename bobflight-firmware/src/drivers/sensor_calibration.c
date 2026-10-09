@@ -33,6 +33,9 @@ static void begin(sensor_calibration_t *c,sc_mode_t mode,uint32_t now) {
 void sc_begin_gyro(sensor_calibration_t *c,uint32_t now) {
     begin(c,SC_GYRO,now);c->reason="keep-still";
 }
+void sc_begin_accel_level(sensor_calibration_t *c,uint32_t now) {
+    begin(c,SC_ACCEL_LEVEL,now);c->reason="hold-level-upright-and-still";
+}
 void sc_begin_accel(sensor_calibration_t *c,uint32_t now) {
     begin(c,SC_ACCEL_WAIT,now);memset(c->face_mean,0,sizeof(c->face_mean));
     c->reason="select-face";
@@ -46,7 +49,7 @@ bool sc_capture_face(sensor_calibration_t *c,unsigned face,uint32_t now) {
     c->reason="hold-selected-signed-axis-up";return true;
 }
 void sc_tick(sensor_calibration_t *c,uint32_t now) {
-    bool collecting=c->mode==SC_GYRO || c->mode==SC_ACCEL_COLLECT;
+    bool collecting=c->mode==SC_GYRO || c->mode==SC_ACCEL_COLLECT || c->mode==SC_ACCEL_LEVEL;
     bool accel=c->mode==SC_ACCEL_WAIT || c->mode==SC_ACCEL_COLLECT;
     if((collecting && (uint32_t)(now-c->phase_started)>=30000u) ||
        (accel && (uint32_t)(now-c->session_started)>=300000u)) {
@@ -60,15 +63,16 @@ const char *sc_state_name(const sensor_calibration_t *c) {
     switch(c->mode) {
     case SC_GYRO:return "gyro";case SC_ACCEL_WAIT:return "accel_wait";
     case SC_ACCEL_COLLECT:return "accel_collect";case SC_COMPLETE:return "complete";
+    case SC_ACCEL_LEVEL:return "accel_level";
     case SC_ERROR:return "error";default:return "idle";
     }
 }
 unsigned sc_required(const sensor_calibration_t *c) {
-    return c->mode==SC_GYRO?1000u:c->mode==SC_ACCEL_COLLECT?500u:0u;
+    return (c->mode==SC_GYRO || c->mode==SC_ACCEL_LEVEL)?1000u:c->mode==SC_ACCEL_COLLECT?500u:0u;
 }
 void sc_feed(sensor_calibration_t *c,const float gyro[3],const float raw_acc[3],uint32_t now) {
     sc_tick(c,now);
-    if(c->mode!=SC_GYRO && c->mode!=SC_ACCEL_COLLECT)return;
+    if(c->mode!=SC_GYRO && c->mode!=SC_ACCEL_COLLECT && c->mode!=SC_ACCEL_LEVEL)return;
     for(unsigned i=0;i<3;i++)if(!isfinite(gyro[i]) || !isfinite(raw_acc[i])) {
         c->mode=SC_ERROR;c->reason="nonfinite-sample";window_reset(c);return;
     }
@@ -86,6 +90,18 @@ void sc_feed(sensor_calibration_t *c,const float gyro[3],const float raw_acc[3],
     }
     for(unsigned i=0;i<3;i++)if(fabsf(gyro[i])>5.f) {
         window_reset(c);c->reason="moving";return;
+    }
+    if(c->mode==SC_ACCEL_LEVEL) {
+        /* A known, operator-confirmed level pose. Gravity remains +1 g on Z.
+         * Never turn an inverted/misconfigured frame into a ~2 g offset. */
+        if(acc[2]<=0.f) {
+            c->mode=SC_ERROR;c->reason="level-orientation-mismatch";
+            snprintf(c->apply_detail,sizeof(c->apply_detail),"Level calibration requires upright aligned +Z. Negative Z: check board alignment; no correction applied.");return;
+        }
+        if(norm<0.49f || norm>1.69f || acc[2]<0.7f || acc[2]>1.3f ||
+           fabsf(acc[0])>0.2f || fabsf(acc[1])>0.2f) {
+            window_reset(c);c->reason="level-pose-outside-envelope";return;
+        }
     }
     if(c->mode==SC_ACCEL_COLLECT) {
         unsigned axis=(unsigned)c->face/2u;
@@ -117,6 +133,20 @@ void sc_feed(sensor_calibration_t *c,const float gyro[3],const float raw_acc[3],
     if(c->mode==SC_GYRO) {
         memcpy(c->gyro_bias,c->mean,sizeof(c->gyro_bias));c->gyro_valid=true;
         c->mode=SC_COMPLETE;c->reason="gyro-calibrated-ram-only";
+    } else if(c->mode==SC_ACCEL_LEVEL) {
+        float bias[3]={c->mean[3],c->mean[4],c->mean[5]-1.f};
+        const float scale[3]={1.f,1.f,1.f};
+        memcpy(c->candidate_bias,bias,sizeof(bias));memcpy(c->candidate_scale,scale,sizeof(scale));
+        c->candidate_valid=true;
+        if(!sc_accel_coefficients_valid(bias,scale)) {
+            c->mode=SC_ERROR;c->reason="level-offset-too-large";
+            snprintf(c->apply_detail,sizeof(c->apply_detail),"Level offset exceeds existing coefficient limits; previous calibration retained.");return;
+        }
+        /* Commit only after the whole stationary window and coefficient checks.
+         * One pose determines an offset, NOT scale or cross-axis accuracy. */
+        memcpy(c->accel_bias,bias,sizeof(bias));memcpy(c->accel_scale,scale,sizeof(scale));
+        c->accel_valid=true;c->mode=SC_COMPLETE;c->reason="accel-level-applied-ram-only";
+        snprintf(c->apply_detail,sizeof(c->apply_detail),"Level offset applied in RAM; scales reset to 1. Assumes the confirmed level pose; not multi-axis validation. Save explicitly to retain after power cycle.");
     } else {
         memcpy(c->face_mean[c->face],c->mean+3,3*sizeof(float));
         c->faces|=1u<<(unsigned)c->face;c->mode=SC_ACCEL_WAIT;

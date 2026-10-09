@@ -67,3 +67,31 @@ A clean committed checkout and the existing local ARM/Python/CMake toolchain are
    use physical BOOT recovery; do not call software recovery verified.
 
 A passing software model or compile does not prove these physical checks.
+
+## Calibration workflow update (`cal2`)
+
+The new firmware identifies itself with the `-cal2` version suffix and advertises
+`calibration_api: 2`. Calibration controls require the paired configurator.
+A level accelerometer offset is now the primary workflow; the six-face solve is
+advanced. The current upright-negative-Z hardware observation is NOT fixed by
+this update, and level calibration must refuse it. Do not turn the board upside
+down to make that check pass. See [calibration details](../../docs/SENSOR-CALIBRATION.md).
+
+Before updating, end any active session (`calibration_cancel`) and export `diff all`.
+Use the sparse HEX only and the existing verified `bl`/physical BOOT recovery path.
+After full power removal and reconnect, verify version `-cal2`, `storage`, `receiver`,
+and `calibration`. Expect the previous saved generation and TAER to survive, a live
+CRSF link when the transmitter is on, and separate gyro offset-applied/readiness
+indicators. Do not assume a successful earlier gyro calibration persists across boot.
+
+Keep the board upright/stationary and copy the new `accel_register_bytes`,
+`accel_counts`, range, aligned pre-correction and corrected fields. Negative aligned
+Z is an expected stop condition for level calibration until mounting is resolved.
+Gyro calibration may be tested independently: keep still, observe a completed
+window and near-zero rotation rates. This does not calibrate the accelerometer.
+
+Compare `status` timing before/after opening detailed diagnostics: target/actual
+1000 Hz, no new overruns, no resets or telemetry framing loss. Verify `bl` again
+with saved settings and no active calibration session. If USB or storage regresses,
+stop; recover via physical BOOT and the previous PR #88 sparse HEX. Do not mass erase.
+Do not call the new calibration hardware-validated until these checks are observed.

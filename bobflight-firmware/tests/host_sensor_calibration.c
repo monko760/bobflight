@@ -45,5 +45,32 @@ int main(void){
  /* A malicious/invalid staged solution never modifies applied coefficients. */
  sc_begin_accel(&c,now);c.faces=63;c.face_mean[0][0]=.01f;c.face_mean[1][0]=.01f;
  CHECK(!sc_apply_accel(&c));CHECK(fabsf(c.accel_scale[0]-scale[0])<1e-5f);
+ /* Level is a bounded offset-only solve, preserving gravity and old state on failures. */
+ float stationary[3]={.12f,-.23f,.31f}, level[3]={.02f,-.03f,.87f};
+ sc_begin_accel_level(&c,now);CHECK(sc_required(&c)==1000);
+ feed(&c,stationary,level,&now,1001);CHECK(c.mode==SC_COMPLETE&&c.accel_valid);
+ CHECK(fabsf(c.accel_bias[2]+.13f)<1e-5f&&c.accel_scale[2]==1.f);
+ sc_correct_accel(&c,level,corrected);
+ CHECK(fabsf(corrected[0])<1e-5f&&fabsf(corrected[1])<1e-5f&&fabsf(corrected[2]-1.f)<1e-5f);
+ float saved_bias[3];memcpy(saved_bias,c.accel_bias,sizeof(saved_bias));
+ /* Upright negative Z must be diagnosed, not hidden in an inversion-sized offset. */
+ level[2]=-.87f;sc_begin_accel_level(&c,now);feed(&c,stationary,level,&now,1);
+ CHECK(c.mode==SC_ERROR&&!strcmp(c.reason,"level-orientation-mismatch")&&c.accel_valid);
+ CHECK(!memcmp(saved_bias,c.accel_bias,sizeof(saved_bias)));
+ level[2]=.87f;sc_begin_accel_level(&c,now);feed(&c,stationary,level,&now,100);sc_cancel(&c,"cancelled");
+ CHECK(!memcmp(saved_bias,c.accel_bias,sizeof(saved_bias))&&c.accel_valid);
+ sc_begin_accel_level(&c,now);sc_tick(&c,now+30000u);CHECK(c.mode==SC_ERROR&&c.accel_valid);
+ sc_begin_accel_level(&c,now);level[0]=NAN;feed(&c,stationary,level,&now,1);
+ CHECK(c.mode==SC_ERROR&&!memcmp(saved_bias,c.accel_bias,sizeof(saved_bias)));
+ level[0]=.5f;sc_begin_accel_level(&c,now);feed(&c,stationary,level,&now,1100);CHECK(c.samples==0&&c.mode==SC_ACCEL_LEVEL);
+ level[0]=.02f;stationary[0]=6;feed(&c,stationary,level,&now,1100);CHECK(c.samples==0);
+ stationary[0]=.12f;sc_begin_accel_level(&c,now);
+ for(unsigned i=0;i<2000;i++)sc_feed(&c,stationary,level,now);CHECK(c.samples==1&&c.mode==SC_ACCEL_LEVEL);
+ sc_begin_accel_level(&c,now);for(unsigned i=0;i<1100;i++){level[0]=(i&1)?-.1f:.1f;sc_feed(&c,stationary,level,++now);}
+ CHECK(c.mode==SC_ACCEL_LEVEL&&c.samples<1000&&!memcmp(saved_bias,c.accel_bias,sizeof(saved_bias)));
+ /* Individually allowed components cannot stack beyond the 0.3 g bias-vector bound. */
+ level[0]=level[1]=.19f;level[2]=.72f;sc_begin_accel_level(&c,now);feed(&c,stationary,level,&now,1001);
+ CHECK(c.mode==SC_ERROR&&!strcmp(c.reason,"level-offset-too-large")&&!memcmp(saved_bias,c.accel_bias,sizeof(saved_bias)));
+ puts("PASS level offset: gravity retained, unit scale, inverted/motion/noise/duplicate/timeout/nonfinite refusal and atomic retention");
  puts("PASS: gyro and six-face solve, duplicates, motion/noise, wrong face, independent gyro at 0.82g, NaN, gaps, timeout, wrap, cancel and atomic apply");return 0;
 }

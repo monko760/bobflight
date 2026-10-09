@@ -30,6 +30,23 @@ sensors_end: 1
 let passed=0;
 async function test(name:string,fn:()=>unknown|Promise<unknown>){await fn();console.log('PASS',name);passed++;}
 async function main(){
+ await test('level calibration capability and pose gates are explicit; old firmware stays read-only for level',()=>{
+  const base=parseKeyValueSnapshot(fixture)!;const ctx={connected:true,snapshot:base,fresh:true,propsOff:true,stationary:true};
+  assert.equal(checkActionGates('accel_level',ctx).allowed,false);
+  const s={...base,calibration_api:2,cal_accel_level_supported:true,gyro_bias_applied:true};
+  assert.equal(checkActionGates('accel_level',{...ctx,snapshot:s}).allowed,true);
+  for(const override of [{cal_accel_level_supported:false},{gyro_calibrated:false},{cal_state:'gyro'},{cal_manual:true},{arm:'armed' as const},{motor_active:true},{sensor_config_ok:false},{accel_raw_g:[0,0,-.876] as [number,number,number]},{accel_raw_g:[.5,0,1] as [number,number,number]}])
+   assert.equal(checkActionGates('accel_level',{...ctx,snapshot:{...s,...override}}).allowed,false);
+  for(const override of [{fresh:false},{propsOff:false},{stationary:false},{pending:true},{connected:false}])assert.equal(checkActionGates('accel_level',{...ctx,snapshot:s,...override}).allowed,false);
+ });
+ await test('new diagnostic frames retain signed sensor counts and do not relabel g as untouched bytes',()=>{
+  const cap='calibration_api: 2\ncal_accel_level_supported: yes\ngyro_bias_applied: yes\naccel_raw_frame: aligned-pre-correction\n';
+  const raw=fixture.replace('sensors_end: 1',cap+'accel_counts: -32768 0 32767\naccel_counts_frame: sensor\naccel_counts_per_g: 4096\naccel_register_bytes: 80 00 00 00 7f ff\ncalibration_end: 1');
+  const s=parseKeyValueSnapshot(raw)!;assert.equal(s.calibration_api,2);assert.equal(s.gyro_bias_applied,true);assert.deepEqual(s.accel_counts,[-32768,0,32767]);
+  for(const [a,b] of [['-32768 0 32767','-32769 0 32767'],['-32768 0 32767','0.5 0 1'],['supported: yes','supported: maybe'],['calibration_api: 2','calibration_api: 3'],['80 00 00 00 7f ff','gg 00 00 00 7f ff']])assert.equal(parseKeyValueSnapshot(raw.replace(a,b)),null);
+  assert.equal(parseKeyValueSnapshot(fixture.replace('cal_state: idle','cal_state: accel_level')),null);
+  assert.equal(parseKeyValueSnapshot(raw.replace('cal_state: idle','cal_state: accel_level'))?.cal_state,'accel_level');
+ });
  await test('strict full sensor schema and exact finite vectors',()=>{
   const s=parseKeyValueSnapshot(fixture)!;assert.ok(s);assert.deepEqual(s.gyro_dps,[.1,-.2,.05]);
   for(const key of ['sample_seq','sensor_age_ms','arm','motor_active','sensor_config_ok','attitude_ready','cal_manual','gyro_dps','sensors_end'])

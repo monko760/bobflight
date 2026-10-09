@@ -410,6 +410,15 @@ int main(void){
  board.rx_uart=2;persist_init();assert(persist_load());assert(board.rx_uart==3&&!strcmp(crsf_map(),"TAER"));
  for(unsigned u=5;u<=7;u++){put32(image+48,u);assert(!persist_load());assert(board.rx_uart==3);}
  put32(image+48,3);assert(persist_load());puts("PASS Matek UART3/TAER cold-restore and unsupported UART5/6/7 atomic refusal");
+ /* Actual level-engine output survives the same nonvolatile codec and board binding. */
+ sensor_calibration_t level_solved;sc_init(&level_solved);sc_begin_accel_level(&level_solved,0);
+ const float still[3]={0,0,0},flat_sample[3]={.02f,-.03f,.875f};
+ for(unsigned t=1;t<=1001;t++)sc_feed(&level_solved,still,flat_sample,t);
+ assert(level_solved.accel_valid&&level_solved.mode==SC_COMPLETE);
+ memcpy(cal.accel_bias,level_solved.accel_bias,12);memcpy(cal.accel_scale,level_solved.accel_scale,12);cal.accel_valid=true;
+ assert(persist_save());memset(&cal,0,sizeof cal);persist_init();assert(persist_load());
+ assert(cal.accel_valid&&!memcmp(cal.accel_bias,level_solved.accel_bias,12)&&!memcmp(cal.accel_scale,level_solved.accel_scale,12));
+ assert(!strcmp(persist_accel_storage(),"host-sim"));puts("PASS Matek level-engine coefficients Save/readback/cold-restore codec (host simulation)");
  supported=false;cal.accel_valid=true;before=saves;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"ram-only"));
  puts("PASS actual six-face solver -> codec -> cold restore, candidate/gyro exclusion, atomic malformed-cal refusal, dirty/save/error state, old-settings migration and unsupported target");
  puts("PASS codec offsets, validated atomic restore, repeated boot-init roundtrip, dirty tracking, guards, failed writes/readback, malformed fields and scope");

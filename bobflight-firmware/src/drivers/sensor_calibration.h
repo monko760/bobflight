@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include "drivers/calibration_policy.h"
 #include <stdint.h>
-typedef enum {SC_IDLE,SC_GYRO,SC_ACCEL_WAIT,SC_ACCEL_COLLECT,SC_COMPLETE,SC_ERROR} sc_mode_t;
+typedef enum {SC_IDLE,SC_GYRO,SC_ACCEL_WAIT,SC_ACCEL_COLLECT,SC_COMPLETE,SC_ERROR,SC_ACCEL_LEVEL} sc_mode_t;
 typedef struct {
     float gyro_bias[3],accel_bias[3],accel_scale[3];
     bool gyro_valid,accel_valid;
@@ -22,6 +22,7 @@ typedef struct {
 bool sc_accel_coefficients_valid(const float bias[3],const float scale[3]);
 void sc_init(sensor_calibration_t *c);
 void sc_begin_gyro(sensor_calibration_t *c,uint32_t now);
+void sc_begin_accel_level(sensor_calibration_t *c,uint32_t now);
 void sc_begin_accel(sensor_calibration_t *c,uint32_t now);
 bool sc_capture_face(sensor_calibration_t *c,unsigned face,uint32_t now);
 bool sc_apply_accel(sensor_calibration_t *c);

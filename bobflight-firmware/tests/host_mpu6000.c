@@ -38,6 +38,10 @@ int main(void){float d[3];b.gyro_spi_bus=4;b.gyro_cs_pin=HAL_PIN_PACK(4,4);
  val(0x3B,2048);val(0x3D,1024);val(0x3F,4096);val(0x43,164);val(0x45,-328);val(0x47,492);
  CHECK(gyro_sample(d));CHECK(fabsf(d[0]-20)<.01f&&fabsf(d[1]-10)<.01f&&fabsf(d[2]-30)<.01f);
  CHECK(fabsf(gyro_accel_g()[0]+.25f)<.001f&&fabsf(gyro_accel_g()[1]-.5f)<.001f);
+ CHECK(gyro_diagnostics()->accel_counts[0]==2048&&gyro_diagnostics()->accel_counts[1]==1024&&gyro_diagnostics()->accel_counts[2]==4096);
+ CHECK(gyro_diagnostics()->accel_register_bytes[0]==8&&gyro_diagnostics()->accel_register_bytes[1]==0);
+ CHECK(!gyro_start_accel_level_calibration()); /* cannot interrupt startup gyro calibration */
+
  val(0x3B,0);val(0x3D,0);val(0x3F,3359);val(0x43,16);val(0x45,0);val(0x47,0);gyro_begin_calibration();
  for(int i=0;i<999;i++){++now;CHECK(gyro_sample(d));}CHECK(!gyro_calibrated());
  val(0x43,1640);++now;CHECK(gyro_sample(d));val(0x43,16);
@@ -72,6 +76,21 @@ int main(void){float d[3];b.gyro_spi_bus=4;b.gyro_cs_pin=HAL_PIN_PACK(4,4);
  CHECK(gyro_start_accel_calibration());CHECK(gyro_capture_accel_face(4));gyro_cancel_manual_calibration();
  CHECK(!gyro_manual_calibration_active());
 
+ /* Full shared-driver level path, completion and failed retry preservation. */
+ val(0x3B,0);val(0x3D,0);val(0x3F,3584);now++;CHECK(gyro_sample(d));
+ CHECK(gyro_start_accel_level_calibration());CHECK(!gyro_start_accel_level_calibration());
+ for(unsigned i=0;i<1001;i++){now++;CHECK(gyro_sample(d));gyro_calibration_touch();gyro_calibration_tick();}
+ CHECK(!gyro_manual_calibration_active());gyro_calibration_info(&info);
+ CHECK(info.accel_valid&&info.gyro_bias_valid&&fabsf(info.accel_bias[2]+.125f)<.00001f&&info.accel_scale[2]==1.f);
+ CHECK(fabsf(gyro_accel_g()[2]-1.f)<.00001f);
+ val(0x3F,-3584);now++;CHECK(gyro_sample(d));CHECK(gyro_start_accel_level_calibration());
+ now++;CHECK(gyro_sample(d));gyro_calibration_tick();gyro_calibration_info(&info);
+ CHECK(!gyro_manual_calibration_active()&&info.accel_valid&&!strcmp(info.reason,"level-orientation-mismatch"));
+ CHECK(fabsf(info.accel_bias[2]+.125f)<.00001f);
+ /* Restore the fixture's 0.2 g offset for the existing persistence regression. */
+ float previous_bias[3]={0,0,-.2f},previous_scale[3]={1,1,1};
+ gyro_restore_accel_calibration(previous_bias,previous_scale,true);
+ val(0x3F,3277);now++;CHECK(gyro_sample(d));
  gyro_calibration_info_t stored;gyro_calibration_info(&stored);
  uint32_t binding=gyro_accel_calibration_binding();CHECK(binding!=0);
  b.gyro_spi_bus=1;CHECK(!gyro_accel_restore_valid(stored.accel_bias,stored.accel_scale,binding));b.gyro_spi_bus=4;
