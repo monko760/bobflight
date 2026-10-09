@@ -65,7 +65,7 @@ assert sets==['set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5',
               'set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5','set gyro_notch2_cutoff_hz 0','set gyro_notch2_hz 0'],sets
 assert 'ok gyro_notch1_hz=200.5' in lines
 assert [l for l in lines if l.startswith('gyro_notch') and '=' in l][-4:]==[f'{k}=0' for k in KEYS],lines
-assert values(lines,'schema')==['10'],lines  # schema 9 adds the RPM filter, schema 10 motor_direction
+assert values(lines,'schema')==['11'],lines  # schema 9 adds the RPM filter, schema 10 motor_direction
 
 # Save + reboot keeps the pair; on the 8 kHz board a 1 kHz loop change makes the
 # stored 600 Hz notch above-nyquist: disabled at runtime, reported, not altered.

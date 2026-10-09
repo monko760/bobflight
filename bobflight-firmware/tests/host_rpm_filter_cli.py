@@ -1,10 +1,10 @@
 # Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
-"""Actual host firmware CLI: RPM notch filter (schema 9 keys; storage schema 10) per board.
+"""Actual host firmware CLI: RPM notch filter (schema 9 keys; storage schema 11) per board.
 get/set/diff/dump/defaults/save for rpm_filter_harmonics, rpm_filter_min_hz,
 rpm_filter_q_x100 and motor_poles; exact refusal lines with the value left
 unchanged; the exact read-only `rpm_filter` report (the host has no ESC, so
 bidir-off / erpm-unavailable and every motor unavailable); harmonics > 0 never
-enables bidir; save + reboot keeps the values; the full dump fits the 2048-byte export buffer."""
+enables bidir; save + reboot keeps the values; the full dump fits the 2560-byte export buffer."""
 import os,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
 # Safety S1: the RPM filter runs inside gyro_filter() on every gyro sample, so the
@@ -63,16 +63,16 @@ r=reports(lines)
 assert r==[expect(0,'no','bidir-off'),expect(0,'no','erpm-unavailable'),expect(0,'no','off')],r
 assert lines.index('dshot_bidir=off')<lines.index('ok dshot_bidir=on') and 'erpm_m1=none' in lines,lines
 
-# diff lists non-defaults, dump lists all four, defaults resets, storage schema 10 (schema 9 added these keys).
+# diff lists non-defaults, dump lists all four, defaults resets, storage schema 11 (schema 9 added these keys).
 lines=run(['diff','set rpm_filter_harmonics 3','set motor_poles 12','diff','dump','defaults','diff','storage']+[f'get {k}' for k in KEYS])
 sets=[l for l in lines if l.startswith(('set rpm_filter','set motor_poles'))]
 assert sets==['set rpm_filter_harmonics 3','set motor_poles 12',
               'set rpm_filter_harmonics 3','set rpm_filter_min_hz 100','set rpm_filter_q_x100 500','set motor_poles 12'],sets
 assert [l for l in lines if l.split('=')[0] in KEYS][-4:]==[f'{k}={v}' for k,v in zip(KEYS,DEF)],lines
-assert values(lines,'schema')==['10'] and values(lines,'# schema')==['10']*4,lines
-assert all(s.endswith(',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction') for s in values(lines,'scope')+values(lines,'# scope')),lines
+assert values(lines,'schema')==['11'] and values(lines,'# schema')==['11']*4,lines
+assert all(s.endswith(',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw') for s in values(lines,'scope')+values(lines,'# scope')),lines
 
-# Worst-case full dump (every key non-default, longest values) fits the 2048-byte export buffer (<= 2047).
+# Worst-case full dump (every key non-default, longest values) fits the 2560-byte export buffer (<= 2047).
 big=['set rate_max_roll 1234.57','set rate_max_pitch 1234.57','set rate_max_yaw 1234.57','set rate_expo 0.123457',
      'set pid_roll_p 0.00123457','set pid_roll_i 0.00123457','set pid_roll_d 0.00123457','set pid_pitch_p 0.00123457',
      'set pid_pitch_i 0.00123457','set pid_pitch_d 0.00123457','set pid_yaw_p 0.00123457','set pid_yaw_i 0.00123457',
@@ -84,7 +84,7 @@ out=subprocess.run([exe],input=('\n'.join(big)+'\n').encode(),stdout=subprocess.
 s=out.index('# bobflight_config: 1');e=out.index('# config_end: 1\r\n',s)+len('# config_end: 1\r\n')
 assert 'config response failed' not in out and 'set motor_poles 36' in out[s:e],out
 print(f'worst-case dump {e-s} bytes')
-assert e-s<2048,e-s
+assert e-s<2560,e-s
 
 # Save + reboot keeps the settings (storage saved, not dirty).
 PAD=' '*64
@@ -93,4 +93,4 @@ lines=run(['set rpm_filter_harmonics 2','set rpm_filter_min_hz 80','set rpm_filt
 assert [l for l in lines if l.split('=')[0] in KEYS][-4:]==['rpm_filter_harmonics=2','rpm_filter_min_hz=80','rpm_filter_q_x100=350','motor_poles=12'],lines
 assert values(lines,'state')[-1]=='saved' and values(lines,'dirty')[-1]=='0',lines
 assert reports(lines)[-1]==expect(0,'no','bidir-off'),reports(lines)
-print(f'PASS rpm_filter CLI ({board}, {RATE} Hz): get/set/refusals verbatim, report, bidir never auto-enabled, diff/dump/defaults, schema 10, save+reboot')
+print(f'PASS rpm_filter CLI ({board}, {RATE} Hz): get/set/refusals verbatim, report, bidir never auto-enabled, diff/dump/defaults, schema 11, save+reboot')

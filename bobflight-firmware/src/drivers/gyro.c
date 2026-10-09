@@ -613,6 +613,8 @@ bool gyro_sample(float dps[3])
         arming_set_gyro_healthy(false);
         return false;
     }
+    config_board_alignment_apply(dps);
+    config_board_alignment_apply(g_acc);
     if(g_kind==GYRO_CHIP_MPU6K) {
         memcpy(g_diag.raw_acc_g,g_acc,sizeof(g_acc));
         g_diag.sample_ms=hal_millis();
@@ -769,7 +771,7 @@ const float *gyro_accel_g(void){return g_acc;}
 const float *gyro_latest_dps(void){return g_latest;}
 const gyro_diagnostics_t *gyro_diagnostics(void){return &g_diag;}
 static bool manual_sensor_ready(void) {
-    return g_healthy && g_diag.config_ok && g_diag.sample_seq &&
+    return !config_board_alignment_pending() && g_healthy && g_diag.config_ok && g_diag.sample_seq &&
         (uint32_t)(hal_millis()-g_diag.sample_ms)<=100u &&
         arming_state()!=ARM_ARMED && hal_usb_cdc_connected();
 }

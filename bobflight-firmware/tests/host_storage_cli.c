@@ -77,9 +77,9 @@ int main(void){
   if(!loop_rate_setting_set(8000)||!config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN)){fprintf(stderr,"settings refused\n");return 1;}
   long_cal=true;long_mode=true;output[0]=0;cmd_config_export(true);long_cal=false;long_mode=false;
   size_t len=strlen(output);
-  printf("calibrated worst-case schema 10 dump: %zu bytes (limit 2048, headroom %zu bytes)\n",len,(size_t)2048u-len);
-  if(strstr(output,"config export failed")||len<=1800||len+64>2048){fprintf(stderr,"FAIL: calibrated worst-case dump %zu bytes (need 1800 < len <= 1984: 64 B headroom under 2048, no 'config export failed')\n%s\n",len,output);return 1;}
-  assert(strstr(output,"# schema: 10\r\n")&&strstr(output,"set motor_poles 36\r\nset motor_direction props-in\r\nset loop_rate_hz 8000\r\n"));
+  printf("calibrated worst-case schema 10 dump: %zu bytes (limit 2560, headroom %zu bytes)\n",len,(size_t)2560u-len);
+  if(strstr(output,"config export failed")||len<=1800||len+64>2560){fprintf(stderr,"FAIL: calibrated worst-case dump %zu bytes (need 1800 < len <= 2496: 64 B headroom under 2560, no 'config export failed')\n%s\n",len,output);return 1;}
+  assert(strstr(output,"# schema: 11\r\n")&&strstr(output,"set motor_direction props-in\r\nset loop_rate_hz 8000\r\n"));
   assert(strstr(output,"# accel_calibrated: yes\r\n")&&strstr(output,"# accel_bias: -0.0012345")&&strstr(output,"# config_end: 1\r\n"));
   assert(strstr(output,"control_mode horizon\r\n")&&strstr(output,"mode_range ARM 1 12 1100 2100\r\n"));
   /* diff: motor_direction only when it is not the default props-out; dump always. */

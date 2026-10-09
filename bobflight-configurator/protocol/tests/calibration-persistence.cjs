@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 const assert=require('node:assert/strict');
 const path=require('node:path');
-const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3,STORAGE_SCOPE_V4,STORAGE_SCOPE_V5,STORAGE_SCOPE_V6,STORAGE_SCOPE_V7,STORAGE_SCOPE_V8,STORAGE_PAYLOAD_BYTES_V8,STORAGE_SCOPE_V9,STORAGE_SCOPE_V10,STORAGE_PAYLOAD_BYTES_V9,STORAGE_PAYLOAD_BYTES_V10,CONFIG_EXPORT_MAX_BYTES}=require('../dist');
+const {parseStorage,canSaveStorage,parseConfigurationExport,STORAGE_SCOPE,STORAGE_SCOPE_V2,STORAGE_SCOPE_V3,STORAGE_SCOPE_V4,STORAGE_SCOPE_V5,STORAGE_SCOPE_V6,STORAGE_SCOPE_V7,STORAGE_SCOPE_V8,STORAGE_PAYLOAD_BYTES_V8,STORAGE_SCOPE_V9,STORAGE_SCOPE_V10,STORAGE_PAYLOAD_BYTES_V9,STORAGE_PAYLOAD_BYTES_V10,CONFIG_EXPORT_MAX_BYTES,STORAGE_SCOPE_V11,STORAGE_PAYLOAD_BYTES_V11,isBoardAlignmentCommand}=require('../dist');
 const {mockSensorReply}=require('../dist/sensor-mock');
 const {loadUiTs}=require('./load-ui-ts.cjs');
 const {parseKeyValueSnapshot}=loadUiTs(path.resolve(__dirname,'../../ui/src/sensors/telemetry.ts'));
@@ -51,14 +51,14 @@ for(const bad of [v8.replace('set gyro_notch1_hz 200','set gyro_notch1_hz 10'),v
 assert.equal(parseStorage(storage(8,STORAGE_SCOPE_V8)).schema,8);assert.throws(()=>parseStorage(storage(8,STORAGE_SCOPE_V7)));assert.throws(()=>parseStorage(storage(7,STORAGE_SCOPE_V8)));assert.throws(()=>parseStorage(storage(9,STORAGE_SCOPE_V8)));
 console.log('PASS schema8 capability (gyro_notch1/2 centre+cutoff @ 192..207 / 208-byte payload)');
 const v9=v8.replace('# schema: 8','# schema: 9').replace(STORAGE_SCOPE_V8,STORAGE_SCOPE_V9).replace('# config_end: 1','set rpm_filter_harmonics 3\nset rpm_filter_min_hz 100\nset rpm_filter_q_x100 500\nset motor_poles 14\n# config_end: 1');
-assert.equal(parseConfigurationExport(v9,'dump').modeCount,4);assert.equal(STORAGE_PAYLOAD_BYTES_V9,224);assert.equal(CONFIG_EXPORT_MAX_BYTES,2048);
+assert.equal(parseConfigurationExport(v9,'dump').modeCount,4);assert.equal(STORAGE_PAYLOAD_BYTES_V9,224);assert.equal(CONFIG_EXPORT_MAX_BYTES,2560);
 assert.equal(STORAGE_SCOPE_V9,STORAGE_SCOPE_V8+',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles');
 for(const bad of [v9.replace('set rpm_filter_harmonics 3','set rpm_filter_harmonics 4'),v9.replace('set rpm_filter_harmonics 3','set rpm_filter_harmonics 2.5'),v9.replace('set rpm_filter_min_hz 100','set rpm_filter_min_hz 201'),
   v9.replace('set rpm_filter_q_x100 500','set rpm_filter_q_x100 99'),v9.replace('set motor_poles 14','set motor_poles 15'),v9.replace('set motor_poles 14','set motor_poles 40'),v8.replace('# config_end: 1','set motor_poles 14\n# config_end: 1')])assert.throws(()=>parseConfigurationExport(bad,'dump'));
-{const pad='# config_end: 1';const big=v9.replace(pad,'set rate_max_roll 800\n'.repeat(Math.ceil((CONFIG_EXPORT_MAX_BYTES-v9.length)/22)+1)+pad);assert(big.length>CONFIG_EXPORT_MAX_BYTES);assert.throws(()=>parseConfigurationExport(big,'dump'),e=>e.message===`Configuration export is ${big.length} bytes; the limit is 2048 bytes`,'oversize message states the actual size and the 2048 limit');
+{const pad='# config_end: 1';const big=v9.replace(pad,'set rate_max_roll 800\n'.repeat(Math.ceil((CONFIG_EXPORT_MAX_BYTES-v9.length)/22)+1)+pad);assert(big.length>CONFIG_EXPORT_MAX_BYTES);assert.throws(()=>parseConfigurationExport(big,'dump'),e=>e.message===`Configuration export is ${big.length} bytes; the limit is 2560 bytes`,'oversize message states the actual size and the 2560 limit');
  const fits=v9.replace(pad,'set rate_max_roll 800\n'.repeat(Math.floor((1990-v9.length)/22))+pad);assert(fits.length>1800&&fits.length<=CONFIG_EXPORT_MAX_BYTES);assert.equal(parseConfigurationExport(fits,'dump').modeCount,4);}
 assert.equal(parseStorage(storage(9,STORAGE_SCOPE_V9)).schema,9);assert.throws(()=>parseStorage(storage(9,STORAGE_SCOPE_V8)));assert.throws(()=>parseStorage(storage(8,STORAGE_SCOPE_V9)));assert.throws(()=>parseStorage(storage(10,STORAGE_SCOPE_V9)));
-console.log('PASS schema9 capability (RPM filter harmonics/min_hz/q_x100/motor_poles @ 208..223 / 224-byte payload; export limit 2048)');
+console.log('PASS schema9 capability (RPM filter harmonics/min_hz/q_x100/motor_poles @ 208..223 / 224-byte payload; export limit 2560)');
 const v10=v9.replace('# schema: 9','# schema: 10').replace(STORAGE_SCOPE_V9,STORAGE_SCOPE_V10).replace('# config_end: 1','set motor_direction props-in\n# config_end: 1');
 assert.equal(parseConfigurationExport(v10,'dump').modeCount,4);assert.equal(STORAGE_PAYLOAD_BYTES_V10,256);assert.equal(STORAGE_SCOPE_V10,STORAGE_SCOPE_V9+',motor_direction');
 assert.equal(parseConfigurationExport(v10.replace('props-in','props-out'),'dump').modeCount,4);
@@ -66,11 +66,19 @@ for(const bad of [v10.replace('set motor_direction props-in','set motor_directio
 assert.equal(parseStorage(storage(10,STORAGE_SCOPE_V10)).schema,10);assert.throws(()=>parseStorage(storage(10,STORAGE_SCOPE_V9)));assert.throws(()=>parseStorage(storage(9,STORAGE_SCOPE_V10)));assert.throws(()=>parseStorage(storage(11,STORAGE_SCOPE_V10)));
 console.log('PASS schema10 capability (motor_direction props-out|props-in u32 @ 228..231 / 256-byte payload; unknown tokens refused in exports)');
 
+const v11=v10.replace('# schema: 10','# schema: 11').replace(STORAGE_SCOPE_V10,STORAGE_SCOPE_V11).replace('# config_end: 1','set align_board_roll 180\nset align_board_pitch -15\nset align_board_yaw 90\n# config_end: 1');
+assert.equal(parseStorage(storage(11,STORAGE_SCOPE_V11)).schema,11);assert.equal(STORAGE_PAYLOAD_BYTES_V11,256);assert.equal(parseConfigurationExport(v11,'dump').modeCount,4);
+for(const cmd of ['set align_board_roll 180','set align_board_pitch -180','get align_board_yaw'])assert(isBoardAlignmentCommand(cmd));
+for(const cmd of ['set align_board_roll 181','set align_board_roll -181','set align_board_roll 0.5','set align_board_roll NaN','set align_board_roll 0\narm','set align_board_roll 180 extra'])assert(!isBoardAlignmentCommand(cmd));
+for(const value of ['181','-181','0.5','NaN','180 extra'])assert.throws(()=>parseConfigurationExport(v11.replace('align_board_roll 180','align_board_roll '+value),'dump'));
+assert.throws(()=>parseConfigurationExport(v10.replace('# config_end: 1','set align_board_roll 180\n# config_end: 1'),'dump'));
+console.log('PASS schema11 mounting capability, export domain, legacy refusal and strict command allowlist');
+
 // Render the actual save panel with old/new advertised capabilities.
 function nodes(t){return Array.isArray(t)?t.flatMap(nodes):t&&typeof t==='object'?[t,...nodes(t.props?.children)]:[];}
 function txt(t){return Array.isArray(t)?t.map(txt).join(''):t&&typeof t==='object'?txt(t.props?.children):String(t??'');}
 (async()=>{
- for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true],[4,STORAGE_SCOPE_V4,true],[5,STORAGE_SCOPE_V5,true],[6,STORAGE_SCOPE_V6,true],[7,STORAGE_SCOPE_V7,true],[8,STORAGE_SCOPE_V8,true],[9,STORAGE_SCOPE_V9,true],[10,STORAGE_SCOPE_V10,true]]){
+ for(const [schema,scope,allowed] of [[2,STORAGE_SCOPE_V2,false],[3,STORAGE_SCOPE_V3,true],[4,STORAGE_SCOPE_V4,true],[5,STORAGE_SCOPE_V5,true],[6,STORAGE_SCOPE_V6,true],[7,STORAGE_SCOPE_V7,true],[8,STORAGE_SCOPE_V8,true],[9,STORAGE_SCOPE_V9,true],[10,STORAGE_SCOPE_V10,true],[11,STORAGE_SCOPE_V11,true]]){
   let saves=0;
   const state=parseStorage(storage(schema,scope));
   const host={getConnectionStatus:()=> 'connected',sendCommand:async()=>storage(schema,scope),saveSettings:async()=>{saves++;}};

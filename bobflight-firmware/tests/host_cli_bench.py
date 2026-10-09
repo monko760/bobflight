@@ -1,6 +1,6 @@
 # Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
 """Real CLI over host stdin, dummy outputs fail closed; never drives hardware."""
-import subprocess,sys
+import subprocess,sys,os
 exe=sys.argv[1]
 def run(data):
     p=subprocess.run([exe],input=data,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10,check=True)
@@ -26,3 +26,19 @@ for cmd in ['calibrate_gyro','calibrate_accel start','calibrate_accel +x','calib
     assert 'calibration refused' in run((cmd+'\n').encode())
 assert 'calibration cancelled' in run(b'calibration_cancel\n')
 print('PASS: real sensor CLI framing and unavailable-IMU calibration refusals')
+
+# Mounting setters stage only. This real CLI test never drives hardware.
+out=run(b'set align_board_roll 180\nset align_board_pitch -15\nset align_board_yaw 90\nget align_board_roll\nsensors\ndiff all\n')
+assert 'ok align_board_roll=180' in out and 'align_board_roll=180' in out,out
+assert 'board_align_configured: 180 -15 90' in out and 'board_align_active: 0 0 0' in out,out
+assert 'board_align_reboot_required: yes' in out and 'set align_board_roll 180' in out,out
+for value in ['181','-181','0.5','nan','inf','180 extra']:
+ out=run(('set align_board_roll '+value+'\nget align_board_roll\n').encode())
+ assert 'ok align_board_roll' not in out and 'align_board_roll=0' in out,(value,out)
+print('PASS actual mounting CLI: bounded values, staged not active, explicit reboot indication, exported configuration')
+
+cmd=b'set align_board_roll 180\nset align_board_pitch 0\nset align_board_yaw 90\nsensors\nsave\nreboot\n'+b' '*64+b'\nsensors\nstorage\n'
+out=subprocess.run([exe],input=cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10,check=True,env={**os.environ,'BOBFLIGHT_HOST_REBOOT_REINIT':'1'}).stdout.decode()
+assert 'saved: host_sim verified' in out and 'board_align_active: 0 0 0' in out and 'board_align_active: 180 0 90' in out,out
+assert 'state: saved' in out and 'dirty: 0' in out,out
+print('PASS real mounting CLI Save/readback and reboot activation with retained yaw')

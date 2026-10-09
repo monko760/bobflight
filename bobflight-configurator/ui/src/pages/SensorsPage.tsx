@@ -1,3 +1,4 @@
+import {BoardOrientationPanel} from "../components/BoardOrientationPanel";
 import {StoragePanel} from "../components/StoragePanel";
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useState } from "react";
@@ -32,6 +33,7 @@ export function SensorsPage() {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [copyResult,setCopyResult]=useState("");
   const [storagePending,setStoragePending]=useState(false);
+  const [mountDraftDirty,setMountDraftDirty]=useState(false);
   useEffect(()=>{
     if(snapshot?.cal_apply_detail && !snapshot.accel_calibrated)setShowDiagnostics(true);
   },[snapshot?.cal_apply_detail,snapshot?.accel_calibrated]);
@@ -103,7 +105,7 @@ export function SensorsPage() {
   return (
     <div className="panel">
       <h2>Live Sensors & Calibration</h2>
-      <StoragePanel requiredScope="accel_calibration" onPending={setStoragePending} blocked={pending||!fresh||snapshot?.cal_manual===true} revision={snapshot?.cal_state==="complete"?2:snapshot?.accel_calibrated?1:0}/>
+      <StoragePanel requiredScope="accel_calibration" onPending={setStoragePending} blocked={pending||!fresh||snapshot?.cal_manual===true||mountDraftDirty} revision={[snapshot?.cal_state,snapshot?.accel_calibrated,...(snapshot?.board_align_configured??[])].join(":")}/>
       <p>
         Move the quad gently. Gyro measures rotation speed; acceleration includes gravity.
       </p>
@@ -293,6 +295,8 @@ export function SensorsPage() {
           </table>
         </div>
       </div>
+
+      <BoardOrientationPanel snapshot={snapshot} fresh={fresh} gate={checkActionGates("mounting_set",gateCtx)} command={command} onDirty={setMountDraftDirty}/>
 
       {/* Gyro Calibration Section */}
       <h3 style={{ marginTop: "24px" }}>Gyro Calibration</h3>

@@ -11,7 +11,7 @@
 #define COMMIT_BYTES 32u
 #define RECORD_BYTES (HEADER+MAX_PAYLOAD+COMMIT_BYTES)
 #define HEADER 32u
-#define MAX_PAYLOAD 256u /* schema10 uses all 256 bytes (motor_direction + reserved: commit block stays 32-byte aligned) */
+#define MAX_PAYLOAD 256u /* schema11 remains 256 bytes; commit block stays 32-byte aligned */
 #define MAGIC 0x42464346u
 #define SEAL 0x51A7C0DEu
 static uint32_t generation, loaded_schema;
@@ -44,6 +44,7 @@ static bool known_v10(const uint8_t*p,uint32_t board){
 }
 static bool acceptable(const uint8_t*p,uint32_t board,size_t n,unsigned version){
  if(version<=1)return valid(p,board,n);
+ if(version>=11)return record_valid(p,board,256,11)||known_v10(p,board);
  if(version>=10)return record_valid(p,board,256,10)||known_v9(p,board);
  if(version>=9)return record_valid(p,board,224,9)||known_v8(p,board);
  if(version>=8)return record_valid(p,board,208,8)||record_valid(p,board,192,7)||record_valid(p,board,188,6)||record_valid(p,board,184,5)||record_valid(p,board,176,4)||record_valid(p,board,160,3)||record_valid(p,board,128,2)||record_valid(p,board,96,1);
@@ -75,7 +76,8 @@ static bool read_slot(uint32_t offset,uint8_t *p,size_t n,unsigned version){
  if(!hal_flash_read(offset,p,HEADER)){memset(p,255,RECORD_BYTES);return false;}
  size_t tail=0;
  if(rd(p)==MAGIC){
-  if(version>=10&&rd(p+4)==10&&rd(p+12)==256)tail=256+COMMIT_BYTES;
+  if(version>=11&&rd(p+4)==11&&rd(p+12)==256)tail=256+COMMIT_BYTES;
+  else if(version>=10&&rd(p+4)==10&&rd(p+12)==256)tail=256+COMMIT_BYTES;
   else if(version>=9&&rd(p+4)==9&&rd(p+12)==224)tail=224+COMMIT_BYTES;
   else if(version>=8&&rd(p+4)==8&&rd(p+12)==208)tail=208+COMMIT_BYTES;
   else if(version>=7&&rd(p+4)==7&&rd(p+12)==192)tail=192+COMMIT_BYTES;
@@ -102,6 +104,7 @@ static bool recognized_for_version(const uint8_t*p,uint32_t board,unsigned versi
  if(rd(p)!=MAGIC)return true; /* empty/erased handled elsewhere */
  if(rd(p+8)!=board)return false;
  if(version<=1)return rd(p+4)==1&&rd(p+12)!=0; /* length checked by caller */
+ if(version>=11)return record_valid(p,board,256,11)||known_v10(p,board);
  if(version>=10)return known_v10(p,board);
  if(version>=9)return known_v9(p,board);
  if(version>=8)return known_v8(p,board);
@@ -152,3 +155,6 @@ config_store_result_t config_store_load_v9(uint32_t b,void*p,size_t n){return n=
 config_store_result_t config_store_save_v9(uint32_t b,const void*p,size_t n){return n==224?save(b,p,n,9):CONFIG_STORE_INVALID;}
 config_store_result_t config_store_load_v10(uint32_t b,void*p,size_t n){return n==256?load(b,p,n,10):CONFIG_STORE_INVALID;}
 config_store_result_t config_store_save_v10(uint32_t b,const void*p,size_t n){return n==256?save(b,p,n,10):CONFIG_STORE_INVALID;}
+
+config_store_result_t config_store_load_v11(uint32_t b,void*p,size_t n){return n==256?load(b,p,n,11):CONFIG_STORE_INVALID;}
+config_store_result_t config_store_save_v11(uint32_t b,const void*p,size_t n){return n==256?save(b,p,n,11):CONFIG_STORE_INVALID;}

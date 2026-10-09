@@ -4,7 +4,7 @@ import {useHost} from '../hooks/useHost';
 import {parseStorage,parseConfigurationExport,canSaveStorage,type StorageSnapshot} from '../protocol';
 import {requestRefresh,storageDirty,browserConfirm} from './storageRefresh';
 /** onPending: told whenever a save / refresh / export starts or settles (and false on unmount), so a page can lock its own setters; it never feeds `blocked`. */
-export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:{revision?:number;blocked?:boolean;requiredScope?:string;onPending?:(pending:boolean)=>void}){
+export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:{revision?:number|string;blocked?:boolean;requiredScope?:string;onPending?:(pending:boolean)=>void}){
  const {host,connectionStatus,postFlashGate}=useHost();
  const connected=connectionStatus==='connected'&&!postFlashGate;
  const [state,setState]=useState<StorageSnapshot|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');

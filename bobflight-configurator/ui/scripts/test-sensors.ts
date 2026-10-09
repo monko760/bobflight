@@ -47,6 +47,15 @@ async function main(){
   assert.equal(parseKeyValueSnapshot(fixture.replace('cal_state: idle','cal_state: accel_level')),null);
   assert.equal(parseKeyValueSnapshot(raw.replace('cal_state: idle','cal_state: accel_level'))?.cal_state,'accel_level');
  });
+ await test('mounting capability: exact vectors, active/pending consistency, calibration gates and staged setters',()=>{
+  const wire=fixture.replace('sensors_end: 1','board_alignment_api: 1\nboard_align_configured: 180 0 90\nboard_align_active: 0 0 90\nboard_align_reboot_required: yes\nsensors_end: 1');
+  const snap=parseKeyValueSnapshot(wire)!;assert.deepEqual(snap.board_align_configured,[180,0,90]);
+  const ctx={snapshot:snap,connected:true,fresh:true,propsOff:true,stationary:true};
+  assert(checkActionGates('mounting_set',ctx).allowed);assert(!checkActionGates('gyro_cal',ctx).allowed);assert(!checkActionGates('accel_start',ctx).allowed);
+  for(const change of [{board_alignment_api:undefined},{arm:'armed' as const},{motor_active:true},{cal_manual:true},{cal_state:'accel_wait'}])assert(!checkActionGates('mounting_set',{...ctx,snapshot:{...snap,...change}}).allowed);
+  for(const change of [{fresh:false},{connected:false},{propsOff:false},{stationary:false},{pending:true}])assert(!checkActionGates('mounting_set',{...ctx,...change}).allowed);
+  for(const [a,b] of [['configured: 180 0 90','configured: 181 0 90'],['configured: 180 0 90','configured: 0.5 0 90'],['configured: 180 0 90','configured: NaN 0 90'],['required: yes','required: no'],['alignment_api: 1','alignment_api: 2']])assert.equal(parseKeyValueSnapshot(wire.replace(a,b)),null);
+ });
  await test('strict full sensor schema and exact finite vectors',()=>{
   const s=parseKeyValueSnapshot(fixture)!;assert.ok(s);assert.deepEqual(s.gyro_dps,[.1,-.2,.05]);
   for(const key of ['sample_seq','sensor_age_ms','arm','motor_active','sensor_config_ok','attitude_ready','cal_manual','gyro_dps','sensors_end'])

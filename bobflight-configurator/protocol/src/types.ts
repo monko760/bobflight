@@ -51,6 +51,8 @@ export type CliCommand =
   | "reboot"
   | "bl" | "bl discard"
   | "sensors"
+  | `get align_board_${"roll"|"pitch"|"yaw"}`
+  | `set align_board_${"roll"|"pitch"|"yaw"} ${number}`
   | "calibration"
   | "calibration_cancel"
   | "calibrate_accel level"

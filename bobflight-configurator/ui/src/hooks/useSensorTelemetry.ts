@@ -1,3 +1,4 @@
+import {isBoardAlignmentCommand} from "@bobflight/protocol";
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import {useHost} from "./useHost";
@@ -90,7 +91,7 @@ export function useSensorTelemetry(){
   const command=useCallback(async(cmd:string):Promise<string|undefined>=>{
     if(lane.hasPendingAction)return;
     const cancel=cmd==="calibration_cancel" || cmd==="calibrate_accel cancel";
-    const action=cancel?"accel_cancel":cmd==="calibrate_gyro"?"gyro_cal":cmd==="calibrate_accel level"?"accel_level":cmd==="calibrate_accel start"?"accel_start":cmd==="calibrate_accel apply"?"accel_apply":/^calibrate_accel [+-][xyz]$/.test(cmd)?"accel_face":null;
+    const action=cmd.startsWith("set align_board_")&&isBoardAlignmentCommand(cmd)?"mounting_set":cancel?"accel_cancel":cmd==="calibrate_gyro"?"gyro_cal":cmd==="calibrate_accel level"?"accel_level":cmd==="calibrate_accel start"?"accel_start":cmd==="calibrate_accel apply"?"accel_apply":/^calibrate_accel [+-][xyz]$/.test(cmd)?"accel_face":null;
     if(!action){setCommandError("Unsupported calibration command");return;}
     const generation=lane.generation;setPending(true);setReply(null);setCommandError(null);
     try{

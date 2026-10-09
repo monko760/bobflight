@@ -95,3 +95,11 @@ Compare `status` timing before/after opening detailed diagnostics: target/actual
 with saved settings and no active calibration session. If USB or storage regresses,
 stop; recover via physical BOOT and the previous PR #88 sparse HEX. Do not mass erase.
 Do not call the new calibration hardware-validated until these checks are observed.
+
+## Persistent aircraft mounting (`mount1`)
+
+Firmware suffix `-cal2-mount1` adds schema 11 mounting rotation without modifying
+the factory target. For ICs up with stock front unchanged, use roll 180, pitch 0,
+yaw 0. See [mounting configuration and tests](../../docs/BOARD-ALIGNMENT.md),
+including the schema-11 downgrade limitation. Save, reboot, verify all axes, then
+level-calibrate and Save again. Do not confuse changed mounting with a scale fix.

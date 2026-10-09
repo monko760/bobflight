@@ -307,3 +307,11 @@ Betaflight behavior reference (facts only, no code copied):
 [accelerometer pipeline](https://github.com/betaflight/betaflight/blob/master/src/main/sensors/acceleration.c)
 and [gyro pipeline](https://github.com/betaflight/betaflight/blob/master/src/main/sensors/gyro.c).
 The independent implementation keeps BobFlight's explicit Save and guard policy.
+
+## Aircraft mounting before calibration
+
+[Persistent board mounting](BOARD-ALIGNMENT.md) is applied after factory IMU alignment
+and before calibration. Finish Save/reboot of a mounting change before collecting
+a new calibration. Sensor register bytes/counts remain in the sensor frame;
+`accel_raw_g` is aircraft-frame pre-correction data. Schema 11 binds saved
+accelerometer coefficients to the active mounting angles as well as the IMU.

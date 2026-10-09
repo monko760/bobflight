@@ -1,4 +1,4 @@
-import {parseStorage,isVerifiedFlashSave} from "./storage";
+import {parseStorage,isVerifiedFlashSave,isBoardAlignmentCommand} from "./storage";
 import { isModeRangeCommand, isControlSourceCommand, isControlModeCommand } from "./parse-modes";
 /*
  * Copyright 2026 Robert Leclercq
@@ -284,7 +284,7 @@ export class BobFlightCliClient {
     opts?: SendCommandOptions
   ): Promise<string> {
     if (/[\r\n]/.test(cmd)) throw new Error(`unsupported CLI command: ${String(cmd)}`);
-    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd) && !isGyroNotchCliCommand(cmd) && !isRpmFilterCliCommand(cmd)) {
+    if (!(/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) && !isModeRangeCommand(cmd) && !isControlSourceCommand(cmd) && !isControlModeCommand(cmd) && !ALLOWED_COMMANDS.includes(cmd) && !/^(receiver_uart [123467]|motor_test [0-4]|motor_pulse [1-4] (?:[0-9]|[1-9][0-9]|100))$/.test(cmd) && !/^power_config(?: [0-9]+(?:\.[0-9]+)?){7}$/.test(cmd) && !isR0bDshotCliCommand(cmd) && !isGyroNotchCliCommand(cmd) && !isRpmFilterCliCommand(cmd) && !isBoardAlignmentCommand(cmd)) {
       throw new Error(`unsupported CLI command: ${String(cmd)}`);
     }
     return this.sendRaw(cmd, opts);

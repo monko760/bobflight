@@ -48,7 +48,8 @@ bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding
 static bool legacy_orientation_allowed;
 bool gyro_accel_legacy_orientation_valid(const float b[3],const float v[3],uint32_t binding){return legacy_orientation_allowed&&binding==0x01006811u&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
-uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:image_len==208?8:image_len==224?9:10;}
+static uint32_t image_schema=11;
+uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:image_len==208?8:image_len==224?9:image_schema;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
  if(image_len==96&&n==128&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,96);return CONFIG_STORE_OK;}
  return config_store_load(id,p,n);
@@ -102,6 +103,8 @@ config_store_result_t config_store_load_v10(uint32_t id,void*p,size_t n){
  return config_store_load(id,p,n);
 }
 config_store_result_t config_store_save_v10(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
+config_store_result_t config_store_load_v11(uint32_t id,void*p,size_t n){return config_store_load_v10(id,p,n);}
+config_store_result_t config_store_save_v11(uint32_t id,const void*p,size_t n){image_schema=11;return config_store_save(id,p,n);}
 
 /* Include the codec to validate the on-wire byte format, not just happy-path APIs. */
 #include "../src/drivers/persist.c"
@@ -334,7 +337,7 @@ int main(void){
   persist_init();float n=-1;assert(config_get_key("rpm_filter_harmonics",&n)&&n==0.f);
   assert(persist_load());assert(persist_dirty());assert(config_store_loaded_schema()==8);
   for(unsigned i=0;i<4;i++){assert(config_get_key(rk[i],&n)&&n==rdef[i]);}
-  assert(persist_save());assert(image_len==PAYLOAD_BYTES&&!persist_dirty());assert(config_store_loaded_schema()==10);
+  assert(persist_save());assert(image_len==PAYLOAD_BYTES&&!persist_dirty());assert(config_store_loaded_schema()==11);
   assert(!memcmp(image,schema8,208)); /* schema8 bytes unchanged */
   for(unsigned i=0;i<4;i++)assert(getfloat(image+208+i*4)==rdef[i]);
   for(unsigned i=0;i<4;i++)assert(config_set_key(rk[i],rset[i]));
@@ -379,7 +382,7 @@ int main(void){
    }
   }
   memcpy(image,schema9,224);image_len=224;persist_init();assert(persist_load()&&persist_dirty());
-  assert(persist_save()&&image_len==PAYLOAD_BYTES&&config_store_loaded_schema()==10&&!persist_dirty());
+  assert(persist_save()&&image_len==PAYLOAD_BYTES&&config_store_loaded_schema()==11&&!persist_dirty());
   assert(!memcmp(image,schema9,224)&&get32(image+228)==0u); /* schema9 bytes unchanged */
   assert(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN)&&persist_dirty()&&persist_save());
   assert(get32(image+228)==1u);for(unsigned i=224;i<256;i++)if(i<228||i>231)assert(image[i]==0);
@@ -419,6 +422,28 @@ int main(void){
  assert(persist_save());memset(&cal,0,sizeof cal);persist_init();assert(persist_load());
  assert(cal.accel_valid&&!memcmp(cal.accel_bias,level_solved.accel_bias,12)&&!memcmp(cal.accel_scale,level_solved.accel_scale,12));
  assert(!strcmp(persist_accel_storage(),"host-sim"));puts("PASS Matek level-engine coefficients Save/readback/cold-restore codec (host simulation)");
+ /* Schema10 migration preserves factory-frame calibration and all unrelated bytes. */
+ uint8_t legacy10[256];memcpy(legacy10,image,256);image_schema=10;persist_init();memset(&cal,0,sizeof cal);
+ assert(persist_load()&&cal.accel_valid&&persist_dirty());config_board_alignment_activate();
+ assert(config_get()->align_board_roll==0&&config_get()->align_board_pitch==0&&config_get()->align_board_yaw==0);
+ assert(board.rx_uart==3&&!strcmp(crsf_map(),"TAER"));
+ assert(config_set_key("align_board_roll",180)&&config_board_alignment_pending());
+ assert(persist_save()&&image[96]==0&&cal.accel_valid); /* do not save old-frame coefficients */
+ assert(!memcmp(image,legacy10,96)&&getfloat(image+232)==180&&getfloat(image+244)==0);
+ persist_init();memset(&cal,0,sizeof cal);assert(persist_load());config_board_alignment_activate();
+ assert(!cal.accel_valid&&!config_board_alignment_pending()&&!persist_dirty());
+ memcpy(cal.accel_bias,level_solved.accel_bias,12);memcpy(cal.accel_scale,level_solved.accel_scale,12);cal.accel_valid=true;
+ assert(persist_save()&&getfloat(image+244)==180);uint8_t mount11[256];memcpy(mount11,image,256);
+ persist_init();memset(&cal,0,sizeof cal);assert(persist_load());config_board_alignment_activate();
+ assert(cal.accel_valid&&!persist_dirty()&&!memcmp(cal.accel_bias,level_solved.accel_bias,12));
+ assert(config_set_key("align_board_yaw",17));putfloat(image+244,0);assert(!persist_load());
+ assert(config_get()->align_board_yaw==17&&cal.accel_valid); /* atomic frame-mismatch refusal */
+ memcpy(image,mount11,256);assert(persist_load());assert(config_set_key("align_board_roll",0));
+ assert(persist_save()&&image[96]==0);persist_init();assert(persist_load());config_board_alignment_activate();
+ assert(!cal.accel_valid&&!config_board_alignment_pending()); /* no resurrection returning to stock */
+ memcpy(image,legacy10,256);image_schema=10;image[232]=1;assert(!persist_load());
+ memcpy(image,mount11,256);image_schema=11;assert(persist_load());config_board_alignment_activate();
+ puts("PASS schema10 mounting migration, old-frame exclusion, new-frame restore, mismatch atomicity and no calibration resurrection");
  supported=false;cal.accel_valid=true;before=saves;assert(!persist_save());assert(!strcmp(persist_accel_storage(),"ram-only"));
  puts("PASS actual six-face solver -> codec -> cold restore, candidate/gyro exclusion, atomic malformed-cal refusal, dirty/save/error state, old-settings migration and unsupported target");
  puts("PASS codec offsets, validated atomic restore, repeated boot-init roundtrip, dirty tracking, guards, failed writes/readback, malformed fields and scope");

@@ -76,7 +76,8 @@ bool gyro_accel_restore_valid(const float b[3],const float v[3],uint32_t binding
 static bool legacy_orientation_allowed;
 bool gyro_accel_legacy_orientation_valid(const float b[3],const float v[3],uint32_t binding){return legacy_orientation_allowed&&binding==0x01006811u&&sc_accel_coefficients_valid(b,v);}
 void gyro_restore_accel_calibration(const float b[3],const float v[3],bool valid){memcpy(cal.accel_bias,b,12);memcpy(cal.accel_scale,v,12);cal.accel_valid=valid;}
-uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:image_len==208?8:image_len==224?9:10;}
+static uint32_t image_schema=11;
+uint32_t config_store_loaded_schema(void){return image_len==96?1:image_len==128?2:image_len==160?3:image_len==176?4:image_len==184?5:image_len==188?6:image_len==192?7:image_len==208?8:image_len==224?9:image_schema;}
 config_store_result_t config_store_load_v2(uint32_t id,void*p,size_t n){
  if(image_len==96&&n==128&&exists&&!read_failure&&supported&&id==image_board){memset(p,0,n);memcpy(p,image,96);return CONFIG_STORE_OK;}
  return config_store_load(id,p,n);
@@ -128,6 +129,8 @@ config_store_result_t config_store_load_v10(uint32_t id,void*p,size_t n){
  return config_store_load(id,p,n);
 }
 config_store_result_t config_store_save_v10(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
+config_store_result_t config_store_load_v11(uint32_t id,void*p,size_t n){return config_store_load_v10(id,p,n);}
+config_store_result_t config_store_save_v11(uint32_t id,const void*p,size_t n){image_schema=11;return config_store_save(id,p,n);}
 
 config_store_result_t config_store_save_v3(uint32_t id,const void*p,size_t n){return config_store_save(id,p,n);}
 
