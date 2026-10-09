@@ -2,6 +2,7 @@
 #include "drivers/gyro.h"
 #include "drivers/calibration_policy.h"
 #include "flight/arming.h"
+#include "flight/config.h"
 #include "board/board.h"
 #include "hal/hal.h"
 #include <math.h>
@@ -80,6 +81,26 @@ int main(void) {
   CHECK(gyro_sample(d));
   for(unsigned axis=0;axis<3;axis++)CHECK(fabsf(d[axis]-expected_g[rotation][axis])<.01f);
  }
+ /* Real MPU data: factory flip then independent aircraft roll, both vectors. */
+ config_init();strcpy(b.gyro_align,"CW180_DEG_FLIP");regs[0x3a]=1;gyro_init();
+ CHECK(config_set_key("align_board_roll",180));
+ val(0x3B,2048);val(0x3D,1024);val(0x3F,4096);val(0x43,164);val(0x45,-328);val(0x47,492);
+ float mounted_d[3];now++;CHECK(gyro_sample(mounted_d));CHECK(fabsf(gyro_accel_g()[2]+1.f)<.0001f); /* only staged */
+ CHECK(!gyro_start_manual_calibration());
+ config_board_alignment_activate();now++;CHECK(gyro_sample(mounted_d));
+ const float mounted_g[3]={10,-20,30},mounted_a[3]={.5f,.25f,1};
+ for(unsigned a=0;a<3;a++){CHECK(fabsf(mounted_d[a]-mounted_g[a])<.01f);CHECK(fabsf(gyro_accel_g()[a]-mounted_a[a])<.0001f);}
+ uint32_t mounted_seq=gyro_diagnostics()->sample_seq;regs[0x3a]=0;now++;CHECK(gyro_sample(mounted_d));CHECK(gyro_diagnostics()->sample_seq==mounted_seq);
+ for(unsigned a=0;a<3;a++)CHECK(fabsf(mounted_d[a]-mounted_g[a])<.01f);
+ regs[0x3a]=1;val(0x3B,0);val(0x3D,0);val(0x3F,3584);val(0x43,0);val(0x45,0);val(0x47,0);
+ gyro_begin_calibration();for(unsigned t=0;t<1001;t++){now++;CHECK(gyro_sample(mounted_d));}
+ CHECK(gyro_calibrated());CHECK(gyro_start_accel_level_calibration());
+ for(unsigned t=0;t<1001;t++){now++;CHECK(gyro_sample(mounted_d));gyro_calibration_touch();gyro_calibration_tick();}
+ gyro_calibration_info_t mounted_info;gyro_calibration_info(&mounted_info);
+ CHECK(mounted_info.accel_valid&&fabsf(mounted_info.accel_bias[2]+.125f)<.0001f);
+ CHECK(fabsf(gyro_accel_g()[2]-1.f)<.0001f&&gyro_diagnostics()->accel_counts[2]==3584);
+ config_init();
+ puts("PASS mounted MPU gyro/accel vectors, staging, cached samples and level correction after roll180");
  const char *bad[]={"BROKEN","CW45_DEG","CW0_DEG_FLIP","CW270_DEG_FLIP"};
  for(unsigned i=0;i<4;i++) {
   strcpy(b.gyro_align,bad[i]);gyro_init();CHECK(!healthy&&!gyro_is_healthy());

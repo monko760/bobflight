@@ -38,6 +38,9 @@ config_store_result_t config_store_save_v9(uint32_t board_id,const void *payload
  * motor_direction (S4) at 228..231; 224..227 and 232..255 are reserved zero so the
  * commit block stays 32-byte aligned (HEADER+256), the same record shape as G1's
  * schema 10 (gyro_rate_hz at 224..227), so either order of landing keeps one layout. */
+/* Schema 11: same 256-byte envelope, aircraft mounting + calibration-frame angles. */
+config_store_result_t config_store_load_v11(uint32_t board_id,void *payload,size_t len);
+config_store_result_t config_store_save_v11(uint32_t board_id,const void *payload,size_t len);
 config_store_result_t config_store_load_v10(uint32_t board_id,void *payload,size_t bytes);
 config_store_result_t config_store_save_v10(uint32_t board_id,const void *payload,size_t bytes);
 uint32_t config_store_loaded_schema(void);

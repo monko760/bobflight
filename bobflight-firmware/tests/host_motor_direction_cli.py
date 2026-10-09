@@ -36,13 +36,13 @@ assert 'ok motor_direction=props-in' in lines,lines
 assert [l for l in lines if l.startswith('set failed')]==[INVALID,INVALID,'set failed'],lines
 assert any(l.startswith('  mixer - ') for l in lines),lines
 
-# diff only when props-in; dump always; defaults -> props-out; storage schema 10 scope.
+# diff only when props-in; dump always; defaults -> props-out; storage schema 11 scope.
 lines=run(['diff','set motor_direction props-in','diff','dump','defaults','diff','get motor_direction','storage'])
 sets=[l for l in lines if l.startswith('set motor_direction')]
 assert sets==['set motor_direction props-in','set motor_direction props-in'],sets
 assert 'motor_direction=props-out' in lines,lines
-assert values(lines,'schema')==['10'] and values(lines,'# schema')==['10']*4,lines
-assert all(s.endswith(',motor_poles,motor_direction') for s in values(lines,'scope')+values(lines,'# scope')),lines
+assert values(lines,'schema')==['11'] and values(lines,'# schema')==['11']*4,lines
+assert all(s.endswith(',motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw') for s in values(lines,'scope')+values(lines,'# scope')),lines
 
 # An accepted set makes storage dirty; a refused one does not.
 lines=run(['save','storage','set motor_direction bogus','storage','set motor_direction props-in','storage'])
@@ -54,4 +54,4 @@ lines=run(['set motor_direction props-in','save','reboot',PAD,'get motor_directi
 assert [l for l in lines if l.startswith('motor_direction=')][-1]=='motor_direction=props-in',lines
 assert values(lines,'state')[-1]=='saved' and values(lines,'dirty')[-1]=='0',lines
 assert reports(lines)[-1]==report('props-in'),reports(lines)
-print(f'PASS motor_direction CLI ({board}): get/set/refusal verbatim, value unchanged, mixer report follows immediately, diff/dump/defaults, schema 10, save+reboot')
+print(f'PASS motor_direction CLI ({board}): get/set/refusal verbatim, value unchanged, mixer report follows immediately, diff/dump/defaults, schema 11, save+reboot')

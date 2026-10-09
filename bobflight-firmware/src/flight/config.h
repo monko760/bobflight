@@ -49,8 +49,15 @@ typedef struct {
     float rpm_filter_min_hz;
     float rpm_filter_q_x100;
     float motor_poles;
+    float align_board_roll,align_board_pitch,align_board_yaw; /* whole degrees, -180..180; boot applied */
 } bf_config_t;
 
+bool config_board_alignment_value_valid(float degrees);
+const float *config_board_alignment_active(void);
+bool config_board_alignment_pending(void);
+/* Boot only, after persist_load and before the first IMU sample. */
+void config_board_alignment_activate(void);
+void config_board_alignment_apply(float vector[3]);
 void config_init(void);
 void config_defaults(void);
 const bf_config_t *config_get(void);

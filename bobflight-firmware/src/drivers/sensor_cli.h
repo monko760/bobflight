@@ -7,6 +7,7 @@
 #include <math.h>
 #include "drivers/calibration_policy.h"
 #include "drivers/persist.h"
+#include "flight/config.h"
 static void cmd_sensors(bool details)
 {
     char buf[1100];
@@ -41,6 +42,12 @@ static void cmd_sensors(bool details)
     cli_write_str(buf);
     n=snprintf(buf,sizeof(buf),"calibration_api: 2\r\ncal_accel_level_supported: %s\r\ngyro_bias_applied: %s\r\naccel_raw_frame: aligned-pre-correction\r\n",
         d->config_ok && d->chip && !strcmp(d->chip,"MPU6K-class")?"yes":"no",c.gyro_bias_valid?"yes":"no");
+    if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
+    cli_write_str(buf);
+    const bf_config_t *cfg=config_get();const float *active=config_board_alignment_active();
+    n=snprintf(buf,sizeof(buf),"board_alignment_api: 1\r\nboard_align_configured: %.0f %.0f %.0f\r\nboard_align_active: %.0f %.0f %.0f\r\nboard_align_reboot_required: %s\r\n",
+        (double)cfg->align_board_roll,(double)cfg->align_board_pitch,(double)cfg->align_board_yaw,
+        (double)active[0],(double)active[1],(double)active[2],config_board_alignment_pending()?"yes":"no");
     if(n<0 || (size_t)n>=sizeof(buf)){cli_write_str("sensor response failed: overflow\r\n");return;}
     cli_write_str(buf);
     if(details) {
@@ -85,7 +92,7 @@ static void cmd_sensors(bool details)
 static bool calibration_allowed(void)
 {
     const gyro_diagnostics_t *d=gyro_diagnostics();
-    return arming_state()!=ARM_ARMED && !bench_motor_active() &&
+    return !config_board_alignment_pending() && arming_state()!=ARM_ARMED && !bench_motor_active() &&
            hal_usb_cdc_connected() && gyro_is_healthy() && d->config_ok &&
            d->sample_seq && (uint32_t)(hal_millis()-d->sample_ms)<=100u;
 }

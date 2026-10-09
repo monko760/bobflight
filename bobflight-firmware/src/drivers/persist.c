@@ -1,4 +1,9 @@
 /* SPDX-License-Identifier: Apache-2.0
+ * Schema 11: schema10 payload remains 256 bytes; mounting roll/pitch/yaw
+ * floats at 232/236/240, calibration-frame angles at 244/248/252. Angles are
+ * whole degrees [-180,180]. Zero mounting preserves factory orientation.
+ * Pending mounting is saved without old-frame calibration; boot applies rotation
+ * before the first sample. All <=10 schemas migrate to zero additional rotation.
  * Schema 10 (S4, tentative number): schema9 bytes0..223, reserved zero
  * 224..227, motor_direction u32 LE 228..231 (0 props-out, 1 props-in), reserved
  * zero 232..255 (256 bytes: the commit block at HEADER+256 stays 32-byte
@@ -54,7 +59,7 @@
 
 #define BASE_BYTES 96u
 #define PAYLOAD_BYTES 256u
-#define PERSIST_SCHEMA 10u
+#define PERSIST_SCHEMA 11u
 /* First schema that stores motor_direction; 11 if G1 (gyro_rate_hz) lands first. */
 #define MOTOR_DIRECTION_SCHEMA 10u
 #define MOTOR_DIRECTION_OFFSET 228u
@@ -132,7 +137,13 @@ static bool rpm_valid(const uint8_t *p){
 static bool motor_direction_valid(const uint8_t *p){
  const uint32_t d=get32(p+MOTOR_DIRECTION_OFFSET);
  if(d!=MOTOR_DIRECTION_PROPS_OUT&&d!=MOTOR_DIRECTION_PROPS_IN)return false;
- for(unsigned i=224;i<PAYLOAD_BYTES;i++)if((i<MOTOR_DIRECTION_OFFSET||i>=MOTOR_DIRECTION_OFFSET+4u)&&p[i])return false; /* reserved */
+ for(unsigned i=224;i<228;i++)if(p[i])return false; /* reserved */
+ for(unsigned axis=0;axis<3;axis++){
+  const float mount=getfloat(p+232+4*axis),cal_mount=getfloat(p+244+4*axis);
+  if(!config_board_alignment_value_valid(mount)||!config_board_alignment_value_valid(cal_mount))return false;
+  /* Extra calibration binding: only this aircraft frame may restore these coefficients. */
+  if(p[96]?(cal_mount!=mount):(cal_mount!=0.f))return false;
+ }
  return true;
 }
 static bool extras_valid(const uint8_t *p){power_config_t c=power_decode(p);return power_config_valid(&c)&&(get32(p+156)==300||get32(p+156)==600)&&flight_idle_valid(p)&&rpm_valid(p)&&motor_direction_valid(p);}
@@ -145,11 +156,16 @@ static bool encode(uint8_t p[PAYLOAD_BYTES]){
 #endif
  for(unsigned i=0;i<MODE_COUNT;i++){const mode_config_t *m=mode_range_get((mode_id_t)i);if(!m)return false;uint8_t *r=p+56+i*8;r[0]=m->enabled;r[1]=m->aux_channel;put16(r+2,m->min_us);put16(r+4,m->max_us);}
  gyro_calibration_info_t cal;gyro_calibration_info(&cal);
- if(cal.accel_valid){
+ if(cal.accel_valid&&!config_board_alignment_pending()){
   uint32_t binding=gyro_accel_calibration_binding();
   if(!gyro_accel_restore_valid(cal.accel_bias,cal.accel_scale,binding))return false;
   p[96]=1;put32(p+100,binding);
   for(unsigned i=0;i<3;i++){uint32_t b,v;memcpy(&b,&cal.accel_bias[i],4);memcpy(&v,&cal.accel_scale[i],4);put32(p+104+i*4,b);put32(p+116+i*4,v);}
+ }
+ const bf_config_t *cfg=config_get();const float mount[3]={cfg->align_board_roll,cfg->align_board_pitch,cfg->align_board_yaw};
+ for(unsigned axis=0;axis<3;axis++){
+  putfloat(p+232+4*axis,mount[axis]);
+  putfloat(p+244+4*axis,p[96]?config_board_alignment_active()[axis]:0.f);
  }
  power_encode(p,power_config(),dshot_speed_kbps());
  {float mt;if(!config_get_key("min_throttle",&mt))return false;putfloat(p+160,mt);}
@@ -175,7 +191,7 @@ static bool safe_to_change(void){
 void persist_init(void){config_init();loop_rate_setting_defaults();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;migration_pending=false;last_error="none";memset(saved,0,sizeof(saved));}
 bool persist_load(void){
  if(!safe_to_change())return false;
- uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v10(board_tag(),p,sizeof(p));
+ uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load_v11(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);load_error=r!=CONFIG_STORE_EMPTY&&r!=CONFIG_STORE_UNSUPPORTED;return false;}
  if(config_store_loaded_schema()<3){const power_config_t defaults={11.f,0.f,0.f,0,3.5f,3.3f,0};power_encode(p,&defaults,300);}
  if(config_store_loaded_schema()<4){putfloat(p+160,0.05f);p[164]=0;for(unsigned i=165;i<176;i++)p[i]=0;}
@@ -186,6 +202,7 @@ bool persist_load(void){
  if(config_store_loaded_schema()<9){putfloat(p+208,0.f);putfloat(p+212,100.f);putfloat(p+216,500.f);putfloat(p+220,14.f);}
  /* S4: any older record keeps today's mixer yaw signs (props-out), written explicitly. */
  if(config_store_loaded_schema()<MOTOR_DIRECTION_SCHEMA){put32(p+MOTOR_DIRECTION_OFFSET,MOTOR_DIRECTION_PROPS_OUT);}
+ if(config_store_loaded_schema()<11){for(unsigned i=232;i<256;i++)if(p[i]){last_error="invalid_settings";load_error=true;return false;}memset(p+232,0,24);}
  float values[12];mode_config_t modes[MODE_COUNT];
  if(!decode(p,values,modes)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
  bool orientation_migrated=false;
@@ -216,6 +233,9 @@ bool persist_load(void){
  (void)config_set_key("rpm_filter_q_x100",getfloat(p+216));
  (void)config_set_key("motor_poles",getfloat(p+220));
  (void)config_set_motor_direction((motor_direction_t)get32(p+MOTOR_DIRECTION_OFFSET));
+ (void)config_set_key("align_board_roll",getfloat(p+232));
+ (void)config_set_key("align_board_pitch",getfloat(p+236));
+ (void)config_set_key("align_board_yaw",getfloat(p+240));
  (void)crsf_set_map(p[52]?"TAER":"AETR");
  for(unsigned i=0;i<MODE_COUNT;i++)(void)mode_range_set((mode_id_t)i,modes[i].enabled,modes[i].aux_channel,modes[i].min_us,modes[i].max_us);
  if(!control_mode_set((control_mode_t)p[55])){last_error="control_mode_failed";load_error=true;return false;}
@@ -245,9 +265,9 @@ bool persist_load(void){
 bool persist_save(void){
  if(!safe_to_change())return false;
  uint8_t p[PAYLOAD_BYTES];if(!encode(p)){last_error="invalid_settings";return false;}
- config_store_result_t r=config_store_save_v10(board_tag(),p,sizeof(p));
+ config_store_result_t r=config_store_save_v11(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);return false;}
- uint8_t check[PAYLOAD_BYTES];r=config_store_load_v10(board_tag(),check,sizeof(check));
+ uint8_t check[PAYLOAD_BYTES];r=config_store_load_v11(board_tag(),check,sizeof(check));
  if(r!=CONFIG_STORE_OK||memcmp(p,check,sizeof(p))){last_error="verify_failed";return false;}
  memcpy(saved,p,sizeof(saved));have_saved=true;migration_pending=false;load_error=false;last_error="none";return true;
 }
@@ -267,6 +287,7 @@ const char *persist_accel_storage(void){
  if(load_error)return "error";
  gyro_calibration_info_t c;gyro_calibration_info(&c);if(!c.accel_valid)return "not-calibrated";
  uint8_t now[PAYLOAD_BYTES];
- if(!have_saved||!encode(now)||memcmp(now+96,saved+96,32))return "unsaved";
+ if(config_board_alignment_pending())return "ram-only"; /* old-frame correction is deliberately not saved */
+ if(!have_saved||!encode(now)||memcmp(now+96,saved+96,32)||memcmp(now+244,saved+244,12))return "unsaved";
  return !strcmp(config_store_backend(),"flash")?"flash-verified":"host-sim";
 }

@@ -16,6 +16,7 @@
 #include "drivers/persist.h"
 #include "drivers/power.h"
 #include "flight/pid.h"
+#include "flight/config.h"
 #include "flight/mixer.h"
 #include "flight/arming.h"
 #include "flight/failsafe.h"
@@ -274,6 +275,7 @@ bool app_init(void)
     arming_set_gyro_healthy(gyro_is_healthy());
     /* Defaults and subsystem init must finish before restoring persistent settings. */
     (void)persist_load();
+    config_board_alignment_activate(); /* boot only: before any IMU/control sample */
 
     /* Persisted loop_rate_hz (default 4000 on Kakute F7 HDV, 1000 elsewhere)
      * picks the MPU6000 output rate, then the loop-rate policy

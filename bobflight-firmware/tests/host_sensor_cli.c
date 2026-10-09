@@ -1,11 +1,16 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 #include "drivers/gyro.h"
+#include "flight/config.h"
 #include "flight/arming.h"
 #include "flight/attitude.h"
 #include "sched/tasks.h"
 #include "hal/hal.h"
 #include <stdio.h>
 #include <string.h>
+static bf_config_t cfg;static float active_mount[3];
+const bf_config_t *config_get(void){return &cfg;}
+const float *config_board_alignment_active(void){return active_mount;}
+bool config_board_alignment_pending(void){return false;}
 static char output[4096];static unsigned started,captured,applied,cancelled,last_face;
 static bool usb=true,healthy=true,motor=false;static arm_state_t arm=ARM_DISARMED;
 static bool report=false;static unsigned level_started;

@@ -321,6 +321,16 @@ static void cmd_set(const char *key, const char *valstr)
         cli_write_str("unknown key\r\n");
         return;
     }
+    if(!strncmp(key,"align_board_",12)){
+        if(bench_motor_active()||gyro_manual_calibration_active()){cli_write_str("set failed: finish motor tests/calibration first\r\n");return;}
+        if(!valstr||!*valstr){cli_write_str("set failed\r\n");return;}
+        v=strtof(valstr,&end);
+        if(end==valstr||*end||!config_board_alignment_value_valid(v)||!config_set_key(key,v)){
+            cli_write_str("set failed: alignment must be whole degrees -180..180\r\n");return;
+        }
+        snprintf(buf,sizeof(buf),"ok %s=%.0f\r\n",key,(double)v);cli_write_str(buf);
+        cli_write_str("note: mounting takes effect after save + reboot; recalibrate afterward\r\n");return;
+    }
     /* motor_direction (schema 10): motor-test refusal and token check. */
     if (cmd_set_motor_direction(key, valstr)) {
         return;
