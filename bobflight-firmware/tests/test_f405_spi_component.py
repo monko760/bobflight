@@ -21,7 +21,7 @@ class F405SPI(unittest.TestCase):
   cls.elf=Path(cls.temp.name)/'component.elf'
   sources=[HAL/x for x in ('startup_component.c','spi_component.c','gyro_spi_bridge.c')]
   sources += [ROOT/'src'/x for x in ('drivers/gyro.c','drivers/sensor_calibration.c','flight/filter.c','flight/config.c','sched/loop_rate_setting.c')]
-  sources += [ROOT/'tests/fixtures/f405_gyro_spi/entry.c']
+  sources += [ROOT/'tests/fixtures/f405_gyro_spi/entry.c',ROOT/'tests/fixtures/f405_gyro_spi/syscall_traps.c']
   if cls.WITH_GPIO:sources.append(HAL/'gyro_gpio_prepare.c')
   cmd=['arm-none-eabi-gcc',*FLAGS,'-DBF_F4_COMPONENT_F405XG','-DBOBFLIGHT_HOST=0','-I'+str(ROOT/'src'),'-nostdlib',*[str(p) for p in sources],'-Wl,-L,'+str(ROOT/'cmake/components'),'-Wl,-T,'+str(ROOT/'cmake/components/f405xg.ld'),'-Wl,--gc-sections,--build-id=none','-Wl,--start-group','-lc','-lm','-lgcc','-Wl,--end-group','-o',str(cls.elf)]
   if cls.WITH_GPIO:cmd.insert(1,'-DBF_F405_TEST_REAL_GPIO')
