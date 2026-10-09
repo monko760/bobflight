@@ -102,11 +102,11 @@ int main(int argc,char **argv){ config_init();blackbox_metadata_t meta={500,1000
   flight_log_sample_t e=sample;e.erpm[0]=12399;e.erpm[1]=99;e.erpm[2]=100;e.erpm[3]=0;e.telem_ok=0xF;e.filter_flags=0x45;e.events=0x21;e.loop_code=32;e.overruns=5;
   size_t en=blackbox_frame(big,sizeof big,&e);assert(en>=10);
   const uint8_t tail[]={123,0,1,0,0x0F,0x45,0x21,32,5};assert(!memcmp(big+en-sizeof tail,tail,sizeof tail));}
- if(argc>1){FILE *f=fopen(argv[1],"wb");assert(f);h=blackbox_header(header,sizeof header,&meta);assert(fwrite(header,1,h,f)==h);for(unsigned j=0;j<600;j++){sample.iteration=j*2;sample.time_us=10000+j*2000;
+ if(argc>1){meta.delta_frames=argc>2&&!strcmp(argv[2],"delta");blackbox_encoder_state_t stream={0};FILE *f=fopen(argv[1],"wb");assert(f);h=blackbox_header(header,sizeof header,&meta);assert(fwrite(header,1,h,f)==h);for(unsigned j=0;j<600;j++){sample.iteration=j*2;sample.time_us=10000+j*2000;
   /* Schema 3 extras vary per frame for the in-repo decoder test (host_blackbox_decode.py). */
   for(unsigned m=0;m<4;m++){sample.erpm[m]=j*1000u+m*37u+57u;}
   sample.telem_ok=(uint8_t)(j%16u);sample.filter_flags=(uint8_t)(j%128u);
   sample.events=(uint8_t)((j*7u)%128u);sample.loop_code=(uint8_t)(j%33u);sample.overruns=j*3u;
-  n=blackbox_frame(out,sizeof out,&sample);assert(n&&fwrite(out,1,n,f)==n);}n=blackbox_end(out,sizeof out);assert(fwrite(out,1,n,f)==n);assert(!fclose(f));}
+  n=meta.delta_frames?blackbox_stream_frame(out,sizeof out,&sample,&stream):blackbox_frame(out,sizeof out,&sample);assert(n&&fwrite(out,1,n,f)==n);}n=blackbox_end(out,sizeof out);assert(fwrite(out,1,n,f)==n);assert(!fclose(f));}
  puts("PASS original C encoder: capacity/no partial write, negative terms, finite/overflow, truthful metadata, gains, sample ratio, DShot300/600, log end; schema 4 header keys, 71 fields, eRPM/100, flag ranges, proven frame bound");
 }

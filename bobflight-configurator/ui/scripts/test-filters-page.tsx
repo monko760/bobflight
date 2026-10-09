@@ -17,7 +17,7 @@ import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { DISCARD_EDITS_MESSAGE } from "../src/filters/gyroNotch";
 import { REFRESH_CONFIRM_MESSAGE } from "../src/components/storageRefresh";
 import { GYRO_NOTCH_MOCK_SCENARIOS, type GyroNotchMockScenario } from "../../protocol/src/gyro-notch-mock";
-import { STORAGE_SCOPE_V7, STORAGE_SCOPE_V8 } from "../../protocol/src/storage";
+import { STORAGE_SCOPE_V13 } from "../../protocol/src/storage";
 import type { CliCommand, SettingsKey } from "../src/protocol";
 
 const { container } = installFakeDom();
@@ -82,7 +82,7 @@ async function click(el: FakeElement) { flushSync(() => reactProps(el).onClick({
 
 // ---- host rig -----------------------------------------------------------------
 const storageReply = (schema: number, dirty: boolean) => ["storage_api: 1", "backend: flash", `schema: ${schema}`, `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty ? 1 : 0}`,
-  "generation: 2", "last_error: none", `scope: ${schema >= 8 ? STORAGE_SCOPE_V8 : STORAGE_SCOPE_V7}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n") + "\r\n";
+  "generation: 2", "last_error: none", `scope: ${schema === 13 ? STORAGE_SCOPE_V13 : "unsupported"}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n") + "\r\n";
 
 interface RigOpts {
   /** Replace the FC's `filters` reply (e.g. an unknown or malformed token). */
@@ -113,7 +113,7 @@ async function rig(scenario: GyroNotchMockScenario, o: RigOpts = {}) {
     sendCommand: async (cmd: CliCommand) => {
       ops.push(cmd);
       if (cmd === "filters" && o.filters !== undefined) return o.filters;
-      if (cmd === "storage") { loads++; return storageReply(scenario === "old-fc" ? 7 : 8, o.fcDirty ?? false); }
+      if (cmd === "storage") { loads++; return storageReply(scenario === "old-fc" ? 7 : 13, o.fcDirty ?? false); }
       return mock.sendCommand(cmd);
     },
     saveSettings: async () => { ops.push("save"); },

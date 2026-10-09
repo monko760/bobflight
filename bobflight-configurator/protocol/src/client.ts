@@ -315,7 +315,7 @@ export class BobFlightCliClient {
           this.collector = null;
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
-          if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "storage" || line === "flash_info" || line === "barometer" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
+          if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "barometer" || line === "storage" || line === "flash_info" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
           reject(err);
         },
         { idleMs, timeoutMs, maxChars: opts?.maxResponseChars,

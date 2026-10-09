@@ -28,17 +28,23 @@ The development control loop remains1 kHz, separate from DShot bit timing. Each 
 - Matek ARM firmware and browser configurator production builds pass.
 - Actual math, per-axis UI, nine-key saves, old-version rejection and persistent schema13 tests pass.
 - Real HAL register/preload model covers Matek and Kakute at168/216 MHz, DShot300/600, all16 bits, idle slots, no stretched startup pulse, repeated bursts, route/AF/MOE checks, busy-DMA cancellation and stop.
--160 scoped native regressions pass. Two full-matrix Blackbox throughput tests still fail in their8 kHz scenarios. Their1 kHz cases passed; this is not physical storage throughput verification. Do not claim the complete162-test suite is green.
-- Onboard NOR probe and BMP280 work in this branch are not proof of onboard Blackbox recording or tuning readiness.
+- Schema4 adds actual attitude, acceleration, CRSF signal metadata and optional barometer fields. Lossless I/P encoding fixes the payload-throughput regression; none of this supplies a Matek NOR recording backend.
+- Read-only `flash_info` identifies the physical SPI NOR chip and capacity when recognized. It cannot write, erase or record. BMP280 acquisition is implemented; NOR recording remains a separate milestone.
 
 ## Bench installation/testing gates
 
 1. Remove all propellers. Confirm a DShot-capable ESC, correct signal wiring, common ground and a suitable/current-limited power source. Do not power motors from USB. First configure with motor power disconnected.
 2. Verify ROM DFU recovery and software `bl` entry on this particular board before erasing. The bootloader command must refuse unsafe states. If unsaved settings block entry, consciously use the existing discard workflow; never bypass safety checks. Physical BOOT entry/recovery remains a hardware check, not established by compilation.
 3. Perform a deliberate full internal-flash erase using the established STM32 DFU flashing procedure, then flash this exact Matek image. Ordinary application-only flashing can leave incompatible configuration behind. Do not alter option bytes or external flash as a shortcut.
-4. Expect version suffix `store13-cal2-mount1-actual1-dshot1`, target `matek_f722_px`, `dshot_bound:4/4`, disarmed state and schema13. If storage reports `fresh_install_required`, stop; do not repeatedly save or restore old dumps.
-5. Re-enter only reviewed settings for this bench board. The previously reported board mounting was roll180/pitch0/yaw180; reconfirm physical orientation before using it. Calibrate stationary, explicitly `save`, then power-cycle and verify settings/calibration persist. Set `dshot300` using the actual CLI spelling `dshot 300`; keep bidirectional DShot off. Confirm the1 kHz loop, receiver freshness, low throttle and healthy sensor/output status.
+4. Expect version suffix `store13-cal2-mount1-actual1-dshot1-flashprobe1-bb4-baro1`, target `matek_f722_px`, `dshot_bound:4/4`, disarmed state and schema13. If storage reports `fresh_install_required`, stop; do not repeatedly save or restore old dumps.
+5. Re-enter only reviewed settings for this bench board. The previously reported board mounting was roll180/pitch0/yaw180; reconfirm physical orientation before using it. Calibrate stationary, explicitly `save`, then power-cycle and verify saved mounting/settings and any explicitly saved accelerometer calibration persist. Gyro bias is recalibrated at startup, not a promise of persisted gyro bias. Set `dshot300` using the actual CLI spelling `dshot 300`; keep bidirectional DShot off. Confirm the1 kHz loop, receiver freshness, low throttle and healthy sensor/output status.
 6. With props still removed, secure the motor and connect ESC power. Use only the existing disarmed, time-limited single-motor bench control, starting at its lowest supported setting. Do not arm. Verify M1 through M4 identity individually, never assuming the wiring matches labels. Stop on wrong output, reset, stale receiver, USB loss, unhealthy DShot, unexpected continued rotation or abnormal current/heat.
 7. Where available, verify waveforms with a logic analyzer: DShot300 bit period about3.333us,16 data bits, idle gap, valid CRC, no startup-stretched bit. These hardware measurements and actual motor spin have NOT been performed remotely.
 
 If software bootloader entry fails, disconnect motor power and use the physically verified BOOT/ROM DFU recovery method. Do not remove checks or keep raising throttle to compensate for a timing/wiring problem.
+
+## Combined motor-and-Blackbox test: not ready
+
+On this Matek target, `blackbox start` still has no supported physical storage backend. The SD/FAT writer cannot operate its onboard SPI NOR. The existing recording command filter also refuses starting a motor test while recording; do not bypass it. Actual bench commands reach the normal post-DShot capture point, but any supported simultaneous bench-recording path must be implemented and tested deliberately. USB telemetry polling is not a substitute for high-rate Blackbox.
+
+Next hardware diagnostic, with ESC power disconnected: run `flash_info` in the CLI and retain its entire framed reply. It is non-destructive and reports `flash_recording_supported: no`. Supported identification is not evidence of sustained write throughput. Planned logging ceiling is2 kHz, independent of gyro/PID loops; existing recorder rates remain125/250/500/1000 Hz.

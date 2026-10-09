@@ -2,9 +2,9 @@
 
 ## Objective and current boundary
 
-Produce truthful, high-rate BobFlight logs readable in unmodified Betaflight Blackbox Explorer. This branch adds original I2C/BMP280 drivers and schema 4 capture/encoding. It does **not** complete Matek external NOR recording, alter arming/flight enablement, change persistent configuration schema 11, or establish hardware or flight readiness.
+Produce truthful, high-rate BobFlight logs readable in unmodified Betaflight Blackbox Explorer. This branch adds original I2C/BMP280 drivers and schema 4 capture/encoding. It does **not** complete Matek external NOR recording, alter arming/flight enablement, change persistent configuration schema13, or establish hardware or flight readiness.
 
-This is a development candidate, not merge-ready: expanded payloads fail the existing high-loop-rate SD throughput expectations. Do not conceal those failures by changing the asserted rates or relaxing ring limits.
+The expanded payload regression is repaired with standard previous-value P frames and an absolute I frame at least every32 records. Every decoded field is preserved. The requested recording rates,64 KiB ring allocation,32 KiB normal-load ring-peak bound and existing latency/drop assertions are unchanged. Two artificial congestion inputs were recalibrated (15 to20 ms,8 to7.7 ms write-busy time) so the smaller records still exercise the same loss/halving assertions; these are model stimuli, not measured SD-card specifications.
 
 ## Implemented software
 
@@ -48,7 +48,7 @@ Custom validity flags must be honored when interpreting unavailable/stale sample
 - Native encoder and real-FAT32 fixture tests cover 71/79-field files. Pinned, unmodified Explorer decodes 600 frames, gyro units, actual quaternion attitude, RSSI distinct from LQ, barometric altitude units, eRPM conversion and EOF. These are synthetic software fixtures, not recordings from the physical Matek.
 - Audit caught an overlong field-name header and incorrect `BaroAlt` casing. Short custom names and the actual standard name `baroAlt` fix stock-reader compatibility.
 - Legacy Explorer-computed `rcCommands[]` / `axisError[]` still use firmware-specific rate logic for unrecognized BobFlight. Plot recorded `setpoint[]` and `bfError[]`. Do not spoof Betaflight firmware identity. Full derived-field parity needs explicit viewer support or a separate proven compatibility approach.
-- Expanded payloads fit the 1 kHz-loop model at requested 500/1000 Hz, but higher-loop-rate SD cases exceed former ring/rate expectations. The model is not a measured MCU CPU benchmark and does not establish real-time headroom for quaternion encoding or the new bus.
+- Both500/1000 Hz recording models pass at their existing1/4/8 kHz PID-loop scenarios after delta coding. The existing8 kHz PID/1 kHz recording case still honestly auto-lowers to500 Hz. The model is not a measured MCU CPU benchmark and does not establish real-time headroom for quaternion encoding or the new bus.
 - Matek NOR remains discovery-only. Needed next: bounded page programming, address-mode handling, non-destructive storage/catalog design, download verification, and an actual sustained recording test. Never implicitly erase existing flash contents.
 
 ## References and licensing boundary

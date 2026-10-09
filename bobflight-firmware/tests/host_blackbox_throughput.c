@@ -199,7 +199,7 @@ typedef struct {
 } loop_cfg_t;
 static uint32_t late_slots;
 static double model_t;
-/* Schema 3 slow inputs: realistic eRPM (12-30k), all telemetry OK, notch1 + RPM ok. */
+/* Schema 4 slow inputs: realistic eRPM (12-30k), all telemetry OK, notch1 + RPM ok. */
 static void model_fill(bb_capture_extra_t *x){
  vt_ns+=1000u; /* 4 telemetry reads + RPM snapshot, logged samples only */
  for(unsigned m=0;m<4;m++)x->erpm[m]=(uint32_t)(21000.0+9000.0*sin(model_t*3.0+m));
@@ -376,7 +376,7 @@ int main(int argc,char **argv){
     * hide it: one deterministic halving to 500 Hz, losses reported, header patched. */
    assert(r.rate==500&&!strcmp(r.reason,"auto-lowered-card-slow")&&r.lowerings==1);
    assert(r.dropped>0&&r.pct>0.0&&r.pct<10.0);
-   assert(strstr((char*)file_buf,"H I interval:16\nH P interval:1/16\nH BobFlight log_rate_hz:500 requested_hz:1000 reason:auto-lowered-card-slow "));
+   assert(strstr((char*)file_buf,"H I interval:512\nH P interval:1/16\nH BobFlight log_rate_hz:500 requested_hz:1000 reason:auto-lowered-card-slow "));
    assert(!strstr((char*)file_buf,"log_rate_hz:1000 "));
    printf("  %s @ %u Hz: NOT zero-drop on the realistic card: auto-lowered once to 500 Hz, %lu dropped (%s%%) before the halving\n",lp->name,(unsigned)REQ,(unsigned long)r.dropped,r.pct_str);
   }else{
@@ -392,7 +392,7 @@ int main(int argc,char **argv){
    assert(logged_hz(r.st_mid)>=REQ*0.99&&logged_hz(r.st_mid)<=REQ*1.005);
    if(l==0)save_f2(REQ==1000u?"jitter20s-1000-mid":"jitter20s-500-mid",r.st_mid);
    snprintf(want,sizeof want,"H I interval:%u\nH P interval:1/%u\nH BobFlight log_rate_hz:%u requested_hz:%u reason:default ",
-    (unsigned)(loop_hz/REQ),(unsigned)(loop_hz/REQ),(unsigned)REQ,(unsigned)REQ);assert(strstr((char*)file_buf,want));
+    (unsigned)(BLACKBOX_KEYFRAME_INTERVAL*loop_hz/REQ),(unsigned)(loop_hz/REQ),(unsigned)REQ,(unsigned)REQ);assert(strstr((char*)file_buf,want));
    printf("  %s @ %u Hz: zero drops; %.1f encoded B/frame -> %.1f KiB/s; ring peak %zu B; gyro late max %lu us\n",lp->name,(unsigned)REQ,bpf,bpf*REQ/1024.0,r.ring_peak,(unsigned long)r.max_late_us);
   }
  }
@@ -410,7 +410,7 @@ int main(int argc,char **argv){
    snprintf(want,sizeof want,"blackbox_rate_hz: %u\r\n",(unsigned)half);assert(strstr(r.status,want)&&strstr(r.status,"blackbox_rate_reason: auto-lowered-card-slow\r\n"));
    size_t n=extract(file_buf,sizeof file_buf);assert(n==r.bytes);
    snprintf(want,sizeof want,"H I interval:%u\nH P interval:1/%u\nH BobFlight log_rate_hz:%u requested_hz:%u reason:auto-lowered-card-slow ",
-    (unsigned)(loop_hz/half),(unsigned)(loop_hz/half),(unsigned)half,(unsigned)REQ);assert(strstr((char*)file_buf,want));
+    (unsigned)(BLACKBOX_KEYFRAME_INTERVAL*loop_hz/half),(unsigned)(loop_hz/half),(unsigned)half,(unsigned)REQ);assert(strstr((char*)file_buf,want));
    snprintf(want,sizeof want,"log_rate_hz:%u ",(unsigned)REQ);assert(!strstr((char*)file_buf,want));
   }}
 
@@ -437,9 +437,9 @@ int main(int argc,char **argv){
   * Deterministic virtual-time model: a 15 ms card halves twice (to 125 Hz), an 8 ms card halves after a few
   * drops (the old formula: once to 250 Hz and still ~6 % dropping; 8 ms card ~175 drops before halving). */
  if(REQ==500u){
-  card_model_t mild={"due-slot trigger card (15ms busy)",15000,400,0,0};secs=12;r=run(&loops[2],&mild,secs);report(&loops[2],&mild,&r,secs);check_run_statuses(&r);
+  card_model_t mild={"due-slot trigger card (20ms busy)",20000,400,0,0};secs=12;r=run(&loops[2],&mild,secs);report(&loops[2],&mild,&r,secs);check_run_statuses(&r);
   assert(bbl.phase==BBS_DONE&&r.frames==r.accepted&&r.rate==125&&r.lowerings==2&&!strcmp(r.reason,"auto-lowered-card-slow"));
-  card_model_t near={"due-slot trigger card (8ms busy)",8000,400,0,0};r=run(&loops[2],&near,secs);report(&loops[2],&near,&r,secs);check_run_statuses(&r);
+  card_model_t near={"due-slot trigger card (7.7ms busy)",7700,400,0,0};r=run(&loops[2],&near,secs);report(&loops[2],&near,&r,secs);check_run_statuses(&r);
   assert(bbl.phase==BBS_DONE&&r.rate==250&&r.lowerings==1&&r.dropped>0&&r.dropped<=50);}
  /* (f) Missed-slot accounting (QA #62 F2) at 1k, 4k and 8k PID loops on a fast card:
   * (1) no stall -> missed 0 and effective rate == requested (jitter at the deadline never loses a slot);

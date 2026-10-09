@@ -44,6 +44,7 @@ int main(int argc,char **argv){
  for(unsigned i=0;i<500000&&session.phase!=BBS_RECORDING&&bb_session_busy(&session);i++){now+=10;bb_session_poll(&session,now);}
  if(session.phase!=BBS_RECORDING)fprintf(stderr,"Preparing failed: %s / %s\n",bb_session_name(&session),session.reason);
  assert(session.phase==BBS_RECORDING);uint64_t epoch=now;
+ m.delta_frames=true;blackbox_encoder_state_t expected_encoder={0};
  expected_len=blackbox_header((char*)expected,sizeof expected,&m);assert(expected_len);
  float raw[3]={26,-13,4},gyro[3]={25,-12.5f,4},sp[3]={35,-10,5},motor[4]={.2f,.4f,.6f,.8f},rc[4]={.1f,-.05f,.02f,.25f};pid_axis_out_t out;
  for(unsigned j=0;j<1200;j++){
@@ -56,7 +57,7 @@ int main(int argc,char **argv){
  s.baro_valid=s.baro_alt_valid=1;s.baro_pressure_pa=100653.25f;s.baro_temp_c=25.0825f;s.baro_reference_pa=101000.f;s.baro_alt_cm=-123.4f;s.baro_age_ms=5;s.baro_sample=32;
 #endif
    memcpy(s.p,trace.p,sizeof s.p);memcpy(s.i,trace.i,sizeof s.i);memcpy(s.d,trace.d,sizeof s.d);s.pid_output[0]=out.roll;s.pid_output[1]=out.pitch;s.pid_output[2]=out.yaw;
-   size_t n=blackbox_frame(expected+expected_len,sizeof expected-expected_len,&s);assert(n);expected_len+=n;
+   size_t n=blackbox_stream_frame(expected+expected_len,sizeof expected-expected_len,&s,&expected_encoder);assert(n);expected_len+=n;
   }
   bb_capture_ctx_t ctx={.fill=imu_fixture};bb_capture_observe_ex(now,raw,gyro,sp,&out,motor,rc,true,1,0,true,true,true,&ctx);background(200);
  }

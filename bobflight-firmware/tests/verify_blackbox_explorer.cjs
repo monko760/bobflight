@@ -13,7 +13,7 @@ try {
  const {FlightLogParser}=require(path.join(tmp,'flightlog_parser.cjs'));
  const {FlightLog}=require(path.join(tmp,'flightlog.cjs'));
  function decode(data){let p=new FlightLogParser(data),frames=[],events=[];const log=console.log;try{console.log=()=>{};p.parseHeader(0,data.length);}finally{console.log=log;}
- p.onFrameReady=(valid,frame,type)=>{assert(valid,'invalid frame');if(type==='I')frames.push([...frame]);if(type==='E')events.push(frame);};p.parseLogData(false);return {p,frames,events};}
+ p.onFrameReady=(valid,frame,type)=>{assert(valid,'invalid frame');if(type==='I'||type==='P')frames.push([...frame]);if(type==='E')events.push(frame);};p.parseLogData(false);return {p,frames,events};}
  const bytes=fs.readFileSync(file),{p,frames,events}=decode(bytes),index=p.frameDefs.I.nameToIndex;
  assert.equal(frames.length,600);assert.equal(p.stats.totalCorruptFrames,0);assert.equal(events.length,1);const hasBaro=index.baroAlt!==undefined;assert.equal(p.frameDefs.I.name.length,hasBaro?79:71);assert.equal(index.bfIteration,undefined);
  assert.match(bytes.subarray(0,4096).toString(),/H BobFlight log_schema:4\n/);

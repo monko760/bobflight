@@ -65,7 +65,7 @@ size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
   if(requested>1000u||requested<hz||strlen(reason)>24u)return 0;
   for(const char *r=reason;*r;r++)if(!((*r>='a'&&*r<='z')||*r=='-'))return 0;
   int k=snprintf(t,sizeof t,"H I interval:%lu\nH P interval:1/%lu\nH BobFlight log_rate_hz:%lu requested_hz:%lu reason:%s",
-   (unsigned long)(m->loop_hz/hz),(unsigned long)(m->loop_hz/hz),(unsigned long)hz,(unsigned long)requested,reason);
+   (unsigned long)((m->loop_hz/hz)*(m->delta_frames?BLACKBOX_KEYFRAME_INTERVAL:1u)),(unsigned long)(m->loop_hz/hz),(unsigned long)hz,(unsigned long)requested,reason);
   if(k<0||(size_t)k>=BLACKBOX_RATE_BLOCK_BYTES)return 0;
   while((size_t)k<BLACKBOX_RATE_BLOCK_BYTES-1u)t[k++]=' ';
   t[k++]='\n';t[k]=0;n=add(b,n,sizeof b,t);
@@ -98,14 +98,14 @@ size_t blackbox_header(char *dst,size_t cap,const blackbox_metadata_t *m){
  for(unsigned i=0;i<FIELD_COUNT;i++){if(i)n=add(b,n,sizeof b,",");n=add(b,n,sizeof b,names[i]);} n=add(b,n,sizeof b,"\nH Field I signed:");
  for(unsigned i=0;i<FIELD_COUNT;i++){if(i)n=add(b,n,sizeof b,",");n=add(b,n,sizeof b,unsigned_field(i)?"0":"1");}
  const char *lines[]={"\nH Field I predictor:","\nH Field I encoding:","\nH Field P predictor:","\nH Field P encoding:"};
- for(unsigned l=0;l<4;l++){n=add(b,n,sizeof b,lines[l]);for(unsigned i=0;i<FIELD_COUNT;i++){if(i)n=add(b,n,sizeof b,",");n=add(b,n,sizeof b,(l%2u)&&unsigned_field(i)?"1":"0");}}
+ for(unsigned l=0;l<4;l++){n=add(b,n,sizeof b,lines[l]);for(unsigned i=0;i<FIELD_COUNT;i++){if(i)n=add(b,n,sizeof b,",");n=add(b,n,sizeof b,m->delta_frames&&l>=2u?(l==2u?"1":"0"):((l%2u)&&unsigned_field(i)?"1":"0"));}}
  n=add(b,n,sizeof b,"\n");if(n>=sizeof b||n>=cap)return 0;
  size_t line_len=0;for(size_t j=0;j<n;j++){if(b[j]=='\n')line_len=0;else if(++line_len>1023u)return 0;}
  memcpy(dst,b,n+1u);return n;
 }
 static bool quant(float value,double scale,int32_t *out){if(!isfinite(value))return false;double v=(double)value*scale;double q=v<0?ceil(v-0.5):floor(v+0.5);if(q<(double)INT32_MIN||q>(double)INT32_MAX)return false;*out=(int32_t)q;return true;}
 static size_t uv(uint8_t *dst,uint32_t v){size_t n=0;while(v>=128u){dst[n++]=(uint8_t)((v&127u)|128u);v>>=7;}dst[n++]=(uint8_t)v;return n;}
-size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){
+static size_t encode_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s,blackbox_encoder_state_t *state){
  if(!dst||!s||!flight_log_sample_flags_valid(s))return 0;
  int32_t v[FIELD_COUNT]={0};uint32_t u[FIELD_COUNT]={0};u[0]=s->iteration;u[1]=s->time_us;
  for(unsigned a=0;a<3;a++){if(!quant(s->gyro[a],10,&v[2+a])||!quant(s->gyro_raw[a],10,&v[5+a])||!quant(s->setpoint[a],1,&v[8+a])||!quant(s->p[a],1000,&v[12+a])||!quant(s->i[a],1000,&v[15+a])||!quant(s->d[a],1000,&v[18+a])||!quant(s->pid_output[a],1000,&v[21+a])||!quant(s->setpoint[a]-s->gyro[a],1,&v[32+a]))return 0;if(!isfinite(s->rc[a])||s->rc[a]<-1||s->rc[a]>1||!quant(s->rc[a],500,&v[28+a]))return 0;}
@@ -146,6 +146,25 @@ size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){
  /* eRPM/100, truncated (integer division); validity is bfTelemOk. */
  for(unsigned m=0;m<4;m++)u[BLACKBOX_ERPM_INDEX+m]=s->erpm[m]/100u;
  u[BLACKBOX_ERPM_INDEX+4]=s->telem_ok;u[BLACKBOX_ERPM_INDEX+5]=s->filter_flags;u[BLACKBOX_ERPM_INDEX+6]=s->events;u[BLACKBOX_ERPM_INDEX+7]=s->loop_code;u[BLACKBOX_ERPM_INDEX+8]=s->overruns;
- uint8_t b[BLACKBOX_FRAME_MAX_BYTES];size_t n=0;b[n++]='I';for(unsigned i=0;i<FIELD_COUNT;i++){uint32_t bits=unsigned_field(i)?u[i]:((uint32_t)v[i]<<1)^(v[i]<0?UINT32_MAX:0u);n+=uv(b+n,bits);}if(cap<n)return 0;memcpy(dst,b,n);return n;
+ /* Numeric differences, not wrapping subtraction: an unrepresentable delta
+  * forces an absolute anchor. This preserves full uint32 counters in readers
+  * that apply prediction using wider arithmetic. State commits only on success. */
+ bool key=!state||!state->initialized||state->since_key>=BLACKBOX_KEYFRAME_INTERVAL;
+ if(!key)for(unsigned i=0;i<FIELD_COUNT;i++){
+  int64_t value=unsigned_field(i)?(int64_t)u[i]:(int64_t)v[i];
+  int64_t delta=value-state->previous[i];if(delta<INT32_MIN||delta>INT32_MAX){key=true;break;}
+ }
+ uint8_t b[BLACKBOX_FRAME_MAX_BYTES];size_t n=0;b[n++]=key?'I':'P';
+ for(unsigned i=0;i<FIELD_COUNT;i++){
+  uint32_t bits;
+  if(key)bits=unsigned_field(i)?u[i]:((uint32_t)v[i]<<1)^(v[i]<0?UINT32_MAX:0u);
+  else {int64_t value=unsigned_field(i)?(int64_t)u[i]:(int64_t)v[i];int32_t delta=(int32_t)(value-state->previous[i]);bits=((uint32_t)delta<<1)^(delta<0?UINT32_MAX:0u);}
+  n+=uv(b+n,bits);
+ }
+ if(cap<n)return 0;memcpy(dst,b,n);
+ if(state){for(unsigned i=0;i<FIELD_COUNT;i++)state->previous[i]=unsigned_field(i)?(int64_t)u[i]:(int64_t)v[i];state->initialized=true;state->since_key=key?1u:state->since_key+1u;}
+ return n;
 }
+size_t blackbox_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s){return encode_frame(dst,cap,s,NULL);}
+size_t blackbox_stream_frame(uint8_t *dst,size_t cap,const flight_log_sample_t *s,blackbox_encoder_state_t *state){return state?encode_frame(dst,cap,s,state):0;}
 size_t blackbox_end(uint8_t *dst,size_t cap){static const uint8_t end[]={'E',255,'E','n','d',' ','o','f',' ','l','o','g',0};if(!dst||cap<sizeof end)return 0;memcpy(dst,end,sizeof end);return sizeof end;}

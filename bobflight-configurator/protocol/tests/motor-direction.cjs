@@ -32,12 +32,12 @@ assert.deepEqual(set('','props-in'),{ok:false,unsupported:false,line:null});
 assert.deepEqual(set('\r\n','props-in'),{ok:false,unsupported:false,line:null});
 // E1: a schema this Configurator does not know (11) is refused even when the diff holds only
 // default-valued lines (no `set` line to trip a per-key check).
-{const {parseConfigurationExport:pce,STORAGE_SCOPE_V10}=P;
+{const {parseConfigurationExport:pce,STORAGE_SCOPE_V13}=P;
  const exp=(schema,scope)=>['# bobflight_config: 1','# board: kakute_f7_hdv','# firmware: 0.1.0','# kind: diff',`# schema: ${schema}`,`# scope: ${scope}`,'# excludes: gyro_calibration','# mode_count: 4',
   '# accel_calibrated: no','# calibration_restore: metadata-only-recalibrate-if-flash-lost','# accel_storage: not-calibrated','# accel_bias: 0 0 0','# accel_scale: 1 1 1','# config_end: 1'].join('\r\n')+'\r\n';
- assert.equal(pce(exp('10',STORAGE_SCOPE_V10),'diff').kind,'diff','minimal schema 10 diff parses');
- assert.throws(()=>pce(exp('11',STORAGE_SCOPE_V10),'diff'),/Unsupported export identity\/schema/,'schema 11, schema 10 scope');
- assert.throws(()=>pce(exp('11',STORAGE_SCOPE_V10+',gyro_rate_hz'),'diff'),/Unsupported export identity\/schema/,'schema 11 with a G1-style scope');}
+ assert.equal(pce(exp('13',STORAGE_SCOPE_V13),'diff').kind,'diff','minimal schema13 diff parses');
+ assert.throws(()=>pce(exp('11',STORAGE_SCOPE_V13),'diff'),/Unsupported export identity\/schema/,'schema 11, schema 10 scope');
+ assert.throws(()=>pce(exp('11',STORAGE_SCOPE_V13+',gyro_rate_hz'),'diff'),/Unsupported export identity\/schema/,'schema 11 with a G1-style scope');}
 assert.equal(cmd('props-in'),'set motor_direction props-in');assert.throws(()=>cmd('props-mixed'));
 for(const c of ['get motor_direction','set motor_direction props-out','set motor_direction props-in','mixer'])assert.ok(isMotorDirectionCliCommand(c));
 assert.ok(!isMotorDirectionCliCommand('set motor_direction props-mixed'));

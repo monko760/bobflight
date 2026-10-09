@@ -52,6 +52,15 @@ def decode(data):
                     assert enc == 0 and sgn == 1, name
                     frame[name] = (raw >> 1) ^ -(raw & 1)
             frames.append(frame)
+        elif tag == ord("P"):
+            assert frames, "P without an absolute anchor"
+            assert headers["Field P predictor"].split(",") == ["1"] * len(names)
+            assert headers["Field P encoding"].split(",") == ["0"] * len(names)
+            frame = {}
+            for name in names:
+                raw, pos = varint(data, pos)
+                frame[name] = frames[-1][name] + ((raw >> 1) ^ -(raw & 1))
+            frames.append(frame)
         elif tag == ord("E"):
             assert data[pos:pos + 12] == b"\xffEnd of log\x00", "bad end marker"
             pos += 12
@@ -69,6 +78,12 @@ def main():
         path = Path(tmp) / "fixture.bbl"
         subprocess.run([exe, str(path)], check=True, stdout=subprocess.DEVNULL)
         data = path.read_bytes()
+        delta_path = Path(tmp) / "delta.bbl"
+        subprocess.run([exe, str(delta_path), "delta"], check=True, stdout=subprocess.DEVNULL)
+        dh, dn, df = decode(delta_path.read_bytes())
+        ih, ino, iff = decode(data)
+        assert dn == ino and df == iff, "delta stream must preserve every field exactly"
+        assert len(delta_path.read_bytes()) < len(data), "delta fixture should shrink"
     headers, names, frames = decode(data)
     assert len(names) == 71, len(names)
     assert "bfIteration" not in names
