@@ -69,7 +69,7 @@ static bool prime(control_mode_t mode){
 }
 static bool configure(void){
     config_init();
-    return config_set_key("rate_expo",0) &&
+    return config_set_key("rate_center_roll",100) && config_set_key("rate_center_pitch",100) && config_set_key("rate_center_yaw",100) &&
         config_set_key("rate_max_roll",100) && config_set_key("rate_max_pitch",100) && config_set_key("rate_max_yaw",100) &&
         config_set_key("pid_roll_p",0.001f) && config_set_key("pid_pitch_p",0.001f) && config_set_key("pid_yaw_p",0.001f) &&
         config_set_key("pid_roll_i",0) && config_set_key("pid_pitch_i",0) && config_set_key("pid_yaw_i",0) &&

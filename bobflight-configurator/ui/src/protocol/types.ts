@@ -1,4 +1,4 @@
-import {isBoardAlignmentCommand} from "@bobflight/protocol";
+import {isBoardAlignmentCommand,isSettingsKey,validateSettingValue} from "@bobflight/protocol";
 /**
  * Re-export protocol types; keep BobFlightHost + ALLOWED_CLI_COMMANDS for UI.
  */
@@ -31,7 +31,7 @@ export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
   "version", "sd probe", "sd status", "sd cancel",
   "blackbox start", "blackbox stop", "blackbox status",
   "pid_diag", "pid_diag status", "pid_diag start", "pid_diag start rx", "pid_diag stop",
-  "timing", "status", "sensors", "calibration", "calibration_cancel", "calibrate_gyro",
+  "flash_info", "timing", "status", "sensors", "calibration", "calibration_cancel", "calibrate_gyro",
   "calibrate_accel level", "calibrate_accel start", "calibrate_accel apply", "calibrate_accel cancel",
   "calibrate_accel +x", "calibrate_accel -x", "calibrate_accel +y",
   "calibrate_accel -y", "calibrate_accel +z", "calibrate_accel -z",
@@ -54,6 +54,10 @@ export function parseCliInput(raw: string): CliCommand | null {
   if (/[\x00-\x1f\x7f]/.test(raw)) return null; // reject multiline/control injection
   const cmd = raw.trim().toLowerCase().replace(/ +/g, " ");
   if(isBoardAlignmentCommand(cmd))return cmd as CliCommand;
+  const rateGet=/^get (rate_(?:max|center|expo)_(?:roll|pitch|yaw))$/.exec(cmd);
+  if(rateGet&&isSettingsKey(rateGet[1]))return cmd as CliCommand;
+  const rateSet=/^set (rate_(?:max|center|expo)_(?:roll|pitch|yaw)) (-?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)$/.exec(cmd);
+  if(rateSet&&isSettingsKey(rateSet[1])&&validateSettingValue(rateSet[1],Number(rateSet[2])))return cmd as CliCommand;
   // Preserve the existing explicit bench command spelling restriction.
   if ((cmd === "bench_switch" || cmd === "bench_stop") && raw.trim() !== cmd) return null;
   if (/^sd read (?:0|[1-9][0-9]{0,9})$/.test(cmd) && Number(cmd.slice(8)) <= 4294967295) return cmd as CliCommand;

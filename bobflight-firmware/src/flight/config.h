@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +19,6 @@ typedef struct {
     float rate_max_roll;
     float rate_max_pitch;
     float rate_max_yaw;
-    float rate_expo;
     float pid_roll_p;
     float pid_roll_i;
     float pid_roll_d;
@@ -50,6 +50,13 @@ typedef struct {
     float rpm_filter_q_x100;
     float motor_poles;
     float align_board_roll,align_board_pitch,align_board_yaw; /* whole degrees, -180..180; boot applied */
+    /* Actual rates fields (schema 12) */
+    float rate_center_roll;  /* deg/s, default 200 */
+    float rate_center_pitch; /* deg/s, default 200 */
+    float rate_center_yaw;   /* deg/s, default 200 */
+    float rate_expo_roll;   /* 0..1, default 0.30 */
+    float rate_expo_pitch;  /* 0..1, default 0.30 */
+    float rate_expo_yaw;    /* 0..1, default 0.30 */
 } bf_config_t;
 
 bool config_board_alignment_value_valid(float degrees);
@@ -63,6 +70,10 @@ void config_defaults(void);
 const bf_config_t *config_get(void);
 bool config_get_key(const char *key, float *out);
 bool config_set_key(const char *key, float value);
+size_t config_key_count(void);
+const char *config_key_name(size_t index);
+bool config_get_default_key(const char *key, float *out);
+bool config_get_default(const char *key, float *out);
 const bf_config_t *config_blob(void);
 /** Static notch pair rule: centre 0 (cutoff 0..<1000), or 20..1000 with 0 < cutoff < centre. */
 bool config_gyro_notch_pair_valid(float center_hz, float cutoff_hz);

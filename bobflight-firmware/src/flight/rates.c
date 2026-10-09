@@ -2,10 +2,11 @@
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
  *
- * Clean-room expo rates. Caps and expo from runtime config.
+ * Actual rates only. Independent per-axis center, maximum and expo.
  */
 #include "flight/rates.h"
 #include "flight/config.h"
+#include <math.h>
 
 static const float RATES_DEADBAND = 0.02f;
 
@@ -20,24 +21,19 @@ static float clampf(float v, float lo, float hi)
     return v;
 }
 
-float rates_curve_map(float stick, float max_rate_dps)
+float rates_actual_map(float stick, float center, float max_rate, float expo)
 {
-    const bf_config_t *cfg = config_get();
-    float expo = cfg ? cfg->rate_expo : 0.30f;
-    float x = clampf(stick, -1.f, 1.f);
-    float ax = x < 0.f ? -x : x;
-
-    if (ax <= RATES_DEADBAND) {
+    if (!isfinite(stick) || !isfinite(center) || !isfinite(max_rate) || !isfinite(expo) || center<0.f || center>2000.f || max_rate<10.f || max_rate>2000.f || expo<0.f || expo>1.f) {
         return 0.f;
     }
-
-    float t = (ax - RATES_DEADBAND) / (1.f - RATES_DEADBAND);
-    t = clampf(t, 0.f, 1.f);
-    float shaped = t * ((1.f - expo) + expo * t * t);
-    if (x < 0.f) {
-        shaped = -shaped;
-    }
-    return shaped * max_rate_dps;
+    float x = clampf(stick, -1.f, 1.f);
+    float ax = fabsf(x);
+    float ax2 = ax * ax;
+    float ax5 = ax2 * ax2 * ax;
+    float m_minus_c = max_rate - center;
+    float m_c = m_minus_c > 0.f ? m_minus_c : 0.f;
+    float shape = (1.f - expo) * ax + expo * ax5;
+    return center * x + m_c * x * shape;
 }
 
 void rates_init(void)
@@ -47,11 +43,6 @@ void rates_init(void)
 
 void rates_update(const float rc[4], float setpoint_dps[3])
 {
-    const bf_config_t *cfg = config_get();
-    float mx_r = cfg ? cfg->rate_max_roll : RATES_MAX_DPS;
-    float mx_p = cfg ? cfg->rate_max_pitch : RATES_MAX_DPS;
-    float mx_y = cfg ? cfg->rate_max_yaw : RATES_MAX_DPS;
-
     if (!setpoint_dps) {
         return;
     }
@@ -59,7 +50,28 @@ void rates_update(const float rc[4], float setpoint_dps[3])
         setpoint_dps[0] = setpoint_dps[1] = setpoint_dps[2] = 0.f;
         return;
     }
-    setpoint_dps[0] = rates_curve_map(rc[0], mx_r);
-    setpoint_dps[1] = rates_curve_map(rc[1], mx_p);
-    setpoint_dps[2] = rates_curve_map(rc[2], mx_y);
+    const bf_config_t *cfg = config_get();
+    {
+        float center[3] = { cfg->rate_center_roll, cfg->rate_center_pitch, cfg->rate_center_yaw };
+        float max_r[3] = { cfg->rate_max_roll, cfg->rate_max_pitch, cfg->rate_max_yaw };
+        float expo[3] = { cfg->rate_expo_roll, cfg->rate_expo_pitch, cfg->rate_expo_yaw };
+
+        for (int i = 0; i < 3; i++) {
+            float stick = rc[i];
+            if (!isfinite(stick)) {
+                setpoint_dps[i] = 0.f;
+                continue;
+            }
+            float x = clampf(stick, -1.f, 1.f);
+            float ax = fabsf(x);
+            if (ax <= RATES_DEADBAND) {
+                setpoint_dps[i] = 0.f;
+            } else {
+                float t = (ax - RATES_DEADBAND) / (1.f - RATES_DEADBAND);
+                t = clampf(t, 0.f, 1.f);
+                float x_post = (x < 0.f) ? -t : t;
+                setpoint_dps[i] = rates_actual_map(x_post, center[i], max_r[i], expo[i]);
+            }
+        }
+    }
 }

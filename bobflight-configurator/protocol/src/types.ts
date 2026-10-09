@@ -60,6 +60,7 @@ export type CliCommand =
   | "calibrate_accel apply"
   | "calibrate_accel cancel"
   | `calibrate_accel ${"+x" | "-x" | "+y" | "-y" | "+z" | "-z"}`
+  | "flash_info"
   | "calibrate_gyro"
   | "motor_seq"
   | "dshot"

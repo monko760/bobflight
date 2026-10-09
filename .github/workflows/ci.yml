@@ -123,6 +123,8 @@ jobs:
           npm --prefix ui run test:transport-identity
       - name: Settings smoke
         run: npm --prefix protocol run smoke:settings
+      - name: Actual-only rates and fresh configuration UI
+        run: npm --prefix protocol run test:actual-rates
       - name: Motor protocol tests
         run: npm --prefix protocol run test:motors
       - name: Ports and Modes numeric AUX tests

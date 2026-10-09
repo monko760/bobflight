@@ -7,6 +7,8 @@
 #ifndef BOBFLIGHT_RATES_H
 #define BOBFLIGHT_RATES_H
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -16,10 +18,14 @@ extern "C" {
 void rates_init(void);
 
 /**
- * Map one stick [-1,1] through expo curve to deg/s.
- * Full deflection → ±max_rate_dps. Pure math (no drivers).
+ * Map one stick [-1,1] through Actual rates curve to deg/s.
+ * Formula: C*x + max(M-C,0)*x*((1-E)*abs(x) + E*abs(x)^5)
+ * Center rate, max rate (deg/s), expo [0,1].
+ * Applies clamp to stick [-1,1], but NO deadband.
+ * Failclosed on nonfinite inputs.
+ * Center > max allowed, with effective endpoint max(center, max_rate).
  */
-float rates_curve_map(float stick, float max_rate_dps);
+float rates_actual_map(float stick, float center, float max_rate, float expo);
 
 /** Map rc[0..2] sticks to setpoint_dps[3]; rc[3] unused here. */
 void rates_update(const float rc[4], float setpoint_dps[3]);

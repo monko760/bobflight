@@ -19,290 +19,32 @@ bool hal_flash_write(uint32_t off,const void *src,size_t n){if(off>sizeof(flash)
  for(size_t i=0;i<n;i++){if(write_budget==0)return false;if(write_budget>0)write_budget--;assert((flash[off+i]&p[i])==p[i]);flash[off+i]&=p[i];writes++;}return true;}
 #include "../src/drivers/config_store.c"
 int main(void){
- /* Upgrade either supported old schema; every interrupted write retains an old or new record. */
- for(unsigned schema=1;schema<=2;schema++){
-  uint8_t old3[160],new3[160],out3[160];memset(old3,17,sizeof(old3));memset(new3,34,sizeof(new3));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert((schema==1?config_store_save(19,old3,96):config_store_save_v2(19,old3,128))==CONFIG_STORE_OK);
-  assert(config_store_load_v3(19,out3,160)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==schema);
-  for(unsigned j=schema==1?96:128;j<160;j++)assert(out3[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=224;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v3(19,new3,160);write_budget=-1;
-   assert(config_store_load_v3(19,out3,160)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out3,new3,160)&&config_store_loaded_schema()==3);
-   else assert((!memcmp(out3,old3,schema==1?96:128)&&config_store_loaded_schema()==schema)||(!memcmp(out3,new3,160)&&config_store_loaded_schema()==3));
-  }
-  assert(config_store_save_v2(19,old3,128)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v3(19,new3,160)==CONFIG_STORE_OK&&erases==saved_erases);
+ uint8_t old[256],next[256],out[256];memset(old,17,sizeof old);memset(next,34,sizeof next);
+ memset(flash,255,sizeof flash);layout=(hal_flash_geometry_t){{0,262144},{262144,262144},32};strict_granules=true;
+ assert(config_store_load(19,out,sizeof out)==CONFIG_STORE_EMPTY);assert(config_store_save(19,old,sizeof old)==CONFIG_STORE_OK);
+ assert(config_store_load(19,out,sizeof out)==CONFIG_STORE_OK&&config_store_loaded_schema()==13&&!memcmp(old,out,sizeof old));
+ memcpy(baseline,flash,sizeof flash);
+ for(int cut=0;cut<=320;cut++){
+  memcpy(flash,baseline,sizeof flash);write_budget=cut;config_store_result_t r=config_store_save(19,next,sizeof next);write_budget=-1;
+  config_store_result_t loaded=config_store_load(19,out,sizeof out);
+  /* A torn schema/header is conservatively blocked, but the previous physical slot stays intact. */
+  assert(!memcmp(flash,baseline,RECORD_BYTES));
+  assert(loaded==CONFIG_STORE_OK);assert(!memcmp(out,old,sizeof old)||!memcmp(out,next,sizeof next));
+  if(r==CONFIG_STORE_OK)assert(!memcmp(out,next,sizeof next));
  }
- puts("PASS schema1/2 -> schema3 migration, 450 write-cut cases, zero extension, no-wear save, downgrade protection");
-
- /* Schema3 -> schema4 migration with zero extension and write-cut retention. */
- {
-  uint8_t old4[176],new4[176],out4[176];memset(old4,17,160);memset(old4+160,0,16);memset(new4,34,sizeof(new4));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v3(19,old4,160)==CONFIG_STORE_OK);
-  assert(config_store_load_v4(19,out4,176)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==3);
-  for(unsigned j=160;j<176;j++)assert(out4[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=240;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v4(19,new4,176);write_budget=-1;
-   assert(config_store_load_v4(19,out4,176)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out4,new4,176)&&config_store_loaded_schema()==4);
-   else assert((!memcmp(out4,old4,160)&&config_store_loaded_schema()==3)||(!memcmp(out4,new4,176)&&config_store_loaded_schema()==4));
-  }
-  assert(config_store_save_v3(19,old4,160)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v4(19,new4,176)==CONFIG_STORE_OK&&erases==saved_erases);
-  puts("PASS schema3 -> schema4 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
+ unsigned e=erases;assert(config_store_save(19,next,sizeof next)==CONFIG_STORE_OK&&erases==e);
+ memcpy(baseline,flash,sizeof flash);
+ for(unsigned schema=1;schema<=14;schema++)if(schema!=13){
+  memcpy(flash,baseline,sizeof flash);wr(flash+4,schema);unsigned e0=erases,w0=writes;
+  assert(config_store_load(19,out,sizeof out)==CONFIG_STORE_OK&&!memcmp(out,next,sizeof next));assert(config_store_save(19,next,sizeof next)==CONFIG_STORE_INCOMPATIBLE);assert(erases==e0&&writes==w0);
  }
-
- /* Schema4 -> schema5 migration with zero extension and write-cut retention. */
- {
-  uint8_t old5[184],new5[184],out5[184];memset(old5,17,176);memset(old5+176,0,8);memset(new5,34,sizeof(new5));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v4(19,old5,176)==CONFIG_STORE_OK);
-  assert(config_store_load_v5(19,out5,184)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==4);
-  for(unsigned j=176;j<184;j++)assert(out5[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=256;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v5(19,new5,184);write_budget=-1;
-   assert(config_store_load_v5(19,out5,184)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out5,new5,184)&&config_store_loaded_schema()==5);
-   else assert((!memcmp(out5,old5,176)&&config_store_loaded_schema()==4)||(!memcmp(out5,new5,184)&&config_store_loaded_schema()==5));
-  }
-  assert(config_store_save_v4(19,old5,176)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v5(19,new5,184)==CONFIG_STORE_OK&&erases==saved_erases);
-  puts("PASS schema4 -> schema5 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
- }
-
- /* Schema5 -> schema6 migration with zero extension and write-cut retention. */
- {
-  uint8_t old6[188],new6[188],out6[188];memset(old6,17,184);memset(old6+184,0,4);memset(new6,34,sizeof(new6));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v5(19,old6,184)==CONFIG_STORE_OK);
-  assert(config_store_load_v6(19,out6,188)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==5);
-  for(unsigned j=184;j<188;j++)assert(out6[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=256;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v6(19,new6,188);write_budget=-1;
-   assert(config_store_load_v6(19,out6,188)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out6,new6,188)&&config_store_loaded_schema()==6);
-   else assert((!memcmp(out6,old6,184)&&config_store_loaded_schema()==5)||(!memcmp(out6,new6,188)&&config_store_loaded_schema()==6));
-  }
-  assert(config_store_save_v5(19,old6,184)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v6(19,new6,188)==CONFIG_STORE_OK&&erases==saved_erases);
-  puts("PASS schema5 -> schema6 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
- }
-
- /* Schema6 -> schema7 (loop_rate_hz, full 192-byte MAX_PAYLOAD) migration. */
- {
-  uint8_t old7[192],new7[192],out7[192];memset(old7,17,188);memset(old7+188,0,4);memset(new7,51,sizeof(new7));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v6(19,old7,188)==CONFIG_STORE_OK);
-  assert(config_store_load_v7(19,out7,192)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==6);
-  for(unsigned j=188;j<192;j++)assert(out7[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=260;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v7(19,new7,192);write_budget=-1;
-   assert(config_store_load_v7(19,out7,192)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out7,new7,192)&&config_store_loaded_schema()==7);
-   else assert((!memcmp(out7,old7,188)&&config_store_loaded_schema()==6)||(!memcmp(out7,new7,192)&&config_store_loaded_schema()==7));
-  }
-  assert(config_store_save_v6(19,old7,188)==CONFIG_STORE_INVALID);
-  /* Older schema6 firmware ignores the schema7 record and falls back to the retained schema6 slot. */
-  assert(config_store_load_v6(19,out7,188)==CONFIG_STORE_OK&&config_store_loaded_schema()==6&&!memcmp(out7,old7,188));
-  assert(config_store_load_v7(19,out7,191)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v7(19,new7,192)==CONFIG_STORE_OK&&erases==saved_erases);
-  puts("PASS schema6 -> schema7 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
- }
-
- /* Schema7 -> schema8 (two manual gyro notches, full 208-byte MAX_PAYLOAD). */
- {
-  uint8_t old8[208],new8[208],out8[208];memset(old8,17,192);memset(old8+192,0,16);memset(new8,68,sizeof(new8));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v7(19,old8,192)==CONFIG_STORE_OK);
-  assert(config_store_load_v8(19,out8,208)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==7);
-  for(unsigned j=192;j<208;j++)assert(out8[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=276;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v8(19,new8,208);write_budget=-1;
-   assert(config_store_load_v8(19,out8,208)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out8,new8,208)&&config_store_loaded_schema()==8);
-   else assert((!memcmp(out8,old8,192)&&config_store_loaded_schema()==7)||(!memcmp(out8,new8,208)&&config_store_loaded_schema()==8));
-  }
-  assert(config_store_save_v7(19,old8,192)==CONFIG_STORE_INVALID);
-  /* Older schema7 firmware ignores the schema8 record and falls back to the retained schema7 slot. */
-  assert(config_store_load_v7(19,out8,192)==CONFIG_STORE_OK&&config_store_loaded_schema()==7&&!memcmp(out8,old8,192));
-  assert(config_store_load_v8(19,out8,207)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v8(19,new8,208)==CONFIG_STORE_OK&&erases==saved_erases);
-  puts("PASS schema7 -> schema8 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
- }
-
- /* Schema8 -> schema9 (RPM notch filter, full 224-byte MAX_PAYLOAD). */
- {
-  uint8_t old9[224],new9[224],out9[224];memset(old9,17,208);memset(old9+208,0,16);memset(new9,85,sizeof(new9));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v8(19,old9,208)==CONFIG_STORE_OK);
-  assert(config_store_load_v9(19,out9,224)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==8);
-  for(unsigned j=208;j<224;j++)assert(out9[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=292;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v9(19,new9,224);write_budget=-1;
-   assert(config_store_load_v9(19,out9,224)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out9,new9,224)&&config_store_loaded_schema()==9);
-   else assert((!memcmp(out9,old9,208)&&config_store_loaded_schema()==8)||(!memcmp(out9,new9,224)&&config_store_loaded_schema()==9));
-  }
-  assert(config_store_save_v8(19,old9,208)==CONFIG_STORE_INVALID);
-  /* Older schema8 firmware ignores the schema9 record and falls back to the retained schema8 slot. */
-  assert(config_store_load_v8(19,out9,208)==CONFIG_STORE_OK&&config_store_loaded_schema()==8&&!memcmp(out9,old9,208));
-  assert(config_store_load_v9(19,out9,223)==CONFIG_STORE_INVALID);
-  assert(config_store_save_v9(19,new9,208)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v9(19,new9,224)==CONFIG_STORE_OK&&erases==saved_erases);
-  /* Schema9 still loads a schema7 record with zero extension. */
-  memset(flash,255,sizeof(flash));assert(config_store_save_v7(19,old9,192)==CONFIG_STORE_OK);
-  assert(config_store_load_v9(19,out9,224)==CONFIG_STORE_OK&&config_store_loaded_schema()==7);
-  for(unsigned j=192;j<224;j++)assert(out9[j]==0);
-  puts("PASS schema8 -> schema9 migration, write-cut cases, zero extension, no-wear save, downgrade protection");
- }
-
- /* Same-sized schema10 ->11: full reader/commit path, not only codec mocks. */
- {
-  uint8_t old11[256],new11[256],out11[256];memset(old11,17,256);memset(new11,102,256);
-  memset(flash,255,sizeof flash);layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v10(19,old11,256)==CONFIG_STORE_OK);
-  assert(config_store_load_v11(19,out11,256)==CONFIG_STORE_OK&&config_store_loaded_schema()==10);
-  memcpy(baseline,flash,sizeof flash);
-  for(int cut=0;cut<=324;cut++){
-   memcpy(flash,baseline,sizeof flash);write_budget=cut;
-   config_store_result_t result=config_store_save_v11(19,new11,256);write_budget=-1;
-   assert(config_store_load_v11(19,out11,256)==CONFIG_STORE_OK);
-   if(result==CONFIG_STORE_OK)assert(config_store_loaded_schema()==11&&!memcmp(out11,new11,256));
-   else assert((config_store_loaded_schema()==10&&!memcmp(out11,old11,256))||(config_store_loaded_schema()==11&&!memcmp(out11,new11,256)));
-  }
-  assert(config_store_save_v10(19,old11,256)==CONFIG_STORE_INVALID);
-  unsigned before11=erases;assert(config_store_save_v11(19,new11,256)==CONFIG_STORE_OK&&erases==before11);
-  strict_granules=true;
-  for(unsigned unit=1;unit<=32;unit*=2){
-   layout=(hal_flash_geometry_t){{4096,65536},{16384,32768},unit};memset(flash,255,sizeof flash);
-   assert(config_store_save_v10(19,old11,256)==CONFIG_STORE_OK&&config_store_save_v11(19,new11,256)==CONFIG_STORE_OK);
-   assert(config_store_load_v11(19,out11,256)==CONFIG_STORE_OK&&config_store_loaded_schema()==11&&!memcmp(out11,new11,256));
-  }
-  strict_granules=false;layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  puts("PASS schema10 ->11 actual flash reader, 325 write-cut boundaries, downgrade/no-wear protection and 1..32-byte granules");
- }
- /* Schema9 -> schema10 (S4 motor_direction + reserved, full 256-byte MAX_PAYLOAD). */
- {
-  uint8_t old10[256],new10[256],out10[256];memset(old10,17,224);memset(old10+224,0,32);memset(new10,85,sizeof(new10));
-  memset(flash,255,sizeof(flash));layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  assert(config_store_save_v9(19,old10,224)==CONFIG_STORE_OK);
-  assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK);assert(config_store_loaded_schema()==9);
-  for(unsigned j=224;j<256;j++)assert(out10[j]==0);
-  memcpy(baseline,flash,sizeof(flash));
-  for(int cut=0;cut<=324;cut++){
-   memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-   config_store_result_t r=config_store_save_v10(19,new10,256);write_budget=-1;
-   assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK);
-   if(r==CONFIG_STORE_OK)assert(!memcmp(out10,new10,256)&&config_store_loaded_schema()==10);
-   else assert((!memcmp(out10,old10,224)&&config_store_loaded_schema()==9)||(!memcmp(out10,new10,256)&&config_store_loaded_schema()==10));
-  }
-  assert(config_store_save_v9(19,old10,224)==CONFIG_STORE_INVALID);
-  /* Older schema9 firmware ignores the schema10 record and falls back to the retained schema9 slot. */
-  assert(config_store_load_v9(19,out10,224)==CONFIG_STORE_OK&&config_store_loaded_schema()==9&&!memcmp(out10,old10,224));
-  assert(config_store_load_v10(19,out10,255)==CONFIG_STORE_INVALID);
-  assert(config_store_save_v10(19,new10,224)==CONFIG_STORE_INVALID);
-  unsigned saved_erases=erases;assert(config_store_save_v10(19,new10,256)==CONFIG_STORE_OK&&erases==saved_erases);
-  /* Schema10 still loads a schema8 record with zero extension. */
-  memset(flash,255,sizeof(flash));assert(config_store_save_v8(19,old10,208)==CONFIG_STORE_OK);
-  assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK&&config_store_loaded_schema()==8);
-  for(unsigned j=208;j<256;j++)assert(out10[j]==0);
-  /* 1..32-byte program granules: header+payload (288) and the commit block are whole granules. */
-  strict_granules=true;
-  for(unsigned unit=1;unit<=32;unit*=2){
-   layout=(hal_flash_geometry_t){{4096,65536},{16384,32768},unit};memset(flash,255,sizeof(flash));
-   assert(config_store_save_v10(19,old10,256)==CONFIG_STORE_OK);
-   assert(config_store_save_v10(19,new10,256)==CONFIG_STORE_OK);
-   assert(config_store_load_v10(19,out10,256)==CONFIG_STORE_OK&&!memcmp(out10,new10,256));
-  }
-  strict_granules=false;layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  puts("PASS schema9 -> schema10 migration, write-cut cases, zero extension, no-wear save, downgrade protection, 1..32-byte granules");
- }
-
-
-
-
- uint8_t old[128],next[128],out[128];memset(old,17,128);memset(next,34,128);memset(flash,255,sizeof(flash));
- assert(config_store_load(19,out,128)==CONFIG_STORE_EMPTY);assert(config_store_save(19,old,128)==CONFIG_STORE_OK);assert(config_store_generation()==1);assert(config_store_load(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,old,128));
- unsigned e=erases,w=writes;assert(config_store_save(19,old,128)==CONFIG_STORE_OK);assert(erases==e&&writes==w);memcpy(baseline,flash,sizeof(flash));
- /* Cut every programmed-byte boundary, including the four-byte final seal. */
- for(int cut=0;cut<=164;cut++){
-  memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-  config_store_result_t result=config_store_save(19,next,128);write_budget=-1;
-  assert(config_store_load(19,out,128)==CONFIG_STORE_OK);
-  assert(!memcmp(out,old,128)||!memcmp(out,next,128));
-  if(result==CONFIG_STORE_OK)assert(!memcmp(out,next,128));
-  if(cut<164)assert(!memcmp(out,old,128));
- }
- const int cuts[]={0,1,16,32,104,131072,262144};
- for(unsigned i=0;i<sizeof(cuts)/sizeof(cuts[0]);i++){memcpy(flash,baseline,sizeof(flash));erase_prefix=cuts[i];assert(config_store_save(19,next,128)==CONFIG_STORE_IO_ERROR);erase_prefix=-1;assert(config_store_load(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,old,128));}
- memcpy(flash,baseline,sizeof(flash));assert(config_store_save(19,next,128)==CONFIG_STORE_OK);flash[262144+40]^=1;assert(config_store_load(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,old,128));
- assert(config_store_load(20,out,128)==CONFIG_STORE_INVALID);assert(config_store_save(20,next,128)==CONFIG_STORE_INVALID);assert(config_store_load(19,out,127)==CONFIG_STORE_INVALID);
- memcpy(flash,baseline,sizeof(flash));wr(flash+4,2);assert(config_store_load(19,out,128)==CONFIG_STORE_INVALID);assert(config_store_save(19,next,128)==CONFIG_STORE_INVALID);
- memcpy(flash,baseline,sizeof(flash));wr(flash+16,0xffffffffu);wr(flash+20,crc(flash,128));assert(config_store_save(19,next,128)==CONFIG_STORE_OK);assert(config_store_generation()==0);assert(config_store_load(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,next,128));
- read_fail=true;e=erases;assert(config_store_save(19,old,128)==CONFIG_STORE_IO_ERROR);assert(erases==e);read_fail=false;enabled=false;assert(config_store_save(19,old,128)==CONFIG_STORE_UNSUPPORTED);
-
- enabled=true;read_fail=false;write_budget=-1;erase_prefix=-1;
- memset(flash,255,sizeof(flash));
- assert(config_store_save(19,old,96)==CONFIG_STORE_OK);
- assert(config_store_load_v2(19,out,128)==CONFIG_STORE_OK);
- assert(config_store_loaded_schema()==1&&!memcmp(out,old,96));
- for(unsigned i=96;i<128;i++)assert(out[i]==0);
- uint8_t legacy[128];memcpy(legacy,out,128);memcpy(baseline,flash,sizeof(flash));
- for(int cut=0;cut<=192;cut++){
-  memcpy(flash,baseline,sizeof(flash));write_budget=cut;
-  config_store_result_t result=config_store_save_v2(19,next,128);write_budget=-1;
-  assert(!memcmp(flash,baseline,262144)); /* legacy slot NEVER erased first */
-  assert(config_store_load_v2(19,out,128)==CONFIG_STORE_OK);
-  if(result==CONFIG_STORE_OK){assert(!memcmp(out,next,128));assert(config_store_loaded_schema()==2);}
-  else {assert(!memcmp(out,legacy,128)||!memcmp(out,next,128));if(cut<164)assert(!memcmp(out,legacy,128));}
- }
- for(unsigned i=0;i<sizeof(cuts)/sizeof(cuts[0]);i++){
-  memcpy(flash,baseline,sizeof(flash));erase_prefix=cuts[i];assert(config_store_save_v2(19,next,128)==CONFIG_STORE_IO_ERROR);erase_prefix=-1;
-  assert(config_store_load_v2(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,legacy,128));
- }
- memcpy(flash,baseline,sizeof(flash));assert(config_store_save_v2(19,next,128)==CONFIG_STORE_OK);
- e=erases;w=writes;assert(config_store_save_v2(19,next,128)==CONFIG_STORE_OK&&e==erases&&w==writes);
- flash[262144+140]^=1;assert(config_store_load_v2(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,legacy,128));
- memcpy(flash,baseline,sizeof(flash));wr(flash+4,3);e=erases;assert(config_store_save_v2(19,next,128)==CONFIG_STORE_INVALID&&e==erases);
- memcpy(flash,baseline,sizeof(flash));assert(config_store_save_v2(20,next,128)==CONFIG_STORE_INVALID);
- assert(config_store_save_v2(19,next,127)==CONFIG_STORE_INVALID);
- enabled=false;e=erases;assert(config_store_save_v2(19,next,128)==CONFIG_STORE_UNSUPPORTED&&e==erases);
-
- enabled=true;strict_granules=true;
- for(unsigned unit=1;unit<=32;unit*=2){
-  layout=(hal_flash_geometry_t){{4096,65536},{16384,32768},unit};memset(flash,255,sizeof(flash));
-  assert(config_store_save_v2(19,old,128)==CONFIG_STORE_OK);
-  assert(config_store_save_v2(19,next,128)==CONFIG_STORE_OK);
-  assert(config_store_load_v2(19,out,128)==CONFIG_STORE_OK&&!memcmp(out,next,128));
- }
- strict_granules=false;
- for(unsigned fault=0;fault<5;fault++){
-  layout=(hal_flash_geometry_t){{0,262144},{262144,262144},1};
-  if(fault==0)layout.program_unit=64;
-  if(fault==1)layout.offset[1]=16;
-  if(fault==2)layout.bytes[0]=128;
-  if(fault==3)layout.offset[1]=UINT32_MAX-16;
-  if(fault==4)layout.program_unit=3;
-  e=erases;assert(config_store_save_v2(19,next,128)==CONFIG_STORE_UNSUPPORTED&&e==erases);
- }
- puts("PASS variable backend geometry, 1/2/4/8/16/32-byte one-program-per-granule writes, overlap/size/overflow/alignment-capability guards");
- puts("PASS schema1 -> schema2 migration: all 193 v2 program cuts, seven torn erases, preserved legacy slot, CRC fallback, no-wear repeated save, future/foreign/length refusal");
- puts("PASS two-slot store: 165 byte-cut boundaries, seven torn erases, CRC fallback, future schema/board/length rejection, no-change wear avoidance, generation wrap, read failure");
+ for(unsigned schema=1;schema<=14;schema++)if(schema!=13){memset(flash,255,sizeof flash);wr(flash,MAGIC);wr(flash+4,schema);wr(flash+8,19);wr(flash+12,256);unsigned e0=erases;assert(config_store_load(19,out,256)==CONFIG_STORE_INCOMPATIBLE);assert(config_store_save(19,next,256)==CONFIG_STORE_INCOMPATIBLE&&erases==e0);}
+ memcpy(flash,baseline,sizeof flash);assert(config_store_load(20,out,sizeof out)==CONFIG_STORE_INCOMPATIBLE);assert(config_store_save(20,next,sizeof next)==CONFIG_STORE_INCOMPATIBLE);
+ memcpy(flash,baseline,sizeof flash);flash[HEADER]^=1;assert(config_store_load(19,out,sizeof out)==CONFIG_STORE_OK&&!memcmp(out,next,sizeof next));
+ flash[layout.offset[1]+HEADER]^=1;assert(config_store_load(19,out,sizeof out)==CONFIG_STORE_INVALID);assert(config_store_save(19,next,sizeof next)==CONFIG_STORE_INVALID);
+ memcpy(flash,baseline,sizeof flash);read_fail=true;assert(config_store_load(19,out,sizeof out)==CONFIG_STORE_IO_ERROR);assert(config_store_save(19,next,sizeof next)==CONFIG_STORE_IO_ERROR);read_fail=false;
+ assert(config_store_load(19,out,255)==CONFIG_STORE_INVALID);assert(config_store_save(19,NULL,256)==CONFIG_STORE_INVALID);
+ enabled=false;assert(config_store_load(19,out,256)==CONFIG_STORE_UNSUPPORTED);enabled=true;
+ puts("PASS schema13 only: current roundtrip, 321 write cuts, aligned separate commit, old-slot retention, no-wear save, old/future/foreign rejection without erasure, CRC and I/O failures");
+ return 0;
 }

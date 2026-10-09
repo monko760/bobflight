@@ -53,7 +53,14 @@ export async function readNotches(host: NotchHost): Promise<NotchSnapshot> {
     snap.values[i] = { center: await readKey(host, notchCenterKey(i)), cutoff: await readKey(host, notchCutoffKey(i)) };
   }
   try { snap.report = parseFiltersReport(await host.sendCommand("filters")); } catch { snap.report = null; }
-  try { const st = parseStorage(await host.sendCommand("storage")); snap.schema = st.schema; snap.fcDirty = st.dirty; } catch { /* unknown */ }
+  try {
+    const raw = await host.sendCommand("storage");
+    const declared = /^schema: (\d+)\r?$/m.exec(raw);
+    // An explicitly incompatible format is unsupported, not an unknown schema
+    // that would allow legacy settings through the feature-presence fallback.
+    if (declared && Number(declared[1]) !== 13) snap.schema = 0;
+    else { const st = parseStorage(raw); snap.schema = st.schema; snap.fcDirty = st.dirty; }
+  } catch { /* Transport/partial replies remain unknown; do not invent a version. */ }
   return snap;
 }
 

@@ -7,7 +7,12 @@ export type RatesConfig = {
   rate_max_roll: number;
   rate_max_pitch: number;
   rate_max_yaw: number;
-  rate_expo: number;
+  rate_center_roll: number;
+  rate_center_pitch: number;
+  rate_center_yaw: number;
+  rate_expo_roll: number;
+  rate_expo_pitch: number;
+  rate_expo_yaw: number;
 };
 
 export type PidConfig = {
@@ -34,7 +39,12 @@ export const RATES_DEFAULTS: RatesConfig = {
   rate_max_roll: 800,
   rate_max_pitch: 800,
   rate_max_yaw: 800,
-  rate_expo: 0.3,
+  rate_center_roll: 200,
+  rate_center_pitch: 200,
+  rate_center_yaw: 200,
+  rate_expo_roll: 0.3,
+  rate_expo_pitch: 0.3,
+  rate_expo_yaw: 0.3,
 };
 
 export const PID_DEFAULTS: PidConfig = {

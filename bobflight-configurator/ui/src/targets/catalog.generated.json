@@ -79,9 +79,9 @@
       "id": "matek_f722_px",
       "mcu": "stm32f722",
       "ir": "boards/matek-ir/matek_f722_px.yaml",
-      "support": "sensor-only",
+      "support": "development",
       "capabilities": {
-        "motor_output": false,
+        "motor_output": true,
         "usb_cdc": true,
         "sd_logging": false
       },

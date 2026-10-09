@@ -69,8 +69,8 @@ sets=[l for l in lines if l.startswith(('set rpm_filter','set motor_poles'))]
 assert sets==['set rpm_filter_harmonics 3','set motor_poles 12',
               'set rpm_filter_harmonics 3','set rpm_filter_min_hz 100','set rpm_filter_q_x100 500','set motor_poles 12'],sets
 assert [l for l in lines if l.split('=')[0] in KEYS][-4:]==[f'{k}={v}' for k,v in zip(KEYS,DEF)],lines
-assert values(lines,'schema')==['11'] and values(lines,'# schema')==['11']*4,lines
-assert all(s.endswith(',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw') for s in values(lines,'scope')+values(lines,'# scope')),lines
+assert values(lines,'schema')==['13'] and values(lines,'# schema')==['13']*4,lines
+assert all(s.endswith(',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates') for s in values(lines,'scope')+values(lines,'# scope')),lines
 
 # Worst-case full dump (every key non-default, longest values) fits the 2560-byte export buffer (<= 2047).
 big=['set rate_max_roll 1234.57','set rate_max_pitch 1234.57','set rate_max_yaw 1234.57','set rate_expo 0.123457',
