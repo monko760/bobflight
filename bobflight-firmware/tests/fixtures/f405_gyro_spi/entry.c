@@ -1,5 +1,8 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 #include "hal/stm32f4/gyro_spi_bridge.h"
+#ifdef BF_F405_TEST_REAL_GPIO
+#include "hal/stm32f4/gyro_gpio_prepare.h"
+#endif
 #include "drivers/gyro.h"
 #include "flight/arming.h"
 #include "flight/config.h"
@@ -30,9 +33,23 @@ const board_t *board_get(void){return &board;}
 bool board_pins_live(void){return true;}
 bool board_mmio_permitted(void){return true;}
 bool hal_exti_attach(hal_pin_t p,hal_exti_cb_t cb,void *ctx){(void)p;(void)cb;(void)ctx;return false;}
-static void cs(void *ctx,bool selected){(void)ctx;fixture_cs=selected;}
+static void cs(void *ctx,bool selected){
+ (void)ctx;
+#ifdef BF_F405_TEST_REAL_GPIO
+ bf_f405_gyro_cs_cb(NULL,selected);
+#endif
+ fixture_cs=selected;
+}
 void bf_f4_component_entry(void)
 {
+ strcpy(board.board_id,"mltempf4");strcpy(board.mcu_family,"STM32F405");
+ strcpy(board.gyro_chip,"MPU6000");strcpy(board.gyro_align,"CW180_DEG");
+ board.gyro_spi_bus=1;board.gyro_cs_pin=HAL_PIN_PACK(0,4);
+ board.gyro_sck_pin=HAL_PIN_PACK(0,5);board.gyro_miso_pin=HAL_PIN_PACK(0,6);board.gyro_mosi_pin=HAL_PIN_PACK(0,7);
+ board.gyro_exti_pin=HAL_PIN_PACK(2,5);
+#ifdef BF_F405_TEST_REAL_GPIO
+ if(fixture_case<200) CHECK(bf_f405_gyro_gpio_prepare(&board)==BF_F405_GYRO_GPIO_OK);
+#endif
  bf_f4_clock_plan_t clocks={.hclk_hz=168000000,.apb2_hz=84000000};
  if(fixture_case>=200) {
   bf_f405_spi_prescaler_t p=fixture_case==201?(bf_f405_spi_prescaler_t)0:BF_F405_SPI_PRESCALER_128;
@@ -69,11 +86,6 @@ void bf_f4_component_entry(void)
   }
   fixture_done();
  }
- strcpy(board.board_id,"mltempf4");strcpy(board.mcu_family,"STM32F405");
- strcpy(board.gyro_chip,"MPU6000");strcpy(board.gyro_align,"CW180_DEG");
- board.gyro_spi_bus=1;board.gyro_cs_pin=HAL_PIN_PACK(0,4);
- board.gyro_sck_pin=HAL_PIN_PACK(0,5);board.gyro_miso_pin=HAL_PIN_PACK(0,6);board.gyro_mosi_pin=HAL_PIN_PACK(0,7);
- board.gyro_exti_pin=HAL_PIN_PACK(2,5);
  CHECK(bf_f405_gyro_spi_bind(&spi,board.gyro_cs_pin));
  CHECK(!bf_f405_gyro_spi_bind(&spi,board.gyro_cs_pin));
  CHECK(!hal_spi_open(2)); CHECK(!hal_spi_open_cfg(NULL));
