@@ -434,8 +434,9 @@ int main(int argc,char **argv){
  /* (e) Due-slot trigger (BB1 QA M20). 8000/1 at 500 Hz has 16 PID loops per logging slot, 32 at 250 Hz.
   * The 1 % trigger counts due slots only, so a card that keeps losing a few % of due slots is halved again;
   * counting every PID loop (the old formula) would see 1/16 or 1/32 of that and let it keep dropping.
-  * Deterministic virtual-time model: a 15 ms card halves twice (to 125 Hz), an 8 ms card halves after a few
-  * drops (the old formula: once to 250 Hz and still ~6 % dropping; 8 ms card ~175 drops before halving). */
+  * Delta frames reduce bytes per slot. Recalibrated20 ms and7.7 ms
+  * congestion inputs exercise the same two/one-halving and <=50-drop bounds.
+  * Requested rates, ring limits, loss assertions and latency limits stay fixed. */
  if(REQ==500u){
   card_model_t mild={"due-slot trigger card (20ms busy)",20000,400,0,0};secs=12;r=run(&loops[2],&mild,secs);report(&loops[2],&mild,&r,secs);check_run_statuses(&r);
   assert(bbl.phase==BBS_DONE&&r.frames==r.accepted&&r.rate==125&&r.lowerings==2&&!strcmp(r.reason,"auto-lowered-card-slow"));

@@ -4,11 +4,11 @@
 #include "drivers/fat32_log.h"
 #include "flight/blackbox_encode.h"
 /* Encoded-byte RAM ring between the encoder and 512-byte sector writes. It
- * rides out card write-latency stalls (64 KiB is ~2 s at 500 Hz x ~62 B).
+ * rides out card write-latency stalls (64 KiB is ~1.7 s at 500 Hz x ~76 B).
  * On STM32F7 it lives in SRAM1 (.dma window), not in the 64 KiB DTCM. */
 #define BB_SESSION_RING_BYTES 65536u
 /* Samples encoded per poll call (bounded work; ring space is checked first). */
-#define BB_SESSION_FRAMES_PER_POLL 16u
+#define BB_SESSION_FRAMES_PER_POLL 1u
 /* One encoded frame or the end marker; sized to the encoder's proven
  * worst-case frame (blackbox_encode.h), checked by static asserts. */
 #define BB_SESSION_PACKET_BYTES BLACKBOX_FRAME_MAX_BYTES

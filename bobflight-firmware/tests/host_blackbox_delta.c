@@ -25,7 +25,7 @@ int main(void){
   size_t b=blackbox_stream_frame(stream,sizeof stream,&s,&st);assert(b);bool key=stream[0]=='I';assert(key||stream[0]=='P');if(key){keys++;last_key=j;}else{preds++;assert(j-last_key<BLACKBOX_KEYFRAME_INTERVAL);}
   if(j==0||j==137||j==138||j==271||j==272)assert(key); /* no signed overflow or unsigned wrap approximation */
   size_t ap=1,bp=1;for(unsigned i=0;i<BLACKBOX_FIELD_COUNT;i++){
-   uint32_t av=take(absolute,a,&ap),bv=take(stream,b,&bp);int64_t want=sign[i]?(int64_t)(av>>1)-(int64_t)(av&1)*(1LL+(int64_t)(av>>1)*2):(int64_t)av;
+   uint32_t av=take(absolute,a,&ap),bv=take(stream,b,&bp);int64_t want=sign[i]?((int64_t)(av>>1)^-(int64_t)(av&1)):(int64_t)av;
    int64_t got=(!key||sign[i])?((int64_t)(bv>>1)^-(int64_t)(bv&1)):(int64_t)bv;if(!key)got+=previous[i];assert(want==got);previous[i]=got;
   }assert(ap==a&&bp==b);
  }
