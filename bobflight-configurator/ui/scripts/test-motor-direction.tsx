@@ -900,6 +900,50 @@ async function main() {
     };
   }
 
+  await test("real MotorsPage: background telemetry does not flicker controls or swallow clicks", async () => {
+    let holdNext = false, reached = () => {}, release = () => {};
+    const reachedRead = new Promise<void>(r => { reached = r; });
+    const heldRead = new Promise<void>(r => { release = r; });
+    const t = await realPage("mock://bobflight-bench", h => {
+      const send = h.sendCommand as (c: string) => Promise<unknown>;
+      h.sendCommand = async (cmd: string) => {
+        if (holdNext && cmd === "get erpm_m1") { holdNext = false; reached(); await heldRead; }
+        return send(cmd);
+      };
+    });
+    try {
+      await t.connect();
+      const box = (text: string) => container.findAll(e => e.tagName === "LABEL" && visibleText(e).includes(text))[0].findAll(e => e.tagName === "INPUT")[0];
+      const button = (text: string) => container.findAll(e => e.tagName === "BUTTON" && visibleText(e).startsWith(text))[0];
+      assert.ok(await waitFor(() => !isDisabled(box("every motor is stationary")), 3000));
+      flushSync(() => reactProps(box("All props are removed")).onChange({ target: { checked: true } }));
+      flushSync(() => reactProps(box("every motor is stationary")).onChange({ target: { checked: true } }));
+      const slider = container.findAll(e => e.tagName === "INPUT" && e.getAttribute("id") === "motor-level-1")[0];
+      assert.ok(await waitFor(() => !isDisabled(slider), 3000), "pulse capability initialized");
+      flushSync(() => reactProps(slider).onChange({ target: { value: "5" } }));
+      assert.ok(await waitFor(() => !isDisabled(button("Run sequence")) && !isDisabled(button("DShot600")), 3000));
+      holdNext = true; await reachedRead; await sleep(0);
+      for (let sample = 0; sample < 3; sample++) {
+        assert.ok(!isDisabled(box("every motor is stationary")), "stationary checkbox remains usable during read");
+        assert.ok(!isDisabled(button("DShot600")), "available rate remains enabled during read");
+        assert.ok(isDisabled(button("DShot300")), "already selected rate stays disabled");
+        assert.ok(!isDisabled(button("Run sequence")), "sequence remains enabled during read");
+        assert.ok(!isDisabled(button("Test M1")), "prepared pulse remains enabled during read");
+        await sleep(10);
+      }
+      flushSync(() => reactProps(box("every motor is stationary")).onChange({ target: { checked: false } }));
+      assert.ok(isDisabled(button("Run sequence")), "real acknowledgement gate still applies");
+      flushSync(() => reactProps(box("every motor is stationary")).onChange({ target: { checked: true } }));
+      assert.ok(!isDisabled(button("Run sequence")), "acknowledgement is not swallowed during polling");
+      await click(button("DShot600"));
+      assert.ok(isDisabled(button("Run sequence")) && isDisabled(box("every motor is stationary")), "actual pending action locks controls");
+      assert.ok(!t.ops.includes("dshot 600"), "no overlapping write while read outstanding");
+      release();
+      assert.ok(await waitFor(() => t.ops.includes("dshot 600") && !isDisabled(button("DShot300")), 3000), "click during poll is executed with readback");
+      assert.ok(!t.ops.some(op => /^(motor_seq|motor_pulse |motor_test [1-4])/.test(op)), "no motor command without explicit motor request");
+    } finally { release(); await t.done(); }
+  });
+
   await test("real adapter: disconnected -> 'Locked: not connected.', no command sent by the panel", async () => {
     const t = await realPage();
     await sleep(80);

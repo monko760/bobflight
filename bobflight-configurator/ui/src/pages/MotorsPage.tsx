@@ -55,7 +55,7 @@ export function MotorsPage() {
   if (!state || !controller) return <div className="panel">Preparing motor controls…</div>;
   const reason = benchBlockReason(state, now);
   const remaining = Math.max(0, state.estimatedUntil - now);
-  const disabled = !!reason || state.busy || postFlashGate;
+  const disabled = !!reason || storageBlocked(state) || postFlashGate;
   const capability = state.capabilities;
   const readiness = state.status?.motor_output && / ready$/.test(state.status.motor_output) ? "Ready (driver reports)" : "Unavailable / unknown";
   const rate = state.rate ? `DShot${state.rate}` : "Unknown";
@@ -75,10 +75,10 @@ export function MotorsPage() {
     </div>
     <fieldset className="motor-checks"><legend>Before each test</legend>
       <label><input type="checkbox" checked={state.propsOff} disabled={!state.connected} onChange={e => controller.confirmProps(e.target.checked)} /> All props are removed and the frame is secured.</label>
-      <label><input type="checkbox" checked={state.stationary} disabled={!state.connected || state.busy || remaining > 0} onChange={e => controller.confirmStationary(e.target.checked)} /> I can see that every motor is stationary.</label>
+      <label><input type="checkbox" checked={state.stationary} disabled={!state.connected || storageBlocked(state) || remaining > 0} onChange={e => controller.confirmStationary(e.target.checked)} /> I can see that every motor is stationary.</label>
       <p className="muted">Stationary confirmation resets after each test. Confirmations reset after reconnecting or leaving this page.</p>
     </fieldset>
-    <p className="motor-gate" role="status">{reason ?? (state.busy ? "Communicating with controller…" : "Ready for an explicit test request.")}</p>
+    <p className="motor-gate" role="status">{reason ?? (storageBlocked(state) ? "Communicating with controller…" : "Ready for an explicit test request.")}</p>
     {capability && !capability.individual && <p className="banner-warn">This firmware does not advertise motor_test. Install the tested BobFlight bench firmware before using these controls.</p>}
     <p className="muted">Sliders prepare a command only—they never start a motor by themselves. The full 0–{MAX_PULSE_PERCENT}% command range requires an explicit one-second test. Full command can spin a motor extremely fast: remove all props and secure the frame. No continuous throttle or master slider.</p>
     {capability && !capability.pulse && <p className="banner-warn">Adjustable sliders need firmware with motor_pulse support. Your current firmware can still use the fixed 8% tests below. Updating only this configurator does not add firmware support.</p>}

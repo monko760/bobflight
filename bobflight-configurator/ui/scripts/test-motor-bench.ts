@@ -66,6 +66,88 @@ async function main() {
     c.confirmProps(true); c.confirmStationary(false); assert.ok(benchBlockReason(c.state, now()));
     c.confirmStationary(true); advance(1501); assert.ok(benchBlockReason(c.state, now()));
   });
+  await test("stationary acknowledgement stays usable during a read-only poll", async () => {
+    const { c, host } = await setup(); c.confirmStationary(false);
+    const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+    const poll = c.poll(); await Promise.resolve();
+    assert.equal(c.state.busy, true); assert.equal(c.state.actionPending, false);
+    c.confirmStationary(true); assert.equal(c.state.stationary, true);
+    assert.deepEqual(host.commands, ["status"]);
+    host.statusWait = null; d.resolve({ ...ready }); await poll;
+  });
+  await test("each explicit motor/rate action preempts polling and gets a new preflight", async () => {
+    for (const kind of ["individual", "pulse", "sequence", "rate"] as const) {
+      const { c, host } = await setup(); c.setPulsePercent(1, 25);
+      const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+      const poll = c.poll(); await Promise.resolve();
+      const action = kind === "individual" ? c.start(1) : kind === "pulse" ? c.pulse(1) : kind === "sequence" ? c.start("sequence") : c.setRate(600);
+      assert.equal(c.state.actionPending, true);
+      await c.start(2); await c.setRate(300); await c.poll(); // no second reservation
+      assert.deepEqual(host.commands, ["status"]);
+      host.statusWait = null; d.resolve({ ...ready }); await Promise.all([poll, action]);
+      const command = kind === "individual" ? "motor_test 1" : kind === "pulse" ? "motor_pulse 1 25" : kind === "sequence" ? "motor_seq" : "dshot 600";
+      assert.deepEqual(host.commands, ["status", "status", command, ...(kind === "rate" ? ["dshot"] : [])]);
+      assert.equal(c.state.actionPending, false); assert.equal(c.state.busy, false);
+    }
+  });
+  await test("a click during eRPM polling waits for that reply, then skips remaining telemetry", async () => {
+    const { c, host } = await setup(); const reached = deferred<void>(), release = deferred<void>();
+    const send = host.sendCommand.bind(host);
+    host.sendCommand = async cmd => {
+      const reply = await send(cmd);
+      if (cmd === "get erpm_m1") { reached.resolve(); await release.promise; }
+      return reply;
+    };
+    const poll = c.poll(); await reached.promise;
+    const action = c.start(1);
+    assert.deepEqual(host.commands, ["status", "dshot", "get erpm_m1"]);
+    release.resolve(); await Promise.all([poll, action]);
+    assert.deepEqual(host.commands, ["status", "dshot", "get erpm_m1", "status", "motor_test 1"]);
+  });
+  await test("Stop cancels an action reserved behind a polling read", async () => {
+    const { c, host } = await setup(); const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+    const poll = c.poll(); await Promise.resolve(); const action = c.start(1); const stop = c.stop();
+    host.statusWait = null; d.resolve({ ...ready }); await Promise.all([poll, action, stop]);
+    assert.deepEqual(host.commands, ["status", "motor_test 0"]); assert.equal(c.state.stationary, false);
+  });
+  await test("poll-preempting actions do not survive reconnect, hidden page or props revocation", async () => {
+    for (const cancel of ["reconnect", "hidden", "props"] as const) {
+      const { c, host } = await setup(); const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+      const poll = c.poll(); await Promise.resolve(); const action = c.start(1);
+      if (cancel === "reconnect") { host.connection = "disconnected"; c.connection(false); host.connection = "connected"; c.connection(true); }
+      if (cancel === "hidden") c.setVisible(false);
+      if (cancel === "props") { c.confirmProps(false); c.confirmProps(true); }
+      host.statusWait = null; d.resolve({ ...ready }); await Promise.all([poll, action]);
+      if (cancel === "hidden") await c.stop();
+      assert.ok(!host.commands.includes("motor_test 1"));
+    }
+  });
+  await test("a delayed polling read cannot launch a stale reserved motor request", async () => {
+    const { c, host, advance } = await setup(); const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+    const poll = c.poll(); await Promise.resolve(); const action = c.start(1); advance(1501);
+    host.statusWait = null; d.resolve({ ...ready }); await Promise.all([poll, action]);
+    assert.deepEqual(host.commands, ["status"]); assert.equal(c.state.stationary, false); assert.match(c.state.error, /expired/);
+  });
+  await test("slow fresh preflight expires instead of sending a late motor command", async () => {
+    const { c, host, advance } = await setup(); const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+    const action = c.start(1); await Promise.resolve(); advance(1501);
+    host.statusWait = null; d.resolve({ ...ready }); await action;
+    assert.deepEqual(host.commands, ["status"]); assert.match(c.state.error, /expired/);
+  });
+  await test("fresh preflight after polling still refuses armed state", async () => {
+    const { c, host } = await setup(); const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+    const poll = c.poll(); await Promise.resolve(); const action = c.start(1);
+    host.statusWait = null; host.status.arm = "armed"; d.resolve({ ...ready }); await Promise.all([poll, action]);
+    assert.deepEqual(host.commands, ["status", "status"]); assert.equal(c.state.status?.arm, "armed");
+  });
+  await test("background polling does not exempt genuinely stale status", async () => {
+    const { c, host, advance, now } = await setup(); const d = deferred<ParsedStatus>(); host.statusWait = d.promise;
+    const poll = c.poll(); await Promise.resolve(); advance(1501);
+    assert.match(benchBlockReason(c.state, now())!, /fresh/); await c.start(1);
+    assert.equal(c.state.actionPending, false); assert.deepEqual(host.commands, ["status"]);
+    host.statusWait = null; d.resolve({ ...ready }); await poll;
+    assert.ok(!host.commands.some(x => x.startsWith("motor_test ")));
+  });
   await test("single pulse uses fresh status, locks rate/starts, does not auto-restart", async () => {
     const { c, host, advance } = await setup();
     await c.start(1); assert.deepEqual(host.commands, ["status","motor_test 1"]);

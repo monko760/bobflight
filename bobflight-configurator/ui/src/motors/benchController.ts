@@ -67,7 +67,9 @@ export function benchBlockReason(s: BenchState, now: number): string | null {
   return null;
 }
 
-/** One in-flight operation, NO queued/retried starts. Stop invalidates any not-yet-sent action. */
+/** One reserved user action, never a queue/retry of starts. A read-only poll
+ * yields after its outstanding reply; a fresh preflight precedes any mutation.
+ * Stop, visibility/session changes and an expired request cancel unsent actions. */
 export class BenchController {
   state = initial();
   private generation = 0;
@@ -91,7 +93,7 @@ export class BenchController {
     if (!value && this.possibleMotion) void this.stop();
   }
   confirmStationary(value: boolean): void {
-    if (this.state.busy || this.now() < this.state.estimatedUntil) return;
+    if (this.state.actionPending || this.state.stopping || this.now() < this.state.estimatedUntil) return;
     this.patch({ stationary: value });
     if (value) this.possibleMotion = false;
   }
@@ -111,11 +113,24 @@ export class BenchController {
     const status = await this.host.getStatus();
     if (this.valid(g)) this.patch({ status, statusAt: this.now() });
   }
-  private run(work: (g: number) => Promise<void>, action = false): Promise<void> {
-    if (this.flight || this.stopFlight || !this.state.connected || !this.state.visible) return Promise.resolve();
-    const g = this.generation;
+  private actionFresh(g: number, requestedAt: number): boolean {
+    if (!this.valid(g)) return false;
+    if (this.now() - requestedAt <= STATUS_MAX_AGE_MS) return true;
+    this.patch({ stationary: false, error: "Motor control request expired while waiting for communication. Confirm stationary and click again." });
+    return false;
+  }
+  private run(work: (g: number, requestedAt: number) => Promise<void>, action = false): Promise<void> {
+    if (this.stopFlight || !this.state.connected || !this.state.visible ||
+        (this.flight && (!action || this.state.actionPending))) return Promise.resolve();
+    const previous = this.flight;
+    // Reserve synchronously so double clicks cannot queue another start. Do not
+    // overlap USB operations: the old poll exits after its current reply.
+    if (previous) this.generation++;
+    const g = this.generation, requestedAt = this.now();
     this.patch({ busy: true, actionPending: action });
-    const p = Promise.resolve().then(async () => { if (this.valid(g)) await work(g); })
+    const p = Promise.resolve(previous).then(async () => {
+      if (this.valid(g) && (!action || this.actionFresh(g, requestedAt))) await work(g, requestedAt);
+    })
       .catch(e => { if (this.valid(g)) this.patch({ error: e instanceof Error ? e.message : String(e), status: null, rate: null, propsOff: false, stationary: false, pulsePercent: zeroSliders() }); })
       .finally(() => { if (this.flight === p) { this.flight = null; if (!this.stopFlight) this.patch({ busy: false, actionPending: false }); } });
     this.flight = p;
@@ -190,9 +205,9 @@ export class BenchController {
   }
   private test(cmd: CliCommand, label: string, duration: number): Promise<void> {
     if (benchBlockReason(this.state, this.now())) return Promise.resolve();
-    return this.run(async g => {
+    return this.run(async (g, requestedAt) => {
       await this.status(g); // preflight just before writing, not a cached UI assertion
-      if (!this.valid(g) || benchBlockReason(this.state, this.now())) return;
+      if (!this.actionFresh(g, requestedAt) || benchBlockReason(this.state, this.now())) return;
       this.possibleMotion = true;
       this.patch({ stationary: false, estimatedUntil: this.now() + duration, testLabel: label, error: "", reply: "Sending test request…" });
       const text = await this.host.sendCommand(cmd);
@@ -203,9 +218,9 @@ export class BenchController {
   }
   setRate(rate: 300 | 600): Promise<void> {
     if (benchBlockReason(this.state, this.now()) || !this.state.capabilities?.dshot) return Promise.resolve();
-    return this.run(async g => {
+    return this.run(async (g, requestedAt) => {
       await this.status(g);
-      if (!this.valid(g) || benchBlockReason(this.state, this.now())) return;
+      if (!this.actionFresh(g, requestedAt) || benchBlockReason(this.state, this.now())) return;
       const cmd: CliCommand = `dshot ${rate}`;
       this.patch({ rate: null, error: "" });
       const text = await this.host.sendCommand(cmd);
