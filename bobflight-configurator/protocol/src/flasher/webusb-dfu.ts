@@ -15,9 +15,11 @@ import type { ParsedHex } from "./intel-hex";
 import { assertMcuGate, normalizeFirmware } from "./mcu-gate";
 import { readDfuInterfaceName } from "./dfu-descriptors";
 import { assertF405DfuLayout } from "./f405-diagnostic";
-import { planSectorErases } from "./flash-sectors";
+import { planSectorErases, planFullChipErases, assertMainFlashLayout } from "./flash-sectors";
 import {
   DEFAULT_FLASH_BASE,
+  MCU_FLASH_SIZE,
+  type BobFlightMcu,
   type FlashDeviceInfo,
   type FlashOptions,
   type FlashProgress,
@@ -548,9 +550,16 @@ export class WebUsbDfuFlasher implements Flasher {
     const leave = opts?.leave !== false;
     const verify = opts?.verify !== false;
     const parsed = normalizeFirmware(firmware, startAddress);
+    const fullErase = opts?.eraseMode === "full-chip";
 
     try {
       assertMcuGate(parsed, opts);
+      if (opts?.eraseMode !== undefined && opts.eraseMode !== "sectors" && opts.eraseMode !== "full-chip")
+        throw new Error("Unsupported erase mode.");
+      if (fullErase) {
+        planFullChipErases(opts?.expectedMcu);
+        if (!verify) throw new Error("Full chip erase requires readback verification.");
+      }
     } catch (err) {
       this.emit({
         phase: "error",
@@ -563,7 +572,8 @@ export class WebUsbDfuFlasher implements Flasher {
 
     const regions = parsed.regions.length > 0
       ? parsed.regions : [{ address: parsed.baseAddress, data: parsed.bytes }];
-    const eraseAddresses = planSectorErases(regions, opts?.expectedMcu ?? parsed.mcu);
+    const imageSectors = planSectorErases(regions, opts?.expectedMcu ?? parsed.mcu);
+    const eraseAddresses = fullErase ? planFullChipErases(opts?.expectedMcu) : imageSectors;
     if (!Number.isSafeInteger(startAddress) || startAddress !== DEFAULT_FLASH_BASE) {
       throw new Error("This board flasher requires application base 0x08000000.");
     }
@@ -592,7 +602,7 @@ export class WebUsbDfuFlasher implements Flasher {
     try {
       device = await this.openDevice(DEFAULT_ALT);
       this.assertClaimedForFlash();
-      if (opts?.imageProfile === "f405-usb-diagnostic") {
+      if (fullErase || opts?.imageProfile === "f405-usb-diagnostic") {
         const selected = device.configuration?.interfaces.find(i => i.interfaceNumber === this.interfaceNumber);
         const alternate = selected?.alternates.find(a => a.alternateSetting === DEFAULT_ALT);
         let name = alternate?.interfaceName;
@@ -600,7 +610,8 @@ export class WebUsbDfuFlasher implements Flasher {
           name = await readDfuInterfaceName(device, device.configuration!.configurationValue,
             this.interfaceNumber, DEFAULT_ALT, () => this.throwIfCancelled(0, total));
         }
-        assertF405DfuLayout(name);
+        if (fullErase) assertMainFlashLayout(name, opts?.expectedMcu);
+        else assertF405DfuLayout(name);
         this.throwIfCancelled(0, total);
       }
       await this.prepareDevice(device);
@@ -610,13 +621,39 @@ export class WebUsbDfuFlasher implements Flasher {
         phase: "erasing",
         bytesWritten: 0,
         bytesTotal: total,
-        message: `DfuSe erase @ 0x${startAddress.toString(16)}`,
+        message: fullErase ? "Full internal-flash erase, including all saved settings" : `DfuSe erase @ 0x${startAddress.toString(16)}`,
       });
       for (const address of eraseAddresses) {
         this.throwIfCancelled(0, total);
         this.emit({ phase: "erasing", bytesWritten: 0, bytesTotal: total,
           message: `Erasing sector at 0x${address.toString(16)} (${eraseAddresses.length} sectors)` });
+        this.throwIfCancelled(0, total);
         await this.dfuseErase(device, address);
+      }
+
+      if (fullErase) {
+        // Do not program until EVERY main-flash byte is verified blank. This
+        // includes configuration sectors that firmware-only readback misses.
+        const flashBytes = MCU_FLASH_SIZE[opts!.expectedMcu as BobFlightMcu];
+        for (let off = 0; off < flashBytes; off += this.transferSize) {
+          this.throwIfCancelled(0, total);
+          const n = Math.min(this.transferSize, flashBytes - off);
+          await this.dfuseSetAddress(device, DEFAULT_FLASH_BASE + off);
+          await this.abortToIdle(device);
+          const result = await device.controlTransferIn({
+            requestType: "class", recipient: "interface", request: DFU_UPLOAD,
+            value: 2, index: this.interfaceNumber,
+          }, n);
+          if (result.status !== "ok" || !result.data || result.data.byteLength !== n)
+            throw new Error(`Full erase blank verification failed or short read at 0x${(DEFAULT_FLASH_BASE + off).toString(16)}`);
+          const bytes = new Uint8Array(result.data.buffer, result.data.byteOffset, n);
+          const mismatch = bytes.findIndex(b => b !== 0xff);
+          if (mismatch !== -1)
+            throw new Error(`Full erase blank verification failed at 0x${(DEFAULT_FLASH_BASE + off + mismatch).toString(16)}`);
+          await this.abortToIdle(device);
+          this.emit({ phase: "erasing", bytesWritten: 0, bytesTotal: total,
+            message: `Full erase: verified blank ${off + n} / ${flashBytes} internal-flash bytes` });
+        }
       }
 
       let written = 0;
@@ -705,7 +742,7 @@ export class WebUsbDfuFlasher implements Flasher {
         phase: "done",
         bytesWritten: written,
         bytesTotal: total,
-        message: opts?.imageProfile === "f405-usb-diagnostic" ? "Diagnostic written and readback verified. Remains in DFU: unplug USB, remove BOOT bridge, reconnect USB for cold startup." : verify ? "Firmware written and readback verified. Reconnect USB to check startup." : "Firmware written without readback verification.",
+        message: (fullErase ? "Full internal flash erased and blank-verified; previous settings removed. " : "") + (opts?.imageProfile === "f405-usb-diagnostic" ? "Diagnostic written and readback verified. Remains in DFU: unplug USB, remove BOOT bridge, reconnect USB for cold startup." : verify ? "Firmware written and readback verified. Reconnect USB to check startup." : "Firmware written without readback verification."),
       });
     } catch (err) {
       if (this.cancelled) {

@@ -132,6 +132,8 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   const [propsOff, setPropsOff] = useState(false);
   const [backupTaken, setBackupTaken] = useState(false);
   const [boardMatchConfirmed, setBoardMatchConfirmed] = useState(false);
+  const [fullChipErase, setFullChipErase] = useState(false);
+  const [fullEraseConfirmed, setFullEraseConfirmed] = useState(false);
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
@@ -175,7 +177,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
       if (fileInputRef.current) fileInputRef.current.value = '';
       fileSeqRef.current++; loadingRef.current = false; setFileLoading(false);
       setParsed(null); setFileName(null); setFileSize(null); setParseError(null);
-      setBoardMatchConfirmed(false); setShowReconnectHint(false); setMockFlashComplete(false);
+      setBoardMatchConfirmed(false); setFullEraseConfirmed(false); setShowReconnectHint(false); setMockFlashComplete(false);
       setProgress({phase:"idle",bytesWritten:0,bytesTotal:0});
     }
     onBusyChange?.(active || operationRef.current);
@@ -249,7 +251,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   );
 
   const flashing = busy || IN_PROGRESS.has(progress.phase);
-  useEffect(() => { setBoardMatchConfirmed(false); }, [boardId, fileName, deviceLabel, useMock, customMcu, customFlash, customHse, diagnosticAssumptions]);
+  useEffect(() => { setBoardMatchConfirmed(false); setFullEraseConfirmed(false); }, [boardId, parsed, fileName, deviceLabel, useMock, customMcu, customFlash, customHse, diagnosticAssumptions]);
   useEffect(() => {
     setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null);
     setDiagnosticAssumptions(false);
@@ -261,7 +263,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   useEffect(() => {
     const usb = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & {usb?: EventTarget}).usb;
     if (!usb?.addEventListener) return;
-    const disconnected = () => { setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); setBoardMatchConfirmed(false); };
+    const disconnected = () => { setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); setBoardMatchConfirmed(false); setFullEraseConfirmed(false); };
     usb.addEventListener('disconnect', disconnected);
     return () => usb.removeEventListener('disconnect', disconnected);
   }, []);
@@ -280,6 +282,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
       if (flashing || diagnosticConsoleActive || operationRef.current || (builderRef.current && !fromBuilder)) return;
       const currentSeq = ++fileSeqRef.current;
       setBoardMatchConfirmed(false);
+      setFullEraseConfirmed(false);
       setParseError(null);
       setParsed(null);
       setFileName(null);
@@ -333,6 +336,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     pickerRef.current = true;
     setPickerBusy(true);
     setBoardMatchConfirmed(false);
+    setFullEraseConfirmed(false);
     setError(null);
     setDeviceLabel(null);
     setClaimedVid(null);
@@ -364,6 +368,10 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   async function onFlash() {
     if (builderRef.current || flashing || diagnosticConsoleActive || pickerRef.current || operationRef.current || loadingRef.current) return;
     if (!board || !flasher || !parsed || !propsOff || !backupTaken) return;
+    if (fullChipErase && !fullEraseConfirmed) {
+      setError("Confirm full chip erase risk and recovery preparation before flashing.");
+      return;
+    }
     if (diagnostic && !diagnosticAssumptions) return;
 
     if (validationError) {
@@ -411,6 +419,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
         expectedMcu: board.mcu,
         verify: true,
         leave: !diagnostic,
+        ...(fullChipErase ? { eraseMode: "full-chip" as const } : {}),
         ...(diagnostic ? { imageProfile: "f405-usb-diagnostic" as const } : {}),
       });
       if (isLive) {
@@ -435,6 +444,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
       operationRef.current = false;
       onBusyChange?.(false);
       if (isLive) { setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); }
+      setFullEraseConfirmed(false);
       setBusy(false);
     }
   }
@@ -466,6 +476,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     propsOff &&
     backupTaken &&
     boardMatchConfirmed &&
+    (!fullChipErase || fullEraseConfirmed) &&
     !flashing &&
     !pickerBusy &&
     !cdcConnectedLive &&
@@ -484,6 +495,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     !validationError &&
     propsOff &&
     backupTaken &&
+    (!fullChipErase || fullEraseConfirmed) &&
     !flashing &&
     demoMode &&
     mockUnderstood;
@@ -496,42 +508,46 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     ? "Confirm props removed & battery unplugged first"
     : !backupTaken
       ? "Confirm diff all backup taken and recovery method prepared"
-      : diagnostic && !diagnosticAssumptions
-        ? "Confirm the diagnostic MCU, clock and USB-only assumptions"
-      : !boardId
-        ? "Select an exact target board"
-        : fileLoading
-          ? "Loading firmware file…"
-          : !parsed
-            ? "Select a valid .hex file"
-            : validationError
-              ? validationError
-              : isLive && liveDisabledReason
-                ? liveDisabledReason
-                : isLive && cdcConnectedLive
-                  ? "Disconnect CDC connection before flashing in DFU"
-                  : isLive && !stDfuClaimed
-                    ? "Claim ST DFU device 0483:DF11 first"
-                    : isLive && !boardMatchConfirmed
-                      ? "Confirm exact board target match"
-                      : demoMode && !mockUnderstood
-                        ? "Confirm demo mock understanding"
-                        : "Start flash process";
+      : fullChipErase && !fullEraseConfirmed
+        ? "Confirm full chip erase risk and recovery preparation"
+        : diagnostic && !diagnosticAssumptions
+          ? "Confirm the diagnostic MCU, clock and USB-only assumptions"
+          : !boardId
+            ? "Select an exact target board"
+            : fileLoading
+              ? "Loading firmware file…"
+              : !parsed
+                ? "Select a valid .hex file"
+                : validationError
+                  ? validationError
+                  : isLive && liveDisabledReason
+                    ? liveDisabledReason
+                    : isLive && cdcConnectedLive
+                      ? "Disconnect CDC connection before flashing in DFU"
+                      : isLive && !stDfuClaimed
+                        ? "Claim ST DFU device 0483:DF11 first"
+                        : isLive && !boardMatchConfirmed
+                          ? "Confirm exact board target match"
+                          : demoMode && !mockUnderstood
+                            ? "Confirm demo mock understanding"
+                            : "Start flash process";
 
   return (
     <div className="panel flasher-page">
       <TargetCatalog />
       <div className="flasher-header">
         <h2>Firmware Flasher</h2>
-        <span className="muted">Sector erase + readback verification</span>
+        <span className="muted">{fullChipErase ? "Full main-flash erase" : "Sector erase"} + readback verification</span>
         <span className={`pill ${isLive ? "pill-live" : "pill-mock"}`}>
           {isLive ? (liveDisabledReason ? "live DFU unavailable" : "live WebUSB DFU") : "demo / mock"}
         </span>
       </div>
 
       <p className="muted">
-        Stepwise firmware flashing via ST ROM USB DFU (VID 0x0483 / PID 0xDF11).
-        Only sectors touched by the image are erased. Saved settings may persist, migrate or reset; back up first and verify them after reconnecting.
+        Stepwise firmware flashing via ST ROM USB DFU (VID 0x0483 / PID 0xDF11).{" "}
+        {fullChipErase
+          ? "Full chip erase clears all main flash sectors before programming and verified readback. All existing firmware and saved settings will be erased."
+          : "Only sectors touched by the image are erased. Saved settings may persist or reset. Incompatible settings require a fresh install using Full chip erase. Back up first and verify after reconnecting."}
       </p>
 
       {!FLASH_CAPABILITIES.supportsCliFlash && (
@@ -566,7 +582,10 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
       <section className="preflight" aria-label="Stage 1: Safety & Backup">
         <h3>Stage 1: Safety, Backup & Recovery Setup</h3>
         <p className="muted" style={{ marginTop: "0.25rem" }}>
-          Prepare recovery before proceeding. This is not a full-chip erase and settings are not guaranteed to reset or survive.
+          Prepare recovery before proceeding.{" "}
+          {fullChipErase
+            ? "Full main-flash erase will wipe all internal main flash sectors (firmware and saved settings) before programming and readback verification."
+            : "Sector erase only clears sectors touched by the image; settings are not guaranteed to reset or survive."}
         </p>
         <ul className="preflight-list">
           <li>
@@ -611,6 +630,48 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
             Saved any readable configuration (or accept that no backup is available) and confirmed independent recovery: required
           </label>
         </div>
+
+        <div className="row" style={{ marginTop: "0.35rem", alignItems: "center" }}>
+          <label
+            htmlFor="full-chip-erase"
+            style={{ display: "flex", gap: "0.5rem", color: "#e2e8f0" }}
+          >
+            <input
+              id="full-chip-erase"
+              type="checkbox"
+              checked={fullChipErase}
+              disabled={flashing || buildBusy || diagnosticConsoleActive}
+              onChange={(e) => {
+                setFullChipErase(e.target.checked);
+                setFullEraseConfirmed(false);
+              }}
+            />
+            Full chip erase (internal flash)
+          </label>
+        </div>
+
+        {fullChipErase && (
+          <div className="full-erase-details" style={{ marginTop: "0.4rem", marginLeft: "1.5rem" }}>
+            <p className="muted" style={{ fontSize: "0.85rem", margin: "0.25rem 0 0.4rem 0" }}>
+              Full chip erase targets internal main flash only: erase every sector, verify all flash is blank, then program and read back the HEX. Cancellation or failure cannot restore erased data; recover in DFU with the correct HEX. It does not affect OTP memory, option bytes, or external memory storage.
+            </p>
+            <div className="row" style={{ alignItems: "center" }}>
+              <label
+                htmlFor="full-erase-confirmed"
+                style={{ display: "flex", gap: "0.5rem", color: "#fde68a" }}
+              >
+                <input
+                  id="full-erase-confirmed"
+                  type="checkbox"
+                  checked={fullEraseConfirmed}
+                  disabled={flashing || buildBusy || diagnosticConsoleActive}
+                  onChange={(e) => setFullEraseConfirmed(e.target.checked)}
+                />
+                All firmware and saved settings will be erased. I have the matching HEX and a verified independent DFU recovery method.
+              </label>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Stage 2 */}

@@ -5,6 +5,7 @@
  * In-process mock flasher for CI / smoke (no USB).
  */
 
+import { planFullChipErases } from "./flash-sectors";
 import type { ParsedHex } from "./intel-hex";
 import { assertMcuGate, normalizeFirmware } from "./mcu-gate";
 import {
@@ -93,11 +94,16 @@ export class MockFlasher implements Flasher {
     this.cancelled = false;
     const startAddress = opts?.startAddress ?? DEFAULT_FLASH_BASE;
     const leave = opts?.leave !== false;
-    const verify = opts?.verify === true;
+    const verify = opts?.eraseMode === "full-chip" ? opts?.verify !== false : opts?.verify === true;
     const parsed = normalizeFirmware(firmware, startAddress);
 
     try {
       assertMcuGate(parsed, opts);
+      if (opts?.eraseMode !== undefined && opts.eraseMode !== "sectors" && opts.eraseMode !== "full-chip") throw new Error("Unsupported erase mode.");
+      if (opts?.eraseMode === "full-chip") {
+        planFullChipErases(opts.expectedMcu);
+        if (!verify) throw new Error("Full chip erase requires readback verification.");
+      }
     } catch (err) {
       this.emit({
         phase: "error",
@@ -126,7 +132,7 @@ export class MockFlasher implements Flasher {
       phase: "erasing",
       bytesWritten: 0,
       bytesTotal: total,
-      message: "[MOCK — no USB] erase",
+      message: opts?.eraseMode === "full-chip" ? "[MOCK, no USB] Simulating full internal-flash erase and blank verification; no hardware changed" : "[MOCK — no USB] erase",
     });
     await delay(this.tickMs);
     this.throwIfCancelled(0, total);

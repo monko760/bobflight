@@ -101,3 +101,58 @@ Debug: `chrome://device-log` after the failure.
 2. Per-page erase vs mass erase behavior on F745 ROM for large images.
 3. Optional upload-verify before leave (MVP may skip full UPLOAD compare).
 4. CDC identity after leave: rely on `status` `board:` — confirm exact strings for kakute_f7_hdv / tmotor_f7_v2.
+
+
+## Explicit full chip erase (internal main flash)
+
+Normal flashing still erases only sectors intersecting the firmware image. For a
+fresh configuration, select **Full chip erase (internal flash)** and separately
+acknowledge that all firmware and saved settings will be erased. The option is
+off by default and is not persisted. Changing the image (including same-name
+replacement), target, device, mode or profile invalidates the acknowledgment.
+Every completed or failed attempt consumes it.
+
+The protocol option is `eraseMode: "full-chip"`. A supported explicitly selected
+MCU and readback verification are required. Before any erase/program operation,
+the ST ROM DFU alternate-zero internal-flash descriptor must exactly match the
+selected F722 (512 KiB), F745 (1 MiB), or F405xG diagnostic (1 MiB) sector layout.
+Missing, malformed, inaccessible or mismatched geometry refuses the operation.
+Geometry is not exact board identity; the existing board/image and recovery
+acknowledgments remain required.
+
+The implementation erases EVERY main-flash sector using the existing AN3156
+addressed sector-erase command, rather than assuming availability of a separate
+mass-erase command. It then reads the entire selected main-flash range and
+requires every byte to be `0xff` before programming. This includes Matek's two
+configuration sectors outside the usual application image. The selected HEX is
+programmed and independently readback-verified afterward. OTP, option bytes,
+ROM bootloader, external SPI flash and SD storage are not erased.
+
+Any erase failure, nonblank byte, short read, mismatch or cancellation prevents
+completion and automatic application startup. Cancellation cannot undo erased
+sectors or interrupt an erase already accepted by ROM. Re-enter ROM DFU and
+retry with the exact supported board image; never claim a cancelled erase was
+rolled back. F405 diagnostic images still require cold USB restart, not a ROM
+jump. Demo mode performs no USB writes and claims no hardware erasure.
+
+### Matek fresh-install acceptance (props off, battery disconnected)
+
+1. Have the exact generated Matek F722-PX firmware HEX and verified independent
+   ROM DFU recovery available before enabling full erase. A firmware rebuild is
+   not required merely to use this configurator change.
+2. Complete all normal preflight/target/image/DFU checks, enable full erase,
+   acknowledge loss of settings, and flash. Require full blank verification and
+   programmed-image readback verification to complete without error.
+3. Reconnect and verify `version`, board identity, and `storage`. Before the first
+   save, an empty store normally reports `state: defaults`, `generation: 0`,
+   `last_error: empty`. `fresh_install_required` must no longer appear.
+4. Restore ONLY intentional current-schema settings, configure the actual board
+   mounting, and run `save`. Require `saved: flash verified` and then `storage`
+   reporting `state: saved`, `dirty: 0`, `last_error: none`.
+5. Reboot, reconnect and inspect `sensors` and `storage`. Configured and active
+   mounting must match the intended values. Verify physical roll/pitch directions
+   before calibration or motor testing. Do not import an incompatible old dump.
+
+This is a configurator-only change. It does not remove development arming gates,
+change failsafe/arming rules, establish flight readiness or prove hardware DFU
+behavior. Automated tests use simulated NOR flash and rendered UI fixtures.

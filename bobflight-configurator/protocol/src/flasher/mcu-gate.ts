@@ -51,6 +51,37 @@ export function assertMcuGate(
     validateF405DiagnosticImage(firmware);
   }
 
+  if (opts?.eraseMode === "full-chip") {
+    if (!expected || opts.verify === false) throw new Error("Full chip erase requires an explicit supported MCU and readback verification.");
+    // Full erase destroys even sectors outside the image. Validate the actual
+    // application vectors and programmed bytes before any USB write, not only
+    // UI selection or a filename. F405 has its stricter diagnostic gate above.
+    if (expected !== "F405") {
+      if (firmware.baseAddress !== DEFAULT_FLASH_BASE || firmware.bytes.length < 8 || !firmware.regions.length)
+        throw new Error("Full chip erase requires an application vector table at 0x08000000.");
+      let previous = DEFAULT_FLASH_BASE;
+      for (const r of [...firmware.regions].sort((a,b) => a.address-b.address)) {
+        const end = r.address + r.data.length;
+        if (!Number.isSafeInteger(r.address) || !Number.isSafeInteger(end) || !r.data.length ||
+            r.address < previous || end > DEFAULT_FLASH_BASE + MCU_FLASH_SIZE[expected] ||
+            end > DEFAULT_FLASH_BASE + firmware.bytes.length)
+          throw new Error("Full erase application ranges overlap, are empty, or exceed selected flash.");
+        for (let i = 0; i < r.data.length; i++)
+          if (r.data[i] !== firmware.bytes[r.address - DEFAULT_FLASH_BASE + i])
+            throw new Error("Full erase application bytes disagree with programmed regions.");
+        previous = end;
+      }
+      const mapped = (address: number) => firmware.regions.some(r => address >= r.address && address < r.address + r.data.length);
+      for (let i=0;i<8;i++) if (!mapped(DEFAULT_FLASH_BASE+i)) throw new Error("Full erase application vectors contain missing bytes.");
+      const vectors = new DataView(firmware.bytes.buffer,firmware.bytes.byteOffset,firmware.bytes.byteLength);
+      const stack = vectors.getUint32(0,true), reset = vectors.getUint32(4,true);
+      if (stack !== 0x20010000 || !(reset & 1) || !mapped((reset & ~1) >>> 0))
+        throw new Error("Full erase requires valid BobFlight F7 stack and mapped Thumb reset vectors.");
+      if (firmware.entryAddress !== undefined && (!Number.isSafeInteger(firmware.entryAddress) || !mapped((firmware.entryAddress & ~1) >>> 0)))
+        throw new Error("Full erase entry address is outside programmed application data.");
+    }
+  }
+
   const mcu = expected ?? tagged;
   if (!mcu) return;
 
