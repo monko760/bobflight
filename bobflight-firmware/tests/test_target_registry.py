@@ -82,13 +82,17 @@ class RegistryTests(unittest.TestCase):
     def test_host_only_cannot_claim_status(self):
         self.sub('boards/dummy.yaml','status: stub','status: bf-derived');self.bad()
     def test_new_definition_is_one_file(self):
-        raw=(self.root/'boards/tmotor_f7_v2.yaml').read_text().replace('board_id: tmotor_f7_v2','board_id: synthetic_fixture')
+        raw=(self.root/'boards/tmotor_f7_v2.yaml').read_text().replace('board_id: tmotor_f7_v2','board_id: synthetic_fixture').replace('display_name: ','display_name: Synthetic ',1)
         (self.root/'boards/synthetic_fixture.yaml').write_text(raw)
         r=TargetRegistry(self.root)
         self.assertEqual(r.resolve('synthetic_fixture')['board']['id'],'synthetic_fixture')
         self.assertEqual(r.resolve('synthetic_fixture')['ir_path'],'boards/synthetic_fixture.yaml')
+    def test_duplicate_display_name_refused(self):
+        raw=(self.root/'boards/tmotor_f7_v2.yaml').read_text().replace('board_id: tmotor_f7_v2','board_id: twin_fixture')
+        (self.root/'boards/twin_fixture.yaml').write_text(raw)
+        with self.assertRaisesRegex(Exception,'duplicate display_name'):TargetRegistry(self.root)
     def test_planned_board_hardware_refused(self):
-        raw=(self.root/'boards/tmotor_f7_v2.yaml').read_text().replace('board_id: tmotor_f7_v2','board_id: planned_fixture').replace('target: stm32f722','target: stm32f405').replace('part: STM32F722','part: STM32F405')
+        raw=(self.root/'boards/tmotor_f7_v2.yaml').read_text().replace('board_id: tmotor_f7_v2','board_id: planned_fixture').replace('display_name: ','display_name: Planned ',1).replace('target: stm32f722','target: stm32f405').replace('part: STM32F722','part: STM32F405')
         (self.root/'boards/planned_fixture.yaml').write_text(raw)
         r=TargetRegistry(self.root)
         with self.assertRaises(TargetRegistryError):r.resolve('planned_fixture',True)

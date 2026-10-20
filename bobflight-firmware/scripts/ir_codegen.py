@@ -161,6 +161,7 @@ def render(src: Path, ir: dict) -> str:
         "#define BOARD_GENERATED_UART_TABLE" + "".join(
             f" \\\n    {{{u['uart']}u, {_pin_pack(u['tx'])}, {_pin_pack(u['rx'])}}}," for u in uarts),
         UART_END,
+        f"#define BOARD_GENERATED_FLASH_KIB {int(ir.get('flash_kib') or 0)}u /* boards/<id>.yaml mcu.flash_kib; 0 = not checked */",
         "",
         IDENT_BEGIN,
         f'#define BOARD_GENERATED_IDENT_ID     "{ident[0]}"',
@@ -179,6 +180,7 @@ def main() -> int:
     ap.add_argument("ir_yaml", type=Path, help="Path to boards/<board_id>.yaml")
     ap.add_argument("-o", "--output", type=Path, required=True)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--check", action="store_true", help="fail (rc 3) if --output differs from the generated text")
     args = ap.parse_args()
 
     if not args.ir_yaml.is_file():
@@ -191,6 +193,15 @@ def main() -> int:
         print(f"error: {args.ir_yaml}: {e}", file=sys.stderr)
         return 2
     text = render(args.ir_yaml, ir)
+
+    if args.check:
+        current = args.output.read_text(encoding="utf-8") if args.output.is_file() else None
+        if current != text:
+            print(f"error: {args.output} is stale; regenerate with scripts/ir_codegen.py {args.ir_yaml} -o {args.output}",
+                  file=sys.stderr)
+            return 3
+        print(f"{args.output} is up to date")
+        return 0
 
     if args.dry_run:
         sys.stdout.write(text)

@@ -50,6 +50,7 @@ class TargetRegistry:
         spec.loader.exec_module(bd)
         self.board_def = bd
         files = bd.board_files(self.root)
+        self._defs = []
         require(bool(files), 'empty boards registry')
         boards, diags = {}, {}
         for p in files:
@@ -57,6 +58,7 @@ class TargetRegistry:
             rel = p.relative_to(self.root).as_posix()
             self.path(rel)
             d = bd.load(p)
+            self._defs.append(d)
             require(d['board_id'] not in boards and d['board_id'] not in diags, 'duplicate identity')
             cfg = d['configurator']
             if d['support'] == 'diagnostic':
@@ -70,6 +72,7 @@ class TargetRegistry:
                     'support': d['support'], 'capabilities': dict(d['capabilities']),
                     'display_name': d['display_name'], 'build_label': cfg.get('build_label')}
                 require(d['mcu']['part'] == self.mcus.get(d['mcu']['target'], {}).get('part'), 'IR MCU mismatch')
+        bd.check_set(self._defs)
         ordered = sorted(diags.values(), key=lambda p: (p.pop('_order'), p['id']))
         return boards, {p['id']: p for p in ordered}
 
@@ -124,7 +127,8 @@ def main():
         else:
             data=r.resolve(args.board,args.hardware)
             if args.cmake:
-                fields={'BOBFLIGHT_IR_RELATIVE':data['ir_path'],'BOBFLIGHT_EXPECTED_MCU':data['mcu']['part'],'BOBFLIGHT_EXPECTED_TOOLCHAIN':data['toolchain'],'BOBFLIGHT_MCU_STATUS':data['mcu']['status'],'BOBFLIGHT_BOARD_SUPPORT':data['board']['support']}
+                fields={'BOBFLIGHT_IR_RELATIVE':data['ir_path'],'BOBFLIGHT_EXPECTED_MCU':data['mcu']['part'],'BOBFLIGHT_EXPECTED_TOOLCHAIN':data['toolchain'],'BOBFLIGHT_MCU_STATUS':data['mcu']['status'],'BOBFLIGHT_BOARD_SUPPORT':data['board']['support'],
+                        'BOBFLIGHT_BOARD_LINKER_SCRIPT':r.board_def.load(r.root/data['ir_path'])['mcu'].get('linker_script') or ''}
                 for key,val in fields.items(): print(f'set({key} "{val}")')
                 return 0
         print(json.dumps(data,indent=2));return 0

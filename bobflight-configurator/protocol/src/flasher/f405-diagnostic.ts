@@ -1,7 +1,8 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import type { ParsedHex } from './intel-hex';
+import { GENERATED_DIAGNOSTIC_IMAGE } from './board-targets.generated';
 export const F405_USB_DIAGNOSTIC_PROFILE = {
-  id: 'f405-usb-diagnostic', mcu: 'F405', flashKiB: 1024, hseHz: 8000000,
+  ...GENERATED_DIAGNOSTIC_IMAGE, // id, mcu, flashKiB, hseHz from boards/custom_f405xg_usb.yaml
   vddMv: 3300, usbPins: ['PA11','PA12'], power: 'usb-only',
   applicationEnd: 0x080c0000, stack: 0x20020000,
   motor: null, sensor: null, receiver: null, uart: null, settingsStorage: null,

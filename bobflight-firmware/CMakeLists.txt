@@ -754,7 +754,6 @@ else()
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_NOR_PROBE=1 BOBFLIGHT_BARO=1)
     target_sources(bobflight.elf PRIVATE src/hal/stm32f7/i2c_reg.c src/drivers/bmp280.c src/drivers/barometer.c)
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_CONFIG_FLASH_F722=1)
-    set(BF_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/stm32f722_config.ld")
   endif()
   # Kakute has an implemented motor backend; all normal runtime guards remain.
   if(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv")
@@ -772,7 +771,11 @@ else()
   if(DEFINED BOBFLIGHT_TARGET_MCU)
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_TARGET_MCU=${BOBFLIGHT_TARGET_MCU})
   endif()
-  set(_BF_LD_SCRIPT "${BF_LINKER_SCRIPT}")
+  # boards/<id>.yaml mcu.linker_script is the only linker-script source for firmware images.
+  if(NOT BOBFLIGHT_BOARD_LINKER_SCRIPT)
+    message(FATAL_ERROR "boards/${BOBFLIGHT_BOARD}.yaml must set mcu.linker_script for a hardware build")
+  endif()
+  set(_BF_LD_SCRIPT "${CMAKE_SOURCE_DIR}/${BOBFLIGHT_BOARD_LINKER_SCRIPT}")
   message(STATUS "BobFlight: linker ${_BF_LD_SCRIPT} MCU=${BOBFLIGHT_TARGET_MCU}")
   target_link_options(bobflight.elf PRIVATE
     -nostartfiles

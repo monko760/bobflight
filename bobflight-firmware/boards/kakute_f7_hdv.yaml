@@ -19,7 +19,7 @@ mcu:
   target: stm32f745
   part: STM32F745
   hse_mhz: 8
-  flash_kib: absent          # device size not checked by firmware; image layout is the linker script
+  flash_kib: absent          # unverified (F745 ships as 512 or 1024 KiB): not checked, never guessed
   linker_script: cmake/stm32f745.ld
 usb:
   cdc: true

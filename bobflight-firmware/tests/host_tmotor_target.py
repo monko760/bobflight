@@ -19,7 +19,10 @@ assert 'if(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv" AND BOBFLIGHT_TARGET_MCU STR
 clock=(root/'src/hal/stm32f7/hal_clock.c').read_text();assert '#if !defined(BOBFLIGHT_TARGET_TMOTORF7V2) && !defined(BOBFLIGHT_TARGET_MATEKF722PX)\n    clock_pll_off();\n    clock_pwr_scale1_od(true);' in clock
 startup=(root/'src/hal/stm32f7/startup_stm32f722.c').read_text();assert '#define EARLY_LED_GPIO_BASE 0x40020800u' in startup;assert '#define EARLY_LED_PIN 14u' in startup
 assert '(volatile uint32_t *)0x40020014u' not in startup
-board=(root/'src/board/ir_load.c').read_text();assert '0x452u' in board and '0x1FF07A22u==512u' in board
+board=(root/'src/board/ir_load.c').read_text();assert '0x452u' in board and '0x1FF07A22u==BOARD_GENERATED_FLASH_KIB' in board
+import subprocess as _sp,sys as _sys  # FLASHSIZE gate value is generated from boards/tmotor_f7_v2.yaml (512 KiB, RM0431 F722xE)
+_hdr=_sp.run([_sys.executable,str(root/'scripts/ir_codegen.py'),str(root/'boards/tmotor_f7_v2.yaml'),'-o','-','--dry-run'],capture_output=True,text=True,check=True).stdout
+assert '#define BOARD_GENERATED_FLASH_KIB 512u ' in _hdr
 probe=(root/'src/drivers/gyro.c').read_text();assert 'if(id!=0x68u)return false;' in probe
 link=(root/'cmake/stm32f722.ld').read_text();assert 'LENGTH = 512K' in link and 'LENGTH = 64K' in link and 'LENGTH = 192K' in link and '> DMA_RAM' in link
 # Execute the actual board loader with the generated IR (host stubs, no MMIO).

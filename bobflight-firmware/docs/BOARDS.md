@@ -44,7 +44,7 @@ Pins are `P<port><0-15>` (e.g. `PE4`) or `absent`. Unknown keys are rejected.
 | `support` | `host-only`, `sensor-only`, `development`, or `diagnostic` (F4 USB-only image profile, never a CMake target) |
 | `capabilities` | `{motor_output, usb_cdc, sd_logging}` booleans |
 | `configurator` | `image_profile` (`main` / `f405-usb-diagnostic`), `build_label` (present ⇒ the local HEX builder offers it); diagnostic only: `artifact_name`, `mcu_display`, `support_label`, `menu_order`, `custom {mcu, flash_kib, hse_hz}` |
-| `mcu` | `target` (id in `targets/mcus`), `part`, `hse_mhz`, `flash_kib`, `linker_script` |
+| `mcu` | `target` (id in `targets/mcus`), `part`, `hse_mhz` (4..26), `flash_kib` (generated as `BOARD_GENERATED_FLASH_KIB`, checked at boot where the board has a FLASHSIZE gate; `absent` = unverified, not checked), `linker_script` (the only linker-script source: CMake and the F405 diagnostic tool read it) |
 | `usb` | `cdc`, `dm`, `dp` |
 | `gyro` | `chip`, `spi_bus`, `cs`, `exti`, `sck`, `miso`, `mosi`, `orientation` (`CW0_DEG`, `CW90_DEG`, `CW180_DEG`, `CW270_DEG`, `CW180_DEG_FLIP`) |
 | `baro` | `chip`, `i2c_bus`, `scl`, `sda` |
@@ -78,3 +78,13 @@ path comment and the new UART block; main's hand-written UART tables and the new
 generated table give identical `board_init()` state and `board_select_rx_uart(0..255)`
 results; and the registry/catalog matches apart from the `ir` path and the new
 `build_label` / `diagnostic_profiles` data.
+
+## Validation rules (scripts/board_def.py)
+
+- Pins: `P[A-K](0..15)`, no leading zeros, only ports the MCU has (largest package; the schema has no package field, so package-only limits are not checked).
+- Buses and timers: SPI/I2C/UART numbers and timer channels must exist on the part (per-part tables from RM0090/RM0431/RM0385). MCUs without a verified table (F411, H743) cannot carry pins yet.
+- DMA: `DMA1_S0`..`DMA2_S7`, each stream once; leave `absent` unless verified.
+- Allowlists: gyro `MPU6000`/`ICM42688`/`BMI270`, baro `BMP280`, receiver `CRSF` (the drivers in src/drivers).
+- Capabilities: `motor_output` needs motors, `sd_logging` needs `sd`, `usb.cdc` equals `capabilities.usb_cdc` (host-only exempt).
+- Strings: no empty or quoted `absent`, no quotes/backslashes, max 200 chars. YAML 1.1 traps (`010`, `1:30`, `NO`, `On`, `8.0`) are errors.
+- `menu_order` only on diagnostic profiles; display names unique; only `<board_id>.yaml` files (and README.md) in boards/.
