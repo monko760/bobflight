@@ -464,6 +464,27 @@ class Schema(unittest.TestCase):
             self.assertEqual(r.returncode, 2)
             self.assertIn("boards/x.yml: only <board_id>.yaml", r.stderr)
 
+    def test_qa_nits(self):
+        self.bad(KAKUTE.replace("linker_script: cmake/stm32f745.ld", "linker_script: cmake/stm32f722.ld"),
+                 "linker_script 'cmake/stm32f722.ld' is not for stm32f745")
+        ml = (ROOT / "boards/mltempf4.yaml").read_text()
+        self.bad(ml.replace("linker_script: cmake/components/f405xg.ld", "linker_script: cmake/stm32f745.ld"),
+                 "is not for stm32f405", "mltempf4")
+        for kib, ok in ((15, False), (16, True), (2048, True), (2049, False), (0, False)):
+            raw = MATEK.replace("flash_kib: 512", "flash_kib: %d" % kib, 1)
+            with self.subTest(kib=kib):
+                full(raw, "matek_f722_px") if ok else self.bad(raw, r"mcu\.flash_kib %d outside 16\.\.2048" % kib, "matek_f722_px")
+        cu = (ROOT / "boards/custom_f405xg_usb.yaml").read_text()
+        self.bad(cu.replace("flash_kib: 1024,", "flash_kib: 99999,"), r"configurator\.custom\.flash_kib 99999 outside", "custom_f405xg_usb")
+        for digits in ("\u0668", "\uff18", "\u0968"):  # Arabic-Indic, fullwidth, Devanagari eight
+            with self.subTest(digits=digits):
+                self.bad(KAKUTE.replace("hse_mhz: 8", "hse_mhz: " + digits), "non-ASCII scalar")
+        self.bad(KAKUTE.replace("display_name: Kakute F7 HDV", "display_name: Kakute F7 H\u0110V"), "non-ASCII scalar")
+        dn = "display_name: Kakute F7 HDV"
+        self.bad(KAKUTE.replace(dn, "display_name: Kakute's F7"), "unsupported scalar")
+        self.bad(KAKUTE.replace(dn, "display_name: \"Kakute's F7\""), "quotes/backslashes not allowed")
+        self.bad(KAKUTE.replace(dn, "display_name: 'Kakute''s F7'"), "quotes/backslashes not allowed")
+
     def test_absent_never_becomes_a_pin(self):
         d = board_def.to_ir(board_def.load(ROOT / "boards/custom_f405xg_usb.yaml"))
         for k in ("cs", "exti", "tx", "rx", "led0", "vbat", "current", "sck", "miso", "mosi"):

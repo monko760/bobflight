@@ -1,7 +1,15 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import { catalog, diagnosticProfiles } from '../targets/catalog';
 type CustomLimits = { mcu: string; flash_kib: number; hse_hz: number };
-const catalogCustom = diagnosticProfiles.find(p => p.custom)?.custom ?? null;
+const customDiag = diagnosticProfiles.find(p => p.custom) ?? null;
+const catalogCustom = customDiag?.custom ?? null;
+/** "STM32F405xG, 1 MiB flash, 8 MHz HSE" from the custom profile's boards/<id>.yaml. */
+export function diagnosticAssumptionText(p: { mcu_display: string; custom: CustomLimits | null } | null = customDiag): string {
+  if (!p || !p.custom) return "Diagnostic profile limits unavailable";
+  const kib = p.custom.flash_kib;
+  const flash = kib % 1024 === 0 ? `${kib / 1024} MiB` : `${kib} KiB`;
+  return `${p.mcu_display}, ${flash} flash, ${p.custom.hse_hz / 1000000} MHz HSE`;
+}
 /** Limits come from the custom profile's boards/<id>.yaml (configurator.custom). */
 export function customProfileProblem(custom: boolean,mcu: string,flash: string,hse: string,limits: CustomLimits|null = catalogCustom): string|null {
   if(!custom)return null;
@@ -34,7 +42,7 @@ export function DiagnosticProfileControls(p:Props) {
       </select>
       {problem&&<p role="status">{problem}</p>}
     </>}
-    <p>STM32F405xG, 1 MiB flash, 8 MHz HSE, 3.3 V. USB on PA11/PA12; PA9 unchanged. No motors, sensors, configuration writes or software bootloader command. Use USB power only with no attached peripherals. Motolab values are reference assumptions, not automatic board detection.</p>
+    <p>{diagnosticAssumptionText()}, 3.3 V. USB on PA11/PA12; PA9 unchanged. No motors, sensors, configuration writes or software bootloader command. Use USB power only with no attached peripherals. Motolab values are reference assumptions, not automatic board detection.</p>
     <label><input id="diagnostic-assumptions" type="checkbox" checked={p.confirmed} disabled={p.disabled||!!problem} onChange={e=>p.onConfirm(e.target.checked)}/> I confirm these MCU/flash/crystal/USB-routing assumptions match my board and independent BOOT recovery works.</label>
     <p>The flasher checks embedded diagnostic identity and the DFU flash layout before erase. Layout is not exact chip identity. Build a matching diagnostic below or reuse an existing matching HEX. Other MCU/crystal combinations remain unavailable until their backends are implemented.</p>
   </div>;

@@ -75,10 +75,10 @@ global.window = { isSecureContext:true };
 async function run(image, fault='', options={}) {
   const device = new Device(fault);
   if(options.rawDescriptor)device.descriptors=require('./fixtures/dfu-descriptors.cjs').device(options.rawDescriptor);
-  if(options.expectedMcu==='F405') {
-    device.f405=true;
-    device.configuration.interfaces[0].alternates[0].interfaceName='layout' in options ? options.layout : '@Internal Flash /0x08000000/04*016Kg,01*064Kg,07*128Kg';
-  }
+  const defaultLayout={F405:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,07*128Kg',F722:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg',F745:'@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg'};
+  const mcu=options.expectedMcu??'F745';
+  if(mcu==='F405')device.f405=true;
+  device.configuration.interfaces[0].alternates[0].interfaceName='layout' in options ? options.layout : defaultLayout[mcu];
   Object.defineProperty(global,'navigator',{configurable:true,value:{usb:{async requestDevice(){return device;}}}});
   const flasher = new WebUsbDfuFlasher(); const phases=[];
   if(fault==='cancel-descriptor') {
@@ -165,6 +165,34 @@ function parsed(regions) { return {baseAddress:regions[0].address,regions,bytes:
     const result = await run(real); assert.ifError(result.error);
     assert.deepEqual(result.device.erases,[BASE,BASE+32768,BASE+65536]);
     console.log('Exact supplied HEX: all data bytes written and verified in simulated flash.');
+  }
+  {
+    // F7: the device's DFU flash-layout descriptor decides size and erase sectors (Config Lead blocker).
+    const big=parsed([region(BASE,600*1024)]);
+    const small=await run(big,'',{layout:'@Internal Flash /0x08000000/04*032Kg,01*128Kg,01*256Kg'});
+    assert.match(small.error?.message??'',/does not fit this device: image ends at 0x80960000? but DFU reports 512 KiB/);
+    assert.equal(small.device.erases.length,0);assert.equal(small.device.writes,0);assert.equal(small.device.outRequests||0,0);
+    assert.equal(small.phases.at(-1).phase,'error');assert.equal(small.phases.at(-1).message,small.error.message);
+    const full=await run(big,'',{layout:'@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg'});
+    assert.ifError(full.error);
+    assert.deepEqual(full.device.erases,[BASE,BASE+32768,BASE+65536,BASE+98304,BASE+131072,BASE+262144,BASE+524288]);
+    // A descriptor with different sector boundaries is followed, not the static table.
+    const odd=await run(parsed([region(BASE+65536,16)]),'',{layout:'@Internal Flash /0x08000000/02*064Kg,01*128Kg,03*256Kg'});
+    assert.ifError(odd.error);assert.deepEqual(odd.device.erases,[BASE+65536]);
+    for(const layout of ['@Internal Flash /0x08000000/04*032Kg,banana','@Internal Flash /0x08004000/04*032Kg,01*128Kg,03*256Kg',
+                         '@Option Bytes /0x1FFF0000/01*032 e','@Internal Flash /0x08000000/00*032Kg']) {
+      const bad=await run(image,'',{layout});
+      assert.match(bad.error?.message??'',/DFU flash-layout descriptor (not understood|has an invalid sector count).*No erase\/program issued/,layout);
+      assert.ok(bad.error.message.includes(layout.trim())||/invalid sector count/.test(bad.error.message));
+      assert.equal(bad.device.erases.length,0);assert.equal(bad.device.writes,0);
+    }
+    for(const layout of [null,'','  ']) {
+      const missing=await run(image,'',{layout,rawDescriptor:{layout:''}});
+      assert.ok(missing.error,'missing descriptor must refuse');assert.equal(missing.device.erases.length,0);assert.equal(missing.device.writes,0);
+    }
+    const missing2=await run(image,'',{layout:null,rawDescriptor:{stall:true}});
+    assert.ok(missing2.error);assert.equal(missing2.device.erases.length,0);
+    console.log('PASS F7 DFU layout: 512 KiB device refuses 600 KiB (0 erase/0 write), 1 MiB erases descriptor sectors, malformed/missing refused before erase.');
   }
   console.log('PASS: sector coverage, deduplication, F722/F745 boundaries, stale-error recovery, programming errors, short transfers, readback mismatch, cancellation, DFU state transitions, leave errors, and address bounds.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

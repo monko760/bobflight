@@ -75,3 +75,21 @@ import {mcuHintFromFilename,boardNameHints} from '../src/flasher/intelHex';
   assert.equal(mcuHintFromFilename('random.hex'),undefined);
   console.log('PASS filename hints derived from the catalog');
 }
+{
+  // Hint uniqueness: a first word shared by two boards gives no hint (K7d), a unique one does.
+  const mcus=[{id:'a',part:'STM32F745'},{id:'b',part:'STM32F722'}];
+  const cat={mcus,boards:[{id:'acme_f7_one',mcu:'a',support:'development'},{id:'acme_f7_two',mcu:'b',support:'development'},
+    {id:'zeta_board',mcu:'b',support:'sensor-only'},{id:'hostonly_x',mcu:'a',support:'host-only'},{id:'abc_x',mcu:'a',support:'development'}]};
+  assert.deepEqual(boardNameHints(cat),[['zeta','F722']]);
+  console.log('PASS filename hints: shared first word, short word and host-only boards give no hint');
+}
+import {diagnosticAssumptionText} from '../src/flasher/DiagnosticProfileControls';
+import {DiagnosticProfileControls} from '../src/flasher/DiagnosticProfileControls';
+{
+  assert.equal(diagnosticAssumptionText(),'STM32F405xG, 1 MiB flash, 8 MHz HSE');
+  assert.equal(diagnosticAssumptionText({mcu_display:'STM32F722xE',custom:{mcu:'STM32F722',flash_kib:512,hse_hz:12000000}}),'STM32F722xE, 512 KiB flash, 12 MHz HSE');
+  const noop=()=>{};
+  const html=renderToStaticMarkup(<DiagnosticProfileControls custom={false} mcu="" flash="" hse="" confirmed={false} disabled={false} onMcu={noop} onFlash={noop} onHse={noop} onConfirm={noop}/>);
+  assert(html.includes('STM32F405xG, 1 MiB flash, 8 MHz HSE, 3.3 V.'));
+  console.log('PASS diagnostic assumptions text generated from the custom profile YAML');
+}

@@ -1,5 +1,6 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import type { ParsedHex } from './intel-hex';
+import { parseDfuFlashLayout } from './flash-sectors';
 import { GENERATED_DIAGNOSTIC_IMAGE } from './board-targets.generated';
 export const F405_USB_DIAGNOSTIC_PROFILE = {
   ...GENERATED_DIAGNOSTIC_IMAGE, // id, mcu, flashKiB, hseHz from boards/custom_f405xg_usb.yaml
@@ -47,15 +48,8 @@ export function validateF405DiagnosticImage(image: ParsedHex): void {
 }
 /** AN3156 DfuSe internal-flash descriptor. Geometry is not exact chip identity. */
 export function assertF405DfuLayout(name: string | null | undefined): void {
-  const match=/^\s*@Internal Flash\s*\/\s*0x08000000\s*\/\s*([^/]+)\s*$/i.exec(name??'');
-  if(!match)throw new Error('Cannot verify F405xG DFU internal-flash layout. No erase/program issued.');
-  const actual:number[]=[];
-  for(const group of match[1].split(',')) {
-    const part=/^\s*(\d{1,3})\s*\*\s*(\d{1,4})\s*K\s*g\s*$/i.exec(group);
-    if(!part)throw new Error('Unsupported F405 DFU layout descriptor. No erase/program issued.');
-    const count=Number(part[1]),size=Number(part[2]);
-    if(!count||count>12||!size||actual.length+count>12)throw new Error('Invalid F405 DFU sector count.');
-    for(let i=0;i<count;i++)actual.push(size);
-  }
+  let actual: number[];
+  try { actual=parseDfuFlashLayout(name).sizesKiB; } catch { throw new Error('Cannot verify F405xG DFU internal-flash layout. No erase/program issued.'); }
+  if(actual.length>12)throw new Error('Invalid F405 DFU sector count.');
   if(actual.join(',')!=='16,16,16,16,64,128,128,128,128,128,128,128')throw new Error('DFU geometry is not the selected 1 MiB F405xG layout. No erase/program issued.');
 }
