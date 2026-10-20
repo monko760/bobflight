@@ -155,6 +155,11 @@ async function prepare() {
   assert(!inputById('full-erase-confirmed').checked,'success consumes erase consent');assert(gate,'post-flash recovery checks still required');
   await click(buttonByText('Select DFU device'));await check(inputById('board-match-confirmed'),true);await check(inputById('full-erase-confirmed'),true);
   scenario.flash=async()=>{throw new Error('test erase failure');};await click(buttonByText('Flash'));assert(await waitFor(()=>!busy));
+  {
+    // The refusal shown is exactly the thrown reason: never generic text (K8k), never swallowed (S6).
+    const shown=container.findAll((e)=>e.getAttribute('class')==='fail').map(visibleText);
+    assert.deepEqual(shown,['test erase failure'],'displayed refusal equals the thrown message');
+  }
   assert(!inputById('full-erase-confirmed').checked,'failure consumes erase consent');assert(gate);
   await click(buttonByText('Select DFU device'));await check(inputById('full-erase-confirmed'),true);
   flushSync(()=>usbEvents.dispatchEvent(new Event('disconnect')));await sleep(20);

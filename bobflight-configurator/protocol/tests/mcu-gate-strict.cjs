@@ -21,3 +21,14 @@ assert.throws(()=>assertMcuGate(sized(4,base+512*1024),{expectedMcu:'F722'}),/ex
 assert.doesNotThrow(()=>assertMcuGate(sized(1024*1024),{expectedMcu:'F745'}));
 assert.throws(()=>assertMcuGate(sized(1024*1024+4),{expectedMcu:'F745'}),/exceeds F745 flash/);
 console.log('PASS flash-size gate: F722 512 KiB and F745 1 MiB limits');
+
+// Full-erase start-vector gate (S8b): bad initial SP or an even (non-Thumb) reset vector refuses.
+{
+  const vec=(sp,reset)=>{const d=new Uint8Array(64);const v=new DataView(d.buffer);v.setUint32(0,sp,true);v.setUint32(4,reset,true);return {baseAddress:base,bytes:d,regions:[{address:base,data:d}]};};
+  const opts={expectedMcu:'F722',eraseMode:'full-chip',verify:true};
+  assert.doesNotThrow(()=>assertMcuGate(vec(0x20010000,base+9),opts));
+  assert.throws(()=>assertMcuGate(vec(0x20020000,base+9),opts),/Full erase requires valid BobFlight F7 stack and mapped Thumb reset vectors/);
+  assert.throws(()=>assertMcuGate(vec(0x20010000,base+8),opts),/Full erase requires valid BobFlight F7 stack and mapped Thumb reset vectors/);
+  assert.throws(()=>assertMcuGate(vec(0x20010000,base+0x1001),opts),/Full erase requires valid BobFlight F7 stack and mapped Thumb reset vectors/);
+  console.log('PASS full-erase start-vector gate: bad SP, even reset and unmapped reset refused');
+}
