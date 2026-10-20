@@ -6,11 +6,22 @@ import unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
-from ir_codegen import parse_ir
+from board_def import parse_yaml, validate, to_ir
+BASE=(ROOT/'boards/tmotor_f7_v2.yaml').read_text()
+DUMMY=(ROOT/'boards/dummy.yaml').read_text()
 
 class OrientationIR(unittest.TestCase):
     def parse(self, extra, status='ready'):
-        return parse_ir('status: '+status+'\nboard_id: synthetic\nfamily: STM32F722\n'+extra,'synthetic')
+        """extra is `gyro_align: X` (old spelling) mapped to gyro.orientation; '' drops it."""
+        if status=='stub':
+            raw=DUMMY
+        else:
+            raw=BASE.replace('status: bf-derived','status: '+status)
+            line=extra.strip().replace('gyro_align:','orientation:')
+            raw=raw.replace('  orientation: CW0_DEG\n',('  '+line+'\n') if line else '')
+            if '\n' in extra.strip():
+                raw=raw.replace('  orientation:','  orientation: CW0_DEG\n  orientation:',1)
+        return to_ir(validate(parse_yaml(raw)))
     def test_four_rotations(self):
         for name in ('CW0_DEG','CW90_DEG','CW180_DEG','CW270_DEG','CW180_DEG_FLIP'):
             with self.subTest(name=name):self.assertEqual(self.parse('gyro_align: '+name+'\n')['align'],name)

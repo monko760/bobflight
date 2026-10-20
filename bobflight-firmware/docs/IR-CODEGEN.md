@@ -1,6 +1,6 @@
 # IR verify → codegen flow
 
-Pins enter firmware **only** through owned board IR. No Betaflight `config.h`.
+Pins enter firmware **only** through owned board definitions (`boards/<board_id>.yaml`, see [BOARDS.md](BOARDS.md)). No Betaflight `config.h`.
 No invented T-Motor MCU pins.
 
 ```
@@ -45,10 +45,7 @@ picks the selected board. Checked-in `src/board/pins_generated.h` remains the
 IR YAML resolution:
 
 - `dummy` → `boards/dummy.yaml`
-- `tmotor_f7_v2` → `boards/tmotor-ir/tmotor_f7_v2.yaml` if present, else
-  `/workspace/board-defs/tmotor/tmotor_f7_v2.yaml`
-- `kakute_f7_hdv` → `boards/holybro-ir/kakute_f7_hdv.yaml` if present, else
-  `/workspace/board-defs/holybro/kakute_f7_hdv.yaml`
+- every board → `boards/<board_id>.yaml` (no out-of-tree fallback)
 
 Manual / dry-run:
 

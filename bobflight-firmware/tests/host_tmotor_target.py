@@ -5,7 +5,7 @@ import importlib.util,re,subprocess,sys,tempfile
 from pathlib import Path
 root=Path(sys.argv[1]).resolve()
 spec=importlib.util.spec_from_file_location('ir',root/'scripts/ir_codegen.py');ir=importlib.util.module_from_spec(spec);spec.loader.exec_module(ir)
-p=root/'boards/tmotor-ir/tmotor_f7_v2.yaml';data=ir.parse_ir(p.read_text(),p.stem);header=ir.render(p,data)
+p=root/'boards/tmotor_f7_v2.yaml';data=ir.load_board(p);header=ir.render(p,data)
 for expected in ['"tmotor_f7_v2"','"STM32F722"','BOARD_GENERATED_HSE_MHZ      8u','BOARD_GENERATED_GYRO_SPI     1u','BOARD_GENERATED_GYRO_CS      HAL_PIN_PACK(0u, 4u)','BOARD_GENERATED_GYRO_EXTI    HAL_PIN_PACK(2u, 4u)','BOARD_GENERATED_RX_UART      2u','BOARD_GENERATED_LED0_PIN    HAL_PIN_PACK(2u, 14u)','BOARD_GENERATED_IR_VERIFIED  0']:
  assert expected in header,expected
 # Pin facts are zero-based GPIO numbers. Human motor labels and AUX are one-based.

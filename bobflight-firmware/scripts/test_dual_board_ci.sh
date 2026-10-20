@@ -30,14 +30,8 @@ CMAKE_BOARD_SWITCH=0
 SELECTION_MODE="codegen"
 
 IR_DUMMY="$ROOT/boards/dummy.yaml"
-IR_V2="$ROOT/boards/tmotor-ir/tmotor_f7_v2.yaml"
-if [[ ! -f "$IR_V2" ]]; then
-  IR_V2="/workspace/board-defs/tmotor/tmotor_f7_v2.yaml"
-fi
-IR_KAKUTE="$ROOT/boards/holybro-ir/kakute_f7_hdv.yaml"
-if [[ ! -f "$IR_KAKUTE" ]]; then
-  IR_KAKUTE="/workspace/board-defs/holybro/kakute_f7_hdv.yaml"
-fi
+IR_V2="$ROOT/boards/tmotor_f7_v2.yaml"
+IR_KAKUTE="$ROOT/boards/kakute_f7_hdv.yaml"
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 

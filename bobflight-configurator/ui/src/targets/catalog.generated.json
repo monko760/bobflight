@@ -59,46 +59,80 @@
         "usb_cdc": false,
         "sd_logging": false
       },
-      "display_name": "Host simulation"
+      "display_name": "Host simulation",
+      "build_label": null
     },
     {
       "schema_version": 1,
       "id": "kakute_f7_hdv",
       "mcu": "stm32f745",
-      "ir": "boards/holybro-ir/kakute_f7_hdv.yaml",
+      "ir": "boards/kakute_f7_hdv.yaml",
       "support": "development",
       "capabilities": {
         "motor_output": true,
         "usb_cdc": true,
         "sd_logging": true
       },
-      "display_name": "Kakute F7 HDV"
+      "display_name": "Kakute F7 HDV",
+      "build_label": "Kakute F7 HDV development firmware; not flight-qualified."
     },
     {
       "schema_version": 1,
       "id": "matek_f722_px",
       "mcu": "stm32f722",
-      "ir": "boards/matek-ir/matek_f722_px.yaml",
+      "ir": "boards/matek_f722_px.yaml",
       "support": "development",
       "capabilities": {
         "motor_output": true,
         "usb_cdc": true,
         "sd_logging": false
       },
-      "display_name": "Matek F722-PX"
+      "display_name": "Matek F722-PX",
+      "build_label": "Matek F722-PX sensor/CRSF bring-up with settings storage; no motor output, OSD or onboard blackbox logging."
     },
     {
       "schema_version": 1,
       "id": "tmotor_f7_v2",
       "mcu": "stm32f722",
-      "ir": "boards/tmotor-ir/tmotor_f7_v2.yaml",
+      "ir": "boards/tmotor_f7_v2.yaml",
       "support": "sensor-only",
       "capabilities": {
         "motor_output": false,
         "usb_cdc": true,
         "sd_logging": false
       },
-      "display_name": "T-Motor F7 V2"
+      "display_name": "T-Motor F7 V2",
+      "build_label": "T-Motor F7 V2 sensor-only firmware; no motor output."
+    }
+  ],
+  "diagnostic_profiles": [
+    {
+      "schema_version": 1,
+      "id": "mltempf4",
+      "display_name": "Motolab Tempest F4 / MLTEMPF4 USB diagnostic",
+      "mcu": "stm32f405",
+      "mcu_display": "STM32F405xG",
+      "support_label": "diagnostic only",
+      "image_profile": "f405-usb-diagnostic",
+      "build_label": "Experimental USB-only reference image; no sensors, motors, storage or bl command.",
+      "artifact_name": "bobflight-mltempf4-usb-diagnostic.hex",
+      "custom": null
+    },
+    {
+      "schema_version": 1,
+      "id": "custom_f405xg_usb",
+      "display_name": "Custom / unknown board (basic bring-up)",
+      "mcu": "stm32f405",
+      "mcu_display": "STM32F405xG",
+      "support_label": "USB-only reference profile",
+      "image_profile": "f405-usb-diagnostic",
+      "build_label": "Experimental USB-only reference image; no sensors, motors, storage or bl command.",
+      "artifact_name": "bobflight-custom-f405xg-usb-diagnostic.hex",
+      "custom": {
+        "mcu": "STM32F405",
+        "flash_kib": 1024,
+        "hse_hz": 8000000
+      }
     }
   ]
 }

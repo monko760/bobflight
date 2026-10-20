@@ -31,3 +31,11 @@ console.log('PASS explicit selection: empty initial target, no first-board fallb
 
 assert.deepEqual(BOARD_OPTIONS.filter(b=>b.imageProfile).map(b=>b.boardId).sort(),['custom_f405xg_usb','mltempf4']);
 assert(BOARD_OPTIONS.filter(b=>b.imageProfile).every(b=>b.mcu==='F405'&&!b.motorOutput));
+// Migration equivalence (main 5bea523): option list generated from boards/<board_id>.yaml.
+assert.deepEqual(BOARD_OPTIONS.filter(b=>b.imageProfile),[
+  {boardId:'mltempf4', label:'Motolab Tempest F4 / MLTEMPF4 USB diagnostic', mcu:'F405', mcuDisplay:'STM32F405xG', support:'diagnostic only', motorOutput:false, primary:false, imageProfile:'f405-usb-diagnostic'},
+  {boardId:'custom_f405xg_usb', label:'Custom / unknown board (basic bring-up)', mcu:'F405', mcuDisplay:'STM32F405xG', support:'USB-only reference profile', motorOutput:false, primary:false, imageProfile:'f405-usb-diagnostic'},
+]);
+assert.deepEqual(BOARD_OPTIONS.filter(b=>!b.imageProfile).map(b=>[b.boardId,b.label,b.mcu,b.support,b.motorOutput]),[
+  ['kakute_f7_hdv','Kakute F7 HDV','F745','development',true],['matek_f722_px','Matek F722-PX','F722','development',true],['tmotor_f7_v2','T-Motor F7 V2','F722','sensor-only',false]]);
+console.log('PASS board options match main 5bea523 and come only from board definitions');

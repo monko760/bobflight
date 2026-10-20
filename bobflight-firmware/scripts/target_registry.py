@@ -16,6 +16,7 @@ def require(ok, message):
     if not ok:
         raise TargetRegistryError(message)
 
+
 def unique_object(pairs):
     result = {}
     for key, value in pairs:
@@ -27,7 +28,7 @@ class TargetRegistry:
     def __init__(self, root=None):
         self.root = Path(root or Path(__file__).resolve().parents[1]).resolve()
         self.mcus = self.records('mcus', {'schema_version','id','family','part','core','toolchain','status'})
-        self.boards = self.records('boards', {'schema_version','id','display_name','mcu','ir','support','capabilities'})
+        self.boards, self.diagnostic_profiles = self.board_definitions()
         for m in self.mcus.values():
             require(m['family'] in ('F4','F7','H7'), 'unknown MCU family')
             require(m['status'] in ('implemented','planned'), 'unknown MCU status')
@@ -37,25 +38,40 @@ class TargetRegistry:
                 self.path(m['toolchain'])
             else:
                 require(m['toolchain'] == '', 'planned MCU must not advertise a toolchain')
-        spec = importlib.util.spec_from_file_location('board_ir', self.root/'scripts/ir_codegen.py')
-        self.ir = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.ir)
-        for b in self.boards.values():
+        for b in list(self.boards.values())+list(self.diagnostic_profiles.values()):
             require(b['mcu'] in self.mcus, 'board refers to unknown MCU')
-            require(b['support'] in ('host-only','sensor-only','development'), 'unknown board support level')
-            caps = b['capabilities']
-            require(isinstance(caps,dict) and set(caps)=={'motor_output','usb_cdc','sd_logging'} and all(type(v) is bool for v in caps.values()), 'invalid capabilities')
-            if b['support']=='host-only':
-                require(not any(caps.values()), 'host-only board cannot advertise hardware capabilities')
-            if b['support']=='sensor-only':
-                require(not caps['motor_output'], 'sensor-only target cannot advertise motor output')
-            raw = self.path(b['ir']).read_text(encoding='utf-8')
-            for key in ('board_id','family'):
-                require(len(re.findall(r'^\s*'+key+r':',raw,re.M))==1, f'IR requires exactly one {key}')
-            info = self.ir.parse_ir(raw,b['id'])
-            require(info['board_id']==b['id'], 'IR board identity mismatch')
-            require(info['mcu']==self.mcus[b['mcu']]['part'], 'IR MCU mismatch')
-            require((info['status'] in self.ir.PACKABLE) == (b['support']!='host-only'), 'IR status / support mismatch')
+        for b in self.diagnostic_profiles.values():
+            require(self.mcus[b['mcu']]['family']=='F4', 'diagnostic profiles are F4 USB-only images')
+
+    def board_definitions(self):
+        """boards/<board_id>.yaml is the only board source (scripts/board_def.py)."""
+        spec = importlib.util.spec_from_file_location('board_def', self.root/'scripts/board_def.py')
+        bd = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bd)
+        self.board_def = bd
+        files = bd.board_files(self.root)
+        require(bool(files), 'empty boards registry')
+        boards, diags = {}, {}
+        for p in files:
+            require(self.root in p.resolve().parents, 'definition symlink escapes root')
+            rel = p.relative_to(self.root).as_posix()
+            self.path(rel)
+            d = bd.load(p)
+            require(d['board_id'] not in boards and d['board_id'] not in diags, 'duplicate identity')
+            cfg = d['configurator']
+            if d['support'] == 'diagnostic':
+                diags[d['board_id']] = {'schema_version': 1, 'id': d['board_id'], 'display_name': d['display_name'],
+                    'mcu': d['mcu']['target'], 'mcu_display': cfg['mcu_display'], 'support_label': cfg['support_label'],
+                    'image_profile': cfg['image_profile'], 'build_label': cfg['build_label'],
+                    'artifact_name': cfg['artifact_name'], 'custom': cfg.get('custom'),
+                    '_order': cfg.get('menu_order') or 0}
+            else:
+                boards[d['board_id']] = {'schema_version': 1, 'id': d['board_id'], 'mcu': d['mcu']['target'], 'ir': rel,
+                    'support': d['support'], 'capabilities': dict(d['capabilities']),
+                    'display_name': d['display_name'], 'build_label': cfg.get('build_label')}
+                require(d['mcu']['part'] == self.mcus.get(d['mcu']['target'], {}).get('part'), 'IR MCU mismatch')
+        ordered = sorted(diags.values(), key=lambda p: (p.pop('_order'), p['id']))
+        return boards, {p['id']: p for p in ordered}
 
     def path(self, name):
         require(isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_./-]+',name) is not None, 'invalid relative path')
@@ -83,7 +99,7 @@ class TargetRegistry:
         return result
 
     def list_all(self):
-        return {'schema_version':1,'mcus':list(self.mcus.values()),'boards':list(self.boards.values())}
+        return {'schema_version':1,'mcus':list(self.mcus.values()),'boards':list(self.boards.values()),'diagnostic_profiles':list(self.diagnostic_profiles.values())}
 
     def resolve(self, board, hardware=False):
         require(board in self.boards, f'unknown board: {board}')
@@ -103,7 +119,7 @@ def main():
     try:
         r=TargetRegistry(args.root)
         if args.action=='validate':
-            print(f'PASS {len(r.mcus)} MCU definitions, {len(r.boards)} board definitions');return 0
+            print(f'PASS {len(r.mcus)} MCU definitions, {len(r.boards)} board definitions, {len(r.diagnostic_profiles)} diagnostic profiles');return 0
         if args.action=='list': data=r.list_all()
         else:
             data=r.resolve(args.board,args.hardware)

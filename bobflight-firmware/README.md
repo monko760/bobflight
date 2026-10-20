@@ -37,8 +37,8 @@ ANGLE/HORIZON.
 ## How board IR plugs in
 
 1. Hardware publishes OEM-sourced YAML under
-   **`/workspace/board-defs/tmotor/`** (symlink: `boards/tmotor-ir`).
-2. Schema: `/workspace/board-defs/_schema/board-ir.schema.json`.
+   `boards/tmotor_f7_v2.yaml` (see `docs/BOARDS.md`).
+2. Schema and validator: `docs/BOARDS.md`, `scripts/board_def.py`.
 3. Select with CMake `-DBOBFLIGHT_BOARD=…` (default `dummy`). Codegen writes
    `${CMAKE_BINARY_DIR}/generated/board/pins_generated.h`; checked-in
    `src/board/pins_generated.h` is the dummy fallback.
@@ -122,7 +122,7 @@ cmake --build build-f745-kakute
 # → build-f745-kakute/bobflight.elf /.hex /.bin
 ```
 
-Kakute IR is bf-derived (pointer `boards/holybro-ir`). Motors 5–6 are in IR but
+Kakute IR is bf-derived (`boards/kakute_f7_hdv.yaml`). Motors 5–6 are in IR but
 deferred (firmware packs/uses max 4). Do not vendor GPL `config.h`.
 
 ## CLI minimum

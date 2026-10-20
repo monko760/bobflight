@@ -10,15 +10,21 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const LIMIT = 8 * 1024 * 1024;
-const known = ['matek_f722_px', 'kakute_f7_hdv', 'tmotor_f7_v2', 'mltempf4', 'custom_f405xg_usb'];
+// Board list, labels and custom-profile limits come only from boards/<board_id>.yaml,
+// through the validated generated catalog (npm run targets:check keeps it current).
+const catalog = require('../ui/src/targets/catalog.generated.json');
+const mains = catalog.boards.filter(b => b.support !== 'host-only' && b.build_label && catalog.mcus.find(m => m.id === b.mcu)?.status === 'implemented');
+const diagnostics = catalog.diagnostic_profiles;
+const known = [...mains.map(b => b.id), ...diagnostics.map(p => p.id)];
 export function resolveBuildProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k=>!['boardId','customMcu','customFlash','customHse'].includes(k))) throw new Error('Only board/profile selections are accepted.');
   for (const key of ['boardId','customMcu','customFlash','customHse']) if (typeof input[key] !== 'string' || input[key].length > 64) throw new Error('Invalid board/profile fields.');
   if (!known.includes(input.boardId)) throw new Error('No hardware build recipe for this board. No fallback target is selected.');
-  const diagnostic = input.boardId === 'mltempf4' || input.boardId === 'custom_f405xg_usb';
-  if (input.boardId === 'custom_f405xg_usb' && (input.customMcu !== 'STM32F405' || input.customFlash !== '1024' || input.customHse !== '8000000')) throw new Error('Custom builds currently require F405xG / 1024 KiB / 8 MHz. Other MCU and routing combinations are not implemented.');
-  return Object.freeze({ boardId:input.boardId, diagnostic, profile:diagnostic?'f405-usb-diagnostic':'main',
-    label:diagnostic?'Experimental USB-only reference image; no sensors, motors, storage or bl command.':input.boardId==='matek_f722_px'?'Matek F722-PX sensor/CRSF bring-up with settings storage; no motor output, OSD or onboard blackbox logging.':input.boardId==='tmotor_f7_v2'?'T-Motor F7 V2 sensor-only firmware; no motor output.':'Kakute F7 HDV development firmware; not flight-qualified.' });
+  const diag = diagnostics.find(p => p.id === input.boardId);
+  const c = diag?.custom;
+  if (c && (input.customMcu !== c.mcu || input.customFlash !== String(c.flash_kib) || input.customHse !== String(c.hse_hz))) throw new Error(`Custom builds currently require ${c.mcu.replace(/^STM32/,'')}xG / ${c.flash_kib} KiB / ${c.hse_hz/1000000} MHz. Other MCU and routing combinations are not implemented.`);
+  const label = diag ? diag.build_label : mains.find(b => b.id === input.boardId).build_label;
+  return Object.freeze({ boardId:input.boardId, diagnostic:!!diag, profile:diag?diag.image_profile:'main', label, artifactName: diag ? diag.artifact_name : null });
 }
 async function buildEnvironment(repo) {
   const env={...process.env};const original=env.PATH||env.Path||'';
@@ -71,7 +77,7 @@ export async function compileHex(profile,{repo=REPO,signal,log=()=>{}}={}) {
     if(profile.diagnostic) {
       await run(python,[...py,path.join(firmware,'tools/build_f405_usb_diagnostic.py'),'--out',temp],ctx,180000);
       image=path.join(temp,'bobflight-mltempf4-usb-diagnostic.hex');
-      fileName=profile.boardId==='custom_f405xg_usb'?'bobflight-custom-f405xg-usb-diagnostic.hex':'bobflight-mltempf4-usb-diagnostic.hex';
+      fileName=profile.artifactName;
     } else {
       const cmake=await executable(['cmake'],env);
       const make=await executable(process.platform==='win32'?['mingw32-make']:['make'],env);

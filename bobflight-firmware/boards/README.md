@@ -1,41 +1,16 @@
-# boards/ — verified IR only
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# boards/ — one owned definition per board
 
-This directory holds **owned** board Intermediate Representation used by BobFlight
-firmware (Apache-2.0). Do **not** drop Betaflight `config.h` / unified targets here.
+`<board_id>.yaml` is the single source of truth for that board's pins, sensors, USB,
+motor outputs, LED/beeper, UARTs, receiver default, Configurator listing and HEX-builder
+recipe. See [docs/BOARDS.md](../docs/BOARDS.md) for the schema and how to add a board.
 
-## Source of truth for T-Motor F7 IR
+Policy:
 
-Canonical catalog (may live outside this git tree during bring-up):
+- Pins come only from cited, owned facts; unknown is `absent`. Never invent pins.
+- Never paste Betaflight `config.h` / unified targets here (GPL); restate facts with a citation.
+- `dummy.yaml` is the host build (status `stub`: every pin `HAL_PIN_INVALID`).
+- `mltempf4.yaml` and `custom_f405xg_usb.yaml` are F405 USB-only diagnostic profiles,
+  not CMake targets.
 
-```text
-/workspace/board-defs/tmotor/
-```
-
-Schema: `/workspace/board-defs/_schema/board-ir.schema.json`
-
-Until Hardware marks an IR `verified` / `ready`, firmware builds with the
-**dummy** board (`board_id: dummy`, all pins `HAL_PIN_INVALID`). CLI `status`
-prints `board: dummy`.
-
-## Policy
-
-- Pins come only from OEM docs → owned YAML IR → optional `scripts/ir_codegen.py`
-  → `src/board/pins_generated.h`.
-- Never invent T-Motor MCU pin numbers.
-- Never paste GPL flight-controller target files.
-
-See `docs/IR-CODEGEN.md` for the verify → codegen flow.
-
-## Holybro Kakute F7 HDV IR
-
-Canonical catalog (outside this git tree during bring-up):
-
-```text
-/workspace/board-defs/holybro/
-```
-
-Symlink: `boards/holybro-ir` → that path. Pointer note: `boards/HOLYBRO-IR.path`.
-
-`-DBOBFLIGHT_BOARD=kakute_f7_hdv` packs bf-derived pins (MPU6000 SPI4, UART3 CRSF).
-Motors 5–6 are present in IR but deferred (firmware max 4). MCU is **STM32F745** —
-use `cmake/stm32f745.cmake`. Do not vendor GPL `config.h`.
+Validate with `python3 scripts/board_def.py`.
