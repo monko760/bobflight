@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { WebUsbDfuFlasher } = require('../dist/flasher/webusb-dfu.js');
 const { parseIntelHex } = require('../dist/flasher/intel-hex.js');
-const { planSectorErases } = require('../dist/flasher/flash-sectors.js');
+const { planSectorErases, planFullChipErases, assertMainFlashLayout } = require('../dist/flasher/flash-sectors.js');
 const { F405_DIAGNOSTIC_MARKERS, validateF405DiagnosticImage } = require('../dist/flasher/f405-diagnostic.js');
 const BASE = 0x08000000;
 
@@ -31,13 +31,15 @@ class Device {
             if (data[0] === 0x21) this.pointer = address;
             else if (data[0] === 0x41) {
               if (this.fault === 'erase') { this.status = 4; this.state = 10; return; }
-              const bounds = this.f405 ? [0,16384,32768,49152,65536,131072,262144,393216,524288,655360,786432,917504,1048576] : [0,32768,65536,98304,131072,262144,524288,786432,1048576];
+              const bounds = this.f722 ? [0,16384,32768,49152,65536,131072,262144,393216,524288] : this.f405 ? [0,16384,32768,49152,65536,131072,262144,393216,524288,655360,786432,917504,1048576] : [0,32768,65536,98304,131072,262144,524288,786432,1048576];
               const i = bounds.findIndex((x,i) => i < bounds.length-1 && address-BASE >= x && address-BASE < bounds[i+1]);
               assert.ok(i >= 0); this.erases.push(BASE+bounds[i]);
-              this.memory.fill(255,bounds[i],bounds[i+1]);
+              if (this.fault !== 'incomplete-erase' || i !== bounds.length-2) this.memory.fill(255,bounds[i],bounds[i+1]);
             } else assert.fail('unexpected command');
           } else {
-            assert.equal(s.value,2); this.writes++;
+            assert.equal(s.value,2);
+            if (this.requireBlank && this.writes === 0) assert(this.memory.subarray(0,this.f722?524288:1048576).every(b=>b===255),'all main flash blank before FIRST program');
+            this.writes++;
             if (this.fault === 'write') { this.status = 3; this.state = 10; return; }
             const off = this.pointer-BASE;
             for (let i=0;i<data.length;i++) {
@@ -74,18 +76,27 @@ class Device {
 global.window = { isSecureContext:true };
 async function run(image, fault='', options={}) {
   const device = new Device(fault);
-  if(options.rawDescriptor)device.descriptors=require('./fixtures/dfu-descriptors.cjs').device(options.rawDescriptor);
-  if(options.expectedMcu==='F405') {
-    device.f405=true;
-    device.configuration.interfaces[0].alternates[0].interfaceName='layout' in options ? options.layout : '@Internal Flash /0x08000000/04*016Kg,01*064Kg,07*128Kg';
+  device.f722 = options.expectedMcu === 'F722';
+  device.requireBlank = options.eraseMode === 'full-chip';
+  if ('layout' in options) device.configuration.interfaces[0].alternates[0].interfaceName=options.layout;
+  if(device.f722) { // incompatible old configuration in both reserved slots
+    for(const offset of [0x4000,0x8000]) {device.memory.writeUInt32LE(0x42464346,offset);device.memory.writeUInt32LE(12,offset+4);}
   }
+  if(options.rawDescriptor)device.descriptors=require('./fixtures/dfu-descriptors.cjs').device(options.rawDescriptor);
+  const defaultLayout={F405:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,07*128Kg',F722:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg',F745:'@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg'};
+  const mcu=options.expectedMcu??'F745';
+  if(mcu==='F405')device.f405=true;
+  device.configuration.interfaces[0].alternates[0].interfaceName='layout' in options ? options.layout : defaultLayout[mcu];
   Object.defineProperty(global,'navigator',{configurable:true,value:{usb:{async requestDevice(){return device;}}}});
   const flasher = new WebUsbDfuFlasher(); const phases=[];
   if(fault==='cancel-descriptor') {
     const original=device.descriptors.controlTransferIn.bind(device.descriptors);
     device.descriptors.controlTransferIn=async(s,n)=>{const result=await original(s,n);flasher.cancel();return result;};
   }
-  flasher.onProgress(p => { phases.push(p); if(fault === 'cancel' && p.phase === 'writing') flasher.cancel(); });
+  flasher.onProgress(p => { phases.push(p); if((fault === 'cancel' && p.phase === 'writing') ||
+    (fault === 'cancel-erase' && p.phase === 'erasing') ||
+    (fault === 'cancel-blank' && p.message?.startsWith('Full erase: verified blank')) ||
+    (fault === 'cancel-mid-erase' && device.erases.length===1 && p.phase === 'erasing')) flasher.cancel(); });
   await flasher.requestDevice();
   let error;
   try { await flasher.flash(image,{expectedMcu:'F745',verify:true,leave:true,...options}); } catch(e) { error=e; }
@@ -146,6 +157,54 @@ function parsed(regions) { return {baseAddress:regions[0].address,regions,bytes:
   for(const opt of [{leave:true},{verify:false},{imageProfile:undefined},{expectedMcu:'F722'}]) {
     const bad=await run(diagnostic,'',{...diagnosticOptions,...opt});assert(bad.error);assert.equal(bad.device.outRequests||0,0);
   }
+  // Explicit full internal-flash erase: all sectors, never just image ranges.
+  const fullLayouts={F722:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg',F745:'@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg'};
+  const fullData=region(BASE,128).data;const fullVectors=new DataView(fullData.buffer);
+  fullVectors.setUint32(0,0x20010000,true);fullVectors.setUint32(4,BASE+9,true);
+  const small={baseAddress:BASE,bytes:fullData,regions:[{address:BASE,data:fullData}]};
+  for(const expectedMcu of ['F722','F745']) {
+    const result=await run(small,'',{expectedMcu,eraseMode:'full-chip',layout:fullLayouts[expectedMcu]});assert.ifError(result.error);
+    assert.deepEqual(result.device.erases,planFullChipErases(expectedMcu));
+    const size=expectedMcu==='F722'?524288:1048576;
+    assert.deepEqual(result.device.memory.subarray(0,128),Buffer.from(small.regions[0].data));
+    assert(result.device.memory.subarray(128,size).every(b=>b===255),'settings and all other unwritten flash stay erased');
+    if(expectedMcu==='F722')assert(result.device.memory.subarray(size).every(b=>b===0),'no writes outside selected flash');
+    assert(result.device.uploads>=size/2048+1,'full blank readback plus programmed-image verification');
+    assert.match(result.phases.at(-1).message,/settings removed/);
+  }
+  const allF405=await run(diagnostic,'',{...diagnosticOptions,eraseMode:'full-chip'});assert.ifError(allF405.error);
+  assert.deepEqual(allF405.device.erases,planFullChipErases('F405'));assert.equal(allF405.device.leaves,0);
+  assert(allF405.device.memory.subarray(d.length).every(b=>b===255));
+  const selective=await run(small,'',{expectedMcu:'F722'});assert.ifError(selective.error);
+  assert.deepEqual(selective.device.erases,[BASE]);assert.equal(selective.device.memory.readUInt32LE(0x4000),0x42464346,'default selective erase still preserves untouched config');
+  for(const layout of [null,'','@OTP Memory /0x1fff7800/01*512Bg','@Internal Flash /0x08000000/04*016Kg,01*064Kg,01*128Kg',fullLayouts.F745,'@Internal Flash /0x08000000/04*016Ka,01*064Kg,03*128Kg']) {
+    const bad=await run(small,'',{expectedMcu:'F722',eraseMode:'full-chip',layout});assert(bad.error);assert.equal(bad.device.outRequests||0,0,'geometry refusal before DFU writes');
+  }
+  const rawFull=await run(small,'',{expectedMcu:'F722',eraseMode:'full-chip',layout:null,rawDescriptor:{layout:fullLayouts.F722}});assert.ifError(rawFull.error);assert.deepEqual(rawFull.device.erases,planFullChipErases('F722'));
+  for(const opt of [{verify:false},{expectedMcu:undefined},{eraseMode:'typo'}]) {
+    const bad=await run(small,'',{expectedMcu:'F722',eraseMode:'full-chip',layout:fullLayouts.F722,...opt});assert(bad.error);assert.equal(bad.device.outRequests||0,0);
+  }
+  for(const fault of ['incomplete-erase','erase','short-read','corrupt','cancel-erase','cancel-blank','cancel-mid-erase','write','short-write','cancel']) {
+    const bad=await run(small,fault,{expectedMcu:'F722',eraseMode:'full-chip',layout:fullLayouts.F722});assert(bad.error,fault);assert.equal(bad.device.leaves,0,fault);assert(!bad.phases.some(p=>p.phase==='done'),fault);
+    if(!['write','short-write','cancel'].includes(fault))assert.equal(bad.device.writes,0,'no programming after erase/blank-check failure');
+    if(fault==='cancel-erase')assert.equal(bad.device.erases.length,0);
+    if(fault==='incomplete-erase')assert.match(bad.error.message,/blank verification failed/);
+  }
+  for(const badImage of [
+    parsed([region(BASE,2)]),
+    {...small,baseAddress:BASE+16},
+    {...small,regions:[]},
+    {...small,bytes:new Uint8Array(128)},
+    {...small,entryAddress:BASE+512},
+    {...small,regions:[...small.regions,...small.regions]},
+  ]) {
+    const bad=await run(badImage,'',{expectedMcu:'F722',eraseMode:'full-chip',layout:fullLayouts.F722});assert(bad.error);assert.equal(bad.device.outRequests||0,0,'invalid image before destructive operations');
+  }
+  const cancelLayout=await run(small,'cancel-descriptor',{expectedMcu:'F722',eraseMode:'full-chip',layout:null,rawDescriptor:{layout:fullLayouts.F722}});assert(cancelLayout.error);assert.equal(cancelLayout.device.outRequests||0,0);
+  for(const target of ['F722','F745','F405'])assert.equal(new Set(planFullChipErases(target)).size,planFullChipErases(target).length);
+  assert.throws(()=>planFullChipErases('unknown'),/supported/);
+  assert.throws(()=>assertMainFlashLayout(fullLayouts.F722,'F745'),/geometry/);
+  console.log('PASS full internal-flash erase: exact geometry, all sectors/config erased, complete blank verification before program, default preservation, F405 cold restart, refusal/error/cancellation cases.');
   const wrong=d.slice();wrong[512]=0;
   assert.throws(()=>validateF405DiagnosticImage({...diagnostic,bytes:wrong,regions:[{address:BASE,data:wrong}]}),/identity/);
   const overflow={...diagnostic,regions:[...diagnostic.regions,{address:0x080c0000,data:new Uint8Array(1)}]};
@@ -160,11 +219,47 @@ function parsed(regions) { return {baseAddress:regions[0].address,regions,bytes:
     console.log('PASS exact existing F405 HEX: all programmed bytes readback verified in DFU model; no ROM jump.');
   }
   console.log('PASS F405 profile, geometry-before-write, 16 KiB sectors, readback, preserved sectors, corruption/errors/cancellation, and mandatory cold restart.');
+  if(process.env.BF_FULL_ERASE_TEST_HEX) {
+    const real=parseIntelHex(fs.readFileSync(process.env.BF_FULL_ERASE_TEST_HEX,'utf8'));
+    const result=await run(real,'',{expectedMcu:'F722',eraseMode:'full-chip',layout:fullLayouts.F722});assert.ifError(result.error);
+    assert.deepEqual(result.device.erases,planFullChipErases('F722'));
+    for(const r of real.regions)assert.deepEqual(result.device.memory.subarray(r.address-BASE,r.address-BASE+r.data.length),Buffer.from(r.data));
+    assert(result.device.memory.subarray(0x4000,0xc000).every(b=>b===255),'both Matek configuration sectors remain erased after actual firmware programming');
+    console.log('PASS actual Matek HEX full erase: all image bytes verified and both reserved configuration sectors blank in simulated NOR flash.');
+  }
   if(process.argv[2]) {
     const real = parseIntelHex(fs.readFileSync(process.argv[2],'utf8'));
     const result = await run(real); assert.ifError(result.error);
     assert.deepEqual(result.device.erases,[BASE,BASE+32768,BASE+65536]);
     console.log('Exact supplied HEX: all data bytes written and verified in simulated flash.');
+  }
+  {
+    // F7: the device's DFU flash-layout descriptor decides size and erase sectors (Config Lead blocker).
+    const big=parsed([region(BASE,600*1024)]);
+    const small=await run(big,'',{layout:'@Internal Flash /0x08000000/04*032Kg,01*128Kg,01*256Kg'});
+    assert.match(small.error?.message??'',/does not fit this device: image ends at 0x80960000? but DFU reports 512 KiB/);
+    assert.equal(small.device.erases.length,0);assert.equal(small.device.writes,0);assert.equal(small.device.outRequests||0,0);
+    assert.equal(small.phases.at(-1).phase,'error');assert.equal(small.phases.at(-1).message,small.error.message);
+    const full=await run(big,'',{layout:'@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg'});
+    assert.ifError(full.error);
+    assert.deepEqual(full.device.erases,[BASE,BASE+32768,BASE+65536,BASE+98304,BASE+131072,BASE+262144,BASE+524288]);
+    // A descriptor with different sector boundaries is followed, not the static table.
+    const odd=await run(parsed([region(BASE+65536,16)]),'',{layout:'@Internal Flash /0x08000000/02*064Kg,01*128Kg,03*256Kg'});
+    assert.ifError(odd.error);assert.deepEqual(odd.device.erases,[BASE+65536]);
+    for(const layout of ['@Internal Flash /0x08000000/04*032Kg,banana','@Internal Flash /0x08004000/04*032Kg,01*128Kg,03*256Kg',
+                         '@Option Bytes /0x1FFF0000/01*032 e','@Internal Flash /0x08000000/00*032Kg']) {
+      const bad=await run(image,'',{layout});
+      assert.match(bad.error?.message??'',/DFU flash-layout descriptor (not understood|has an invalid sector count).*No erase\/program issued/,layout);
+      assert.ok(bad.error.message.includes(layout.trim())||/invalid sector count/.test(bad.error.message));
+      assert.equal(bad.device.erases.length,0);assert.equal(bad.device.writes,0);
+    }
+    for(const layout of [null,'','  ']) {
+      const missing=await run(image,'',{layout,rawDescriptor:{layout:''}});
+      assert.ok(missing.error,'missing descriptor must refuse');assert.equal(missing.device.erases.length,0);assert.equal(missing.device.writes,0);
+    }
+    const missing2=await run(image,'',{layout:null,rawDescriptor:{stall:true}});
+    assert.ok(missing2.error);assert.equal(missing2.device.erases.length,0);
+    console.log('PASS F7 DFU layout: 512 KiB device refuses 600 KiB (0 erase/0 write), 1 MiB erases descriptor sectors, malformed/missing refused before erase.');
   }
   console.log('PASS: sector coverage, deduplication, F722/F745 boundaries, stale-error recovery, programming errors, short transfers, readback mismatch, cancellation, DFU state transitions, leave errors, and address bounds.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

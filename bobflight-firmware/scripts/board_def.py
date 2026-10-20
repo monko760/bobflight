@@ -58,7 +58,8 @@ MCU_RESOURCES = {
 }
 # targets/mcus/*.json (check_tree also requires the JSON to exist).
 KNOWN_MCU_TARGETS = ("stm32f405", "stm32f411", "stm32f722", "stm32f745", "stm32h743")
-HSE_MHZ = (4, 26)          # F4/F7 datasheets: 4-26 MHz HSE oscillator
+HSE_MHZ = (4, 26)
+FLASH_KIB = (16, 2048)     # STM32F4/F7 flash densities in the supported range          # F4/F7 datasheets: 4-26 MHz HSE oscillator
 DMA_RE = re.compile(r"DMA([12])_S([0-7])")   # stream form; DMA stays absent unless verified
 STR_MAX = 200
 
@@ -75,12 +76,13 @@ def _scalar(tok: str):
         return t == "true"
     if t == "absent":
         return ABSENT
-    _req(re.fullmatch(r"-?0\d+", t) is None, f"ambiguous scalar {t!r} (leading zero)")
-    if re.fullmatch(r"-?\d+", t):
+    _req(t.isascii(), f"non-ASCII scalar {t!r} (Unicode digits/letters are not accepted)")
+    _req(re.fullmatch(r"-?0[0-9]+", t) is None, f"ambiguous scalar {t!r} (leading zero)")
+    if re.fullmatch(r"-?[0-9]+", t):
         return int(t)
     _req(t.lower() not in ("null", "~", "yes", "no", "on", "off", "y", "n", "true", "false"), f"ambiguous scalar {t!r}")
     _req(re.fullmatch(r"[0-9.:_+-]+", t) is None, f"ambiguous scalar {t!r} (number-like)")
-    _req(not any(c in t for c in "{}[],&*!|>%@`\"\\"), f"unsupported scalar {t!r}")
+    _req(not any(c in t for c in "{}[],&*!|>%@`\"'\\"), f"unsupported scalar {t!r}")
     return t
 
 
@@ -300,6 +302,9 @@ def validate(d: dict, stem: str | None = None) -> dict:
     res = MCU_RESOURCES.get(d["mcu"]["part"])
     hse = d["mcu"].get("hse_mhz")
     _req(hse is None or HSE_MHZ[0] <= hse <= HSE_MHZ[1], f"mcu.hse_mhz {hse} outside {HSE_MHZ[0]}..{HSE_MHZ[1]} MHz")
+    for where, fk in (("mcu.flash_kib", d["mcu"].get("flash_kib")),
+                      ("configurator.custom.flash_kib", (d["configurator"].get("custom") or {}).get("flash_kib"))):
+        _req(fk is None or FLASH_KIB[0] <= fk <= FLASH_KIB[1], f"{where} {fk} outside {FLASH_KIB[0]}..{FLASH_KIB[1]} KiB")
     g = d.get("gyro")   # chip/protocol lengths are bounded by the driver allowlists
     rx = d.get("receiver")
 
@@ -401,6 +406,9 @@ def check_tree(d: dict, root: Path) -> dict:
         _req(re.fullmatch(r"cmake/[A-Za-z0-9_./-]+\.ld", ls) is not None and ".." not in ls.split("/"),
              f"mcu.linker_script {ls!r} must be a cmake/*.ld path inside the tree")
         _req((root / ls).resolve().is_file(), f"mcu.linker_script {ls!r} does not exist")
+        family = d["mcu"]["target"].removeprefix("stm32")
+        _req(Path(ls).stem.removeprefix("stm32").startswith(family),
+             f"mcu.linker_script {ls!r} is not for {d['mcu']['target']}")
     return d
 
 

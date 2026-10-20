@@ -92,7 +92,7 @@ class RegistryTests(unittest.TestCase):
         (self.root/'boards/twin_fixture.yaml').write_text(raw)
         with self.assertRaisesRegex(Exception,'duplicate display_name'):TargetRegistry(self.root)
     def test_planned_board_hardware_refused(self):
-        raw=(self.root/'boards/tmotor_f7_v2.yaml').read_text().replace('board_id: tmotor_f7_v2','board_id: planned_fixture').replace('display_name: ','display_name: Planned ',1).replace('target: stm32f722','target: stm32f405').replace('part: STM32F722','part: STM32F405')
+        raw=(self.root/'boards/tmotor_f7_v2.yaml').read_text().replace('board_id: tmotor_f7_v2','board_id: planned_fixture').replace('display_name: ','display_name: Planned ',1).replace('target: stm32f722','target: stm32f405').replace('part: STM32F722','part: STM32F405').replace('linker_script: cmake/stm32f722.ld','linker_script: cmake/components/f405xg.ld')
         (self.root/'boards/planned_fixture.yaml').write_text(raw)
         r=TargetRegistry(self.root)
         with self.assertRaises(TargetRegistryError):r.resolve('planned_fixture',True)

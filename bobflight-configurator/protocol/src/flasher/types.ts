@@ -35,6 +35,8 @@ export interface FlashProgress {
 export type BobFlightMcu = "F745" | "F722" | "F405";
 
 export interface FlashOptions {
+  /** Explicit destructive opt-in. Full-chip means all internal main flash, including saved settings. */
+  eraseMode?: "sectors" | "full-chip";
   /** Explicit USB-only F405 diagnostic; never a normal flight image. */
   imageProfile?: "f405-usb-diagnostic";
   /** Flash base; ST ROM DFU default 0x08000000 (LOCKED). */
