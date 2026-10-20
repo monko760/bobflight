@@ -65,5 +65,6 @@
 #define BOARD_GENERATED_UART_COUNT 0u
 #define BOARD_GENERATED_UART_TABLE
 /* END runtime-selectable serial RX UARTs */
+#define BOARD_GENERATED_FLASH_KIB 0u /* boards/<id>.yaml mcu.flash_kib; 0 = not checked */
 
 #endif /* BOBFLIGHT_PINS_GENERATED_H */

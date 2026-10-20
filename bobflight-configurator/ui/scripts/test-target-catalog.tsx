@@ -39,3 +39,39 @@ assert.deepEqual(BOARD_OPTIONS.filter(b=>b.imageProfile),[
 assert.deepEqual(BOARD_OPTIONS.filter(b=>!b.imageProfile).map(b=>[b.boardId,b.label,b.mcu,b.support,b.motorOutput]),[
   ['kakute_f7_hdv','Kakute F7 HDV','F745','development',true],['matek_f722_px','Matek F722-PX','F722','development',true],['tmotor_f7_v2','T-Motor F7 V2','F722','sensor-only',false]]);
 console.log('PASS board options match main 5bea523 and come only from board definitions');
+
+// buildableBoard: build_label (K5a), implemented MCU (K5b) and main's F7-family guard.
+import {buildableBoard,customProfile} from '../src/targets/catalog';
+import {customProfileProblem} from '../src/flasher/DiagnosticProfileControls';
+import {mcuHintFromFilename,boardNameHints} from '../src/flasher/intelHex';
+{
+  const mcus=[{id:'f7',family:'F7',status:'implemented'},{id:'f7p',family:'F7',status:'planned'},{id:'f4',family:'F4',status:'implemented'}];
+  const b=(id:string,mcu:string,build_label:string|null,support='development')=>({id,mcu,support,build_label});
+  const cat={mcus,boards:[b('ok','f7','L'),b('nolabel','f7',null),b('emptylabel','f7',''),b('planned','f7p','L'),b('f4main','f4','L'),b('host','f7','L','host-only')]};
+  assert.equal(buildableBoard('ok',cat)?.id,'ok');
+  for(const id of ['nolabel','emptylabel','planned','f4main','host','missing'])assert.equal(buildableBoard(id,cat),undefined,id);
+  for(const id of ['kakute_f7_hdv','matek_f722_px','tmotor_f7_v2'])assert.equal(buildableBoard(id)?.id,id);
+  assert.equal(buildableBoard('dummy'),undefined);assert.equal(buildableBoard('mltempf4'),undefined);
+  console.log('PASS buildableBoard: needs build_label, implemented MCU, F7 family (main 5bea523 guard), not host-only');
+}
+{
+  // Custom-profile identity and limits come from the YAML via the catalog, not from string ids.
+  assert.deepEqual(customProfile('custom_f405xg_usb'),{mcu:'STM32F405',flash_kib:1024,hse_hz:8000000});
+  assert.equal(customProfile('mltempf4'),undefined);assert.equal(customProfile('kakute_f7_hdv'),undefined);
+  assert.equal(customProfileProblem(true,'STM32F405','1024','8000000'),null);
+  assert.match(customProfileProblem(true,'STM32F411','1024','8000000')!,/not implemented here for STM32F411/);
+  assert.match(customProfileProblem(true,'STM32F405','512','8000000')!,/requires STM32F405xG, 1024 KiB flash and an 8 MHz/);
+  const alt={mcu:'STM32F722',flash_kib:512,hse_hz:12000000};
+  assert.equal(customProfileProblem(true,'STM32F722','512','12000000',alt),null);
+  assert.match(customProfileProblem(true,'STM32F405','1024','8000000',alt)!,/not implemented/);
+  assert.match(customProfileProblem(true,'STM32F722','512','8000000',alt)!,/512 KiB flash and an 12 MHz/);
+  assert.match(customProfileProblem(true,'STM32F405','1024','8000000',null)!,/not implemented/);
+  console.log('PASS custom profile limits come from the catalog');
+}
+{
+  assert.deepEqual(boardNameHints(),[['kakute','F745'],['matek','F722'],['tmotor','F722']]);
+  assert.equal(mcuHintFromFilename('Kakute-build.hex'),'F745');assert.equal(mcuHintFromFilename('tmotor.hex'),'F722');
+  assert.equal(mcuHintFromFilename('bobflight-stm32f745.hex'),'F745');assert.equal(mcuHintFromFilename('dummy.hex'),undefined);
+  assert.equal(mcuHintFromFilename('random.hex'),undefined);
+  console.log('PASS filename hints derived from the catalog');
+}

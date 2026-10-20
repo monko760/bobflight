@@ -41,6 +41,8 @@ jobs:
         run: python3 tests/test_board_migration_equivalence.py cc
       - name: Target registry reads only board definitions
         run: python3 tests/test_target_registry.py
+      - name: Checked-in src/board/pins_generated.h is not stale
+        run: python3 scripts/ir_codegen.py boards/dummy.yaml -o src/board/pins_generated.h --check
 
   firmware-kakute:
     name: Firmware — Kakute F7 HDV cross build

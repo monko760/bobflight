@@ -1,10 +1,13 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
-import { catalog } from '../targets/catalog';
-export function customProfileProblem(custom: boolean,mcu: string,flash: string,hse: string): string|null {
+import { catalog, diagnosticProfiles } from '../targets/catalog';
+type CustomLimits = { mcu: string; flash_kib: number; hse_hz: number };
+const catalogCustom = diagnosticProfiles.find(p => p.custom)?.custom ?? null;
+/** Limits come from the custom profile's boards/<id>.yaml (configurator.custom). */
+export function customProfileProblem(custom: boolean,mcu: string,flash: string,hse: string,limits: CustomLimits|null = catalogCustom): string|null {
   if(!custom)return null;
   if(!mcu||!flash||!hse)return "Confirm the custom board's MCU, flash density and external crystal frequency.";
-  if(mcu!=='STM32F405')return `A basic USB-only image is not implemented here for ${mcu}. No MCU fallback will be used.`;
-  if(flash!=='1024'||hse!=='8000000')return 'The available basic image requires STM32F405xG, 1024 KiB flash and an 8 MHz external crystal. Other combinations need a matching build.';
+  if(!limits||mcu!==limits.mcu)return `A basic USB-only image is not implemented here for ${mcu}. No MCU fallback will be used.`;
+  if(flash!==String(limits.flash_kib)||hse!==String(limits.hse_hz))return `The available basic image requires ${limits.mcu}xG, ${limits.flash_kib} KiB flash and an ${limits.hse_hz/1000000} MHz external crystal. Other combinations need a matching build.`;
   return null;
 }
 interface Props {

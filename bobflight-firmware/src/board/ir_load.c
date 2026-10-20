@@ -93,8 +93,11 @@ bool board_init(void)
 #if defined(BOBFLIGHT_MCU) && (defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX))
     /* RM0431 F72x/73x device family + ST F722 FLASHSIZE register.
      * Not proof of board identity; reject wrong family/capacity before peripherals. */
+#if BOARD_GENERATED_FLASH_KIB == 0u
+#error "boards/<id>.yaml must give mcu.flash_kib for a board whose FLASHSIZE is checked at boot"
+#endif
     target_mcu_ok=((*(volatile const uint32_t *)(uintptr_t)0xE0042000u & 0xFFFu)==0x452u);
-    if(target_mcu_ok)target_mcu_ok=(*(volatile const uint16_t *)(uintptr_t)0x1FF07A22u==512u);
+    if(target_mcu_ok)target_mcu_ok=(*(volatile const uint16_t *)(uintptr_t)0x1FF07A22u==BOARD_GENERATED_FLASH_KIB);
 #endif
     return loaded && target_mcu_ok;
 }

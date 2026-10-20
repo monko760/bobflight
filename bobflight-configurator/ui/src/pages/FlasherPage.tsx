@@ -29,6 +29,7 @@ import { TargetCatalog } from "../targets/TargetCatalog";
 import { HexBuilder } from "../flasher/HexBuilder";
 import { DiagnosticConsole } from "../flasher/DiagnosticConsole";
 import { DiagnosticProfileControls, customProfileProblem } from "../flasher/DiagnosticProfileControls";
+import { customProfile } from "../targets/catalog";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -182,7 +183,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   }, [onBusyChange]);
 
   const diagnostic = board?.imageProfile === 'f405-usb-diagnostic';
-  const customBoard = boardId === 'custom_f405xg_usb';
+  const customBoard = !!customProfile(boardId);
   const customProblem = customProfileProblem(customBoard,customMcu,customFlash,customHse);
   const onDiagnosticActive = useCallback((active:boolean)=>{
     setDiagnosticConsoleActive(active);onBusyChange?.(active||operationRef.current||builderRef.current);
@@ -628,7 +629,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
               <option value="" disabled>Select a known board or custom profile</option>
               {BOARD_OPTIONS.map((b) => (
                 <option key={b.boardId} value={b.boardId}>
-                  {b.boardId === "custom_f405xg_usb" ? "Custom / unknown board (basic bring-up)" : `${b.label} (${b.mcuDisplay}) · ${b.support}${!b.motorOutput ? " · no motor output" : ""}`}
+                  {customProfile(b.boardId) ? b.label : `${b.label} (${b.mcuDisplay}) · ${b.support}${!b.motorOutput ? " · no motor output" : ""}`}
                   {b.primary ? ": primary" : ""}
                 </option>
               ))}

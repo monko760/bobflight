@@ -22,7 +22,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 ABSENT = None
-PIN_RE = re.compile(r"P([A-K])(\d{1,2})")
+PIN_RE = re.compile(r"P([A-K])(1[0-5]|[0-9])")  # no leading zeros: PA09 is not PA9
 ID_RE = re.compile(r"[a-z][a-z0-9_]*")
 STATUSES = ("stub", "draft", "bf-derived", "verified", "golden", "ready")
 PACKABLE = {"bf-derived", "verified", "golden", "ready"}
@@ -40,20 +40,47 @@ def _req(ok, msg):
         raise BoardDefError(msg)
 
 
+# Driver allowlists: src/drivers/gyro.c probes, src/drivers/bmp280.c, src/drivers/crsf.c.
+GYRO_CHIPS = ("MPU6000", "ICM42688", "BMI270")
+BARO_CHIPS = ("BMP280",)
+RX_PROTOCOLS = ("CRSF",)
+# General-purpose/advanced timers and their capture/compare channel counts, identical on
+# STM32F405 (RM0090), STM32F722 (RM0431) and STM32F745 (RM0385). TIM6/TIM7 are basic
+# timers without channels and are therefore absent.
+_F4F7_TIMERS = {"TIM1": 4, "TIM2": 4, "TIM3": 4, "TIM4": 4, "TIM5": 4, "TIM8": 4, "TIM9": 2,
+                "TIM10": 1, "TIM11": 1, "TIM12": 2, "TIM13": 1, "TIM14": 1}
+# Per-part maxima from the reference manuals / datasheets above (largest package; the
+# schema carries no package, so a pin that exists only on bigger packages is not caught).
+MCU_RESOURCES = {
+    "STM32F405": {"ports": "ABCDEFGHI", "spi": 3, "i2c": 3, "uart": 6, "timers": _F4F7_TIMERS},
+    "STM32F722": {"ports": "ABCDEFGHI", "spi": 5, "i2c": 3, "uart": 8, "timers": _F4F7_TIMERS},
+    "STM32F745": {"ports": "ABCDEFGHIJK", "spi": 6, "i2c": 4, "uart": 8, "timers": _F4F7_TIMERS},
+}
+# targets/mcus/*.json (check_tree also requires the JSON to exist).
+KNOWN_MCU_TARGETS = ("stm32f405", "stm32f411", "stm32f722", "stm32f745", "stm32h743")
+HSE_MHZ = (4, 26)          # F4/F7 datasheets: 4-26 MHz HSE oscillator
+DMA_RE = re.compile(r"DMA([12])_S([0-7])")   # stream form; DMA stays absent unless verified
+STR_MAX = 200
+
+
 # --------------------------------------------------------------------------- YAML subset
 def _scalar(tok: str):
     t = tok.strip()
     _req(t != "", "empty value (write `absent`)")
     if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
-        return t[1:-1]
+        inner = t[1:-1]
+        _req(not any(c in inner for c in "\"'\\"), f"quotes/backslashes not allowed inside strings: {t!r}")
+        return inner
     if t in ("true", "false"):
         return t == "true"
     if t == "absent":
         return ABSENT
+    _req(re.fullmatch(r"-?0\d+", t) is None, f"ambiguous scalar {t!r} (leading zero)")
     if re.fullmatch(r"-?\d+", t):
         return int(t)
-    _req(t not in ("null", "~", "yes", "no", "on", "off"), f"ambiguous scalar {t!r}")
-    _req(not any(c in t for c in "{}[],&*!|>%@`"), f"unsupported scalar {t!r}")
+    _req(t.lower() not in ("null", "~", "yes", "no", "on", "off", "y", "n", "true", "false"), f"ambiguous scalar {t!r}")
+    _req(re.fullmatch(r"[0-9.:_+-]+", t) is None, f"ambiguous scalar {t!r} (number-like)")
+    _req(not any(c in t for c in "{}[],&*!|>%@`\"\\"), f"unsupported scalar {t!r}")
     return t
 
 
@@ -179,10 +206,10 @@ SCHEMA = {
     "mcu": ({"target": ("id", REQ), "part": (str, REQ), "hse_mhz": (int, OPT),
              "flash_kib": (int, OPT), "linker_script": (str, OPT)}, REQ),
     "usb": ({"cdc": (bool, REQ), "dm": ("pin", OPT), "dp": ("pin", OPT)}, REQ),
-    "gyro": ({"chip": (str, REQ), "spi_bus": (int, REQ), "cs": ("pin", REQ), "exti": ("pin", OPT),
+    "gyro": ({"chip": (GYRO_CHIPS, REQ), "spi_bus": (int, REQ), "cs": ("pin", REQ), "exti": ("pin", OPT),
               "sck": ("pin", OPT), "miso": ("pin", OPT), "mosi": ("pin", OPT),
               "orientation": (ORIENTATIONS, REQ)}, OPT),
-    "baro": ({"chip": (str, OPT), "i2c_bus": (int, REQ), "scl": ("pin", REQ), "sda": ("pin", REQ)}, OPT),
+    "baro": ({"chip": (BARO_CHIPS, OPT), "i2c_bus": (int, REQ), "scl": ("pin", REQ), "sda": ("pin", REQ)}, OPT),
     "nor_flash": ({"spi_bus": (int, REQ), "cs": ("pin", REQ), "sck": ("pin", REQ),
                    "miso": ("pin", REQ), "mosi": ("pin", REQ)}, OPT),
     "sd": ({"spi_bus": (int, REQ), "cs": ("pin", REQ), "sck": ("pin", REQ), "miso": ("pin", REQ),
@@ -193,7 +220,7 @@ SCHEMA = {
     "led": ({"led0": ("pin", OPT)}, REQ),
     "beeper": ({"pin": ("pin", REQ), "inverted": (bool, REQ)}, OPT),
     "uarts": (("list", {"uart": (int, REQ), "tx": ("pin", OPT), "rx": ("pin", OPT)}), REQ),
-    "receiver": ({"uart": (int, REQ), "tx": ("pin", OPT), "rx": ("pin", OPT), "protocol": (str, REQ)}, OPT),
+    "receiver": ({"uart": (int, REQ), "tx": ("pin", OPT), "rx": ("pin", OPT), "protocol": (RX_PROTOCOLS, REQ)}, OPT),
 }
 
 
@@ -224,6 +251,9 @@ def _check(value, spec, where):
         _req(type(value) is int and value >= 0, f"{where}: expected non-negative integer")
     else:
         _req(type(value) is typ, f"{where}: expected {typ.__name__}")
+        if typ is str:
+            _req(value not in ("", "absent"), f"{where}: empty or quoted 'absent' string (write bare `absent`)")
+            _req(len(value) <= STR_MAX, f"{where}: string too long")
 
 
 def _pins(d):
@@ -266,30 +296,47 @@ def validate(d: dict, stem: str | None = None) -> dict:
         _req(d["board_id"] == stem, f"board_id {d['board_id']!r} must match file name {stem!r}")
     _req(len(d["board_id"]) < 48, "board_id too long")
     _req(d["mcu"]["part"] == d["mcu"]["target"].upper(), "mcu.part must match mcu.target")
-    g = d.get("gyro")
-    _req(g is None or (0 < len(g["chip"]) <= 23), "gyro.chip length")
+    _req(d["mcu"]["target"] in KNOWN_MCU_TARGETS, f"mcu.target {d['mcu']['target']!r} is not a known MCU target")
+    res = MCU_RESOURCES.get(d["mcu"]["part"])
+    hse = d["mcu"].get("hse_mhz")
+    _req(hse is None or HSE_MHZ[0] <= hse <= HSE_MHZ[1], f"mcu.hse_mhz {hse} outside {HSE_MHZ[0]}..{HSE_MHZ[1]} MHz")
+    g = d.get("gyro")   # chip/protocol lengths are bounded by the driver allowlists
     rx = d.get("receiver")
-    _req(rx is None or (0 < len(rx["protocol"]) <= 11), "receiver.protocol length")
 
     # duplicates: pins, timer/channel, motor indices, uart numbers
     seen = {}
-    for owner, pin in _pins(d):
+    pins = _pins(d)
+    if pins or d["motors"] or d["uarts"] or rx is not None or g is not None:
+        _req(res is not None, f"no verified resource table for {d['mcu']['part']}: pins, buses and timers cannot be checked")
+    for owner, pin in pins:
+        _req(pin[1] in res["ports"], f"{owner}: {pin} is on port {pin[1]}, which {d['mcu']['part']} does not have")
         _req(pin not in seen, f"duplicate pin {pin}: {seen.get(pin)} and {owner}")
         seen[pin] = owner
     idx = [m["index"] for m in d["motors"]]
     _req(idx == list(range(1, len(idx) + 1)), "motors must be indexed 1..N in order")
+    dmas = {}
+    for m in d["motors"]:
+        dm = m.get("dma")
+        if dm is not None:
+            _req(DMA_RE.fullmatch(dm) is not None, f"motors[{m['index']}].dma {dm!r} must look like DMA1_S2")
+            _req(dm not in dmas, f"duplicate DMA stream {dm}: motors[{dmas.get(dm)}] and motors[{m['index']}]")
+            dmas[dm] = m["index"]
     tc = set()
     for m in d["motors"]:
         _req(re.fullmatch(r"TIM([1-9]|1[0-4])", m["timer"]) is not None, f"motors[{m['index']}].timer invalid")
-        _req(1 <= m["channel"] <= 4, f"motors[{m['index']}].channel must be 1..4")
+        _req(1 <= m["channel"] <= res["timers"].get(m["timer"], 0),
+             f"motors[{m['index']}]: {m['timer']} has no channel {m['channel']} on {d['mcu']['part']}")
         key = (m["timer"], m["channel"])
         _req(key not in tc, f"duplicate timer use {m['timer']} CH{m['channel']}")
         tc.add(key)
     nums = [u["uart"] for u in d["uarts"]]
-    _req(len(nums) == len(set(nums)) and all(1 <= n <= 8 for n in nums), "uarts must be unique 1..8")
+    _req(len(nums) == len(set(nums)), "duplicate uart in uarts")
+    for n in nums:
+        _req(1 <= n <= res["uart"], f"uart {n} does not exist on {d['mcu']['part']} (1..{res['uart']})")
     if rx is not None:
-        _req(1 <= rx["uart"] <= 8, "receiver.uart must be 1..8")
+        _req(1 <= rx["uart"] <= res["uart"], f"receiver.uart {rx['uart']} does not exist on {d['mcu']['part']}")
         row = next((u for u in d["uarts"] if u["uart"] == rx["uart"]), None)
+        _req(row is not None or not d["uarts"], f"receiver.uart {rx['uart']} is not in the uarts table")
         if row is not None:
             _req(row.get("tx") == rx.get("tx") and row.get("rx") == rx.get("rx"),
                  "receiver pins must equal its uarts row")
@@ -298,7 +345,7 @@ def validate(d: dict, stem: str | None = None) -> dict:
     for blk, key in (("gyro", "spi_bus"), ("nor_flash", "spi_bus"), ("sd", "spi_bus")):
         if d.get(blk):
             b = d[blk][key]
-            _req(b >= 1, f"{blk}.{key} must be >= 1")
+            _req(1 <= b <= res["spi"], f"{blk}.{key} {b} does not exist on {d['mcu']['part']} (1..{res['spi']})")
             _req(b not in buses, f"duplicate SPI bus {b}: {buses.get(b)} and {blk}")
             buses[b] = blk
     # Existing driver routing guards (unchanged from the previous IR validator).
@@ -309,6 +356,7 @@ def validate(d: dict, stem: str | None = None) -> dict:
              "unsupported flash SPI routing")
     br = d.get("baro")
     if br:
+        _req(1 <= br["i2c_bus"] <= res["i2c"], f"baro.i2c_bus {br['i2c_bus']} does not exist on {d['mcu']['part']}")
         _req(br["i2c_bus"] == 1 and d["mcu"]["part"] == "STM32F722" and [br["scl"], br["sda"]] == ["PB8", "PB9"],
              "unsupported barometer I2C routing")
     # support / status / capabilities
@@ -320,6 +368,10 @@ def validate(d: dict, stem: str | None = None) -> dict:
         _req(not caps["motor_output"] and not caps["sd_logging"], "diagnostic profiles have no motor/SD capability")
     else:
         _req(st in PACKABLE, "hardware target requires a bf-derived/verified IR status")
+    if sup != "host-only":
+        _req(d["usb"]["cdc"] == caps["usb_cdc"], "usb.cdc must equal capabilities.usb_cdc")
+    _req(not caps["motor_output"] or d["motors"], "capabilities.motor_output requires motors")
+    _req(not caps["sd_logging"] or d.get("sd") is not None, "capabilities.sd_logging requires an sd block")
     if sup == "sensor-only":
         _req(not caps["motor_output"], "sensor-only target cannot advertise motor output")
     if st in PACKABLE and sup != "diagnostic":
@@ -333,18 +385,41 @@ def validate(d: dict, stem: str | None = None) -> dict:
         _req(cfg.get("custom") is None and cfg.get("support_label") is None and cfg.get("mcu_display") is None,
              "only diagnostic profiles carry custom/support_label/mcu_display")
         _req(cfg.get("artifact_name") is None, "main builds name their artifact from board_id")
+        _req(cfg.get("menu_order") is None, "menu_order applies to diagnostic profiles only")
     if cfg.get("artifact_name") is not None:
         _req(re.fullmatch(r"bobflight-[a-z0-9-]+\.hex", cfg["artifact_name"]) is not None, "invalid artifact_name")
     return d
 
 
-def load(path: Path) -> dict:
+def check_tree(d: dict, root: Path) -> dict:
+    """Checks that need the firmware tree: MCU definition and linker script."""
+    root = Path(root).resolve()
+    _req((root / "targets/mcus" / f"{d['mcu']['target']}.json").is_file(),
+         f"mcu.target {d['mcu']['target']!r} has no targets/mcus definition")
+    ls = d["mcu"].get("linker_script")
+    if ls is not None:
+        _req(re.fullmatch(r"cmake/[A-Za-z0-9_./-]+\.ld", ls) is not None and ".." not in ls.split("/"),
+             f"mcu.linker_script {ls!r} must be a cmake/*.ld path inside the tree")
+        _req((root / ls).resolve().is_file(), f"mcu.linker_script {ls!r} does not exist")
+    return d
+
+
+def load(path: Path, root: Path | None = None) -> dict:
     path = Path(path)
-    return validate(parse_yaml(path.read_text(encoding="utf-8")), path.stem)
+    d = validate(parse_yaml(path.read_text(encoding="utf-8")), path.stem)
+    return check_tree(d, Path(root) if root else path.resolve().parent.parent)
 
 
 def board_files(root: Path) -> list[Path]:
-    return sorted(p for p in (Path(root) / "boards").glob("*.yaml"))
+    """Every entry in boards/ must be a <board_id>.yaml file (README.md excepted)."""
+    out = []
+    for p in sorted((Path(root) / "boards").iterdir()):
+        if p.name == "README.md":
+            continue
+        _req(p.is_file() and p.suffix == ".yaml" and ID_RE.fullmatch(p.stem) is not None,
+             f"boards/{p.name}: only <board_id>.yaml files belong in boards/ (no .yml, subdirectories or other files)")
+        out.append(p)
+    return out
 
 
 # --------------------------------------------------------------------------- codegen view
@@ -374,6 +449,7 @@ def to_ir(d: dict) -> dict:
                    for m in d["motors"]],
         "baro_i2c": br.get("i2c_bus", 0), "baro_pins": [s(br.get("scl")), s(br.get("sda"))],
         "flash_spi": nf.get("spi_bus", 0),
+        "flash_kib": d["mcu"].get("flash_kib") or 0,
         "flash_pins": [s(nf.get(k)) for k in ("cs", "sck", "miso", "mosi")],
         "sd_spi": sd.get("spi_bus", 0),
         "sd_cs": s(sd.get("cs")), "sd_sck": s(sd.get("sck")), "sd_miso": s(sd.get("miso")),
@@ -382,13 +458,26 @@ def to_ir(d: dict) -> dict:
     }
 
 
+def check_set(defs) -> None:
+    """Cross-file rules: display names are unique across boards and diagnostic profiles."""
+    seen = {}
+    for d in defs:
+        name = d["display_name"]
+        _req(name not in seen, f"duplicate display_name {name!r}: {seen.get(name)} and {d['board_id']}")
+        seen[name] = d["board_id"]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate BobFlight board definitions")
     ap.add_argument("files", nargs="*", type=Path)
     ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     ap.add_argument("--json", action="store_true", help="print the parsed definitions")
     a = ap.parse_args()
-    files = a.files or board_files(a.root)
+    try:
+        files = a.files or board_files(a.root)
+    except BoardDefError as e:
+        print(f"FAIL {e}", file=sys.stderr)
+        return 2
     out, bad = {}, 0
     for f in files:
         try:
@@ -396,6 +485,11 @@ def main() -> int:
         except (BoardDefError, OSError) as e:
             bad += 1
             print(f"FAIL {f}: {e}", file=sys.stderr)
+    try:
+        check_set(out.values())
+    except BoardDefError as e:
+        bad += 1
+        print(f"FAIL {e}", file=sys.stderr)
     if a.json:
         print(json.dumps(out, indent=2))
     if bad:

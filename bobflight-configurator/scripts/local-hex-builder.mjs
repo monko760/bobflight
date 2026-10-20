@@ -13,7 +13,13 @@ const LIMIT = 8 * 1024 * 1024;
 // Board list, labels and custom-profile limits come only from boards/<board_id>.yaml,
 // through the validated generated catalog (npm run targets:check keeps it current).
 const catalog = require('../ui/src/targets/catalog.generated.json');
-const mains = catalog.boards.filter(b => b.support !== 'host-only' && b.build_label && catalog.mcus.find(m => m.id === b.mcu)?.status === 'implemented');
+// Main images: board has a build_label and an implemented F7 MCU backend (F4 is diagnostic-only).
+export function mainBoards(cat) {
+  return cat.boards.filter(b => { const m = cat.mcus.find(x => x.id === b.mcu); return b.support !== 'host-only' && b.build_label && m?.status === 'implemented' && m.family === 'F7'; });
+}
+const mains = mainBoards(catalog);
+// Toolchains the main-image build accepts: those of the MCUs behind buildable boards.
+const toolchains = [...new Set(mains.map(b => catalog.mcus.find(m => m.id === b.mcu).toolchain))];
 const diagnostics = catalog.diagnostic_profiles;
 const known = [...mains.map(b => b.id), ...diagnostics.map(p => p.id)];
 export function resolveBuildProfile(input) {
@@ -76,13 +82,15 @@ export async function compileHex(profile,{repo=REPO,signal,log=()=>{}}={}) {
     let image,fileName,manifest=null;
     if(profile.diagnostic) {
       await run(python,[...py,path.join(firmware,'tools/build_f405_usb_diagnostic.py'),'--out',temp],ctx,180000);
-      image=path.join(temp,'bobflight-mltempf4-usb-diagnostic.hex');
+      const hexes=(await fs.readdir(temp)).filter(f=>f.endsWith('.hex'));
+      if(hexes.length!==1)throw new Error('Diagnostic build did not produce exactly one HEX image.');
+      image=path.join(temp,hexes[0]);
       fileName=profile.artifactName;
     } else {
       const cmake=await executable(['cmake'],env);
       const make=await executable(process.platform==='win32'?['mingw32-make']:['make'],env);
       const resolved=JSON.parse(await run(python,[...py,path.join(firmware,'scripts/target_registry.py'),'resolve',profile.boardId,'--json','--hardware'],{...ctx,log:null}));
-      if(resolved.board.id!==profile.boardId || !['cmake/stm32f745.cmake','cmake/stm32f722.cmake'].includes(resolved.toolchain))throw new Error('Target registry returned an unsupported build recipe.');
+      if(resolved.board.id!==profile.boardId || !toolchains.includes(resolved.toolchain))throw new Error('Target registry returned an unsupported build recipe.');
       const build=path.join(temp,'build');
       await run(cmake,['-S',firmware,'-B',build,'-G',process.platform==='win32'?'MinGW Makefiles':'Unix Makefiles',`-DCMAKE_MAKE_PROGRAM=${make}`,`-DCMAKE_TOOLCHAIN_FILE=${path.join(firmware,resolved.toolchain)}`,`-DBOBFLIGHT_BOARD=${profile.boardId}`,'-DBOBFLIGHT_HOST_SMOKE=OFF','-DBOBFLIGHT_ACCEL_BENCH_RELAXED=OFF','-DBOBFLIGHT_PROVE_RESET=OFF','-DBOBFLIGHT_BOOT_LED_DIAGNOSTICS=OFF'],ctx);
       await run(cmake,['--build',build,'-j','2'],ctx,240000);

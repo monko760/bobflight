@@ -21,7 +21,7 @@ mcu:
   target: stm32f722
   part: STM32F722
   hse_mhz: 8
-  flash_kib: 512             # checked at boot (ir_load.c FLASHSIZE == 512)
+  flash_kib: 512             # checked at boot: generated BOARD_GENERATED_FLASH_KIB vs ST FLASHSIZE register
   linker_script: cmake/stm32f722.ld
 usb:
   cdc: true

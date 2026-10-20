@@ -49,6 +49,8 @@ def strip(text: str) -> str:
     """Drop the Source IR path comment and the UART block (plus its one separating blank line)."""
     out, skip, eat_blank = [], False, False
     for line in text.splitlines(keepends=True):
+        if line.startswith("#define BOARD_GENERATED_FLASH_KIB "):
+            continue
         if eat_blank:
             eat_blank = False
             if line == "\n":
@@ -107,17 +109,46 @@ class Equivalence(unittest.TestCase):
             self.assertEqual(strip_keys(cur), strip_keys(old))
         self.assertEqual(sorted(p["id"] for p in new["diagnostic_profiles"]), ["custom_f405xg_usb", "mltempf4"])
 
+    def test_flash_size_generated_from_yaml(self):
+        """FLASHSIZE checked at boot comes from mcu.flash_kib and equals main's hardcoded 512u."""
+        import re
+        main = (GOLDEN / "ir_load_main_5bea523.c").read_text()
+        main_kib = int(re.search(r"0x1FF07A22u==(\d+)u", main).group(1))
+        self.assertIn("==BOARD_GENERATED_FLASH_KIB)", (ROOT / "src/board/ir_load.c").read_text())
+        for board in ("matek_f722_px", "tmotor_f7_v2"):
+            with self.subTest(board=board):
+                d = ir_codegen.board_def.load(ROOT / "boards" / f"{board}.yaml")
+                self.assertEqual(d["mcu"]["flash_kib"], main_kib)
+                self.assertIn(f"#define BOARD_GENERATED_FLASH_KIB {main_kib}u ", generated(board))
+        # Kakute: device size unverified (F745 ships as 512 or 1024 KiB) -> not checked, never guessed.
+        self.assertIn("#define BOARD_GENERATED_FLASH_KIB 0u ", generated("kakute_f7_hdv"))
+
+    def test_checked_in_header_fresh(self):
+        cmd = [sys.executable, "scripts/ir_codegen.py", "boards/dummy.yaml", "-o", "src/board/pins_generated.h", "--check"]
+        self.assertEqual(subprocess.run(cmd, cwd=ROOT, capture_output=True).returncode, 0)
+        with tempfile.TemporaryDirectory() as t:
+            stale = Path(t) / "pins_generated.h"
+            stale.write_text((ROOT / "src/board/pins_generated.h").read_text().replace("FLASH_KIB 0u", "FLASH_KIB 1u"))
+            r = subprocess.run(cmd[:4] + [str(stale), "--check"], cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 3)
+            self.assertIn("is stale", r.stderr)
+
     def test_linker_scripts_match_build(self):
+        """The build takes mcu.linker_script from the YAML; main's choice per board is frozen here."""
+        main = {"kakute_f7_hdv": "cmake/stm32f745.ld", "tmotor_f7_v2": "cmake/stm32f722.ld",
+                "matek_f722_px": "cmake/stm32f722_config.ld", "mltempf4": "cmake/components/f405xg.ld",
+                "custom_f405xg_usb": "cmake/components/f405xg.ld"}
+        for board, ld in main.items():
+            with self.subTest(board=board):
+                self.assertEqual(ir_codegen.board_def.load(ROOT / "boards" / f"{board}.yaml")["mcu"]["linker_script"], ld)
+        for board in ("kakute_f7_hdv", "tmotor_f7_v2", "matek_f722_px"):
+            out = subprocess.run([sys.executable, str(ROOT / "scripts/target_registry.py"), "resolve", board, "--cmake"],
+                                 check=True, capture_output=True, text=True).stdout
+            self.assertIn(f'set(BOBFLIGHT_BOARD_LINKER_SCRIPT "{main[board]}")', out)
         cmake = (ROOT / "CMakeLists.txt").read_text()
-        for board in ("kakute_f7_hdv", "tmotor_f7_v2"):
-            d = ir_codegen.board_def.load(ROOT / "boards" / f"{board}.yaml")
-            tool = (ROOT / f"cmake/{d['mcu']['target']}.cmake").read_text()
-            self.assertIn(Path(d["mcu"]["linker_script"]).name, tool)
-        d = ir_codegen.board_def.load(ROOT / "boards/matek_f722_px.yaml")
-        self.assertIn(d["mcu"]["linker_script"], cmake)
-        for board in ("mltempf4", "custom_f405xg_usb"):
-            d = ir_codegen.board_def.load(ROOT / "boards" / f"{board}.yaml")
-            self.assertIn(d["mcu"]["linker_script"], (ROOT / "tools/build_f405_usb_diagnostic.py").read_text())
+        self.assertIn('-T${_BF_LD_SCRIPT}', cmake)
+        self.assertIn('set(_BF_LD_SCRIPT "${CMAKE_SOURCE_DIR}/${BOBFLIGHT_BOARD_LINKER_SCRIPT}")', cmake)
+        self.assertNotIn(".ld\")", cmake.split("set(_BF_LD_SCRIPT")[0].split("bobflight.elf")[-1])
 
 
 if __name__ == "__main__":

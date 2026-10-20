@@ -22,9 +22,16 @@ export const diagnosticProfiles = (raw as unknown as { diagnostic_profiles: Diag
 export function diagnosticProfile(boardId: string): DiagnosticProfile | undefined {
   return diagnosticProfiles.find(p => p.id === boardId);
 }
-/** Main-image boards the local HEX builder can compile (board file has a build_label). */
-export function buildableBoard(boardId: string) {
-  const board = catalog.boards.find(b => b.id === boardId);
-  const mcu = board ? mcuForBoard(boardId) : undefined;
-  return board && board.support !== 'host-only' && board.build_label && mcu?.status === 'implemented' ? board : undefined;
+/** The custom (user-confirmed MCU/flash/HSE) diagnostic profile limits, if this id is one. */
+export function customProfile(boardId: string) {
+  return diagnosticProfile(boardId)?.custom ?? undefined;
+}
+/** Main-image boards the local HEX builder can compile: board file has a build_label and
+ *  its MCU backend is implemented; main images are F7-only (F4 is diagnostic-profile only). */
+type CatalogLike = { boards: readonly { id: string; mcu: string; support: string; build_label?: string | null }[];
+  mcus: readonly { id: string; family: string; status: string }[] };
+export function buildableBoard(boardId: string, cat: CatalogLike = catalog) {
+  const board = cat.boards.find(b => b.id === boardId);
+  const mcu = board ? cat.mcus.find(m => m.id === board.mcu) : undefined;
+  return board && board.support !== 'host-only' && board.build_label && mcu?.status === 'implemented' && mcu.family === 'F7' ? board : undefined;
 }

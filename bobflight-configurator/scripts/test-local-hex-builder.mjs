@@ -43,3 +43,11 @@ try {
   for(let i=0;i<100&&!aborted;i++)await new Promise(r=>setTimeout(r,5));assert(aborted);
   console.log('PASS local builder: exact recipes, unsupported generic blocked, no arbitrary parameters, GET never compiles, origin/host/token/type guards, one active build, disconnect cancellation.');
 } finally {server.closeAllConnections();await new Promise(r=>server.close(r));}
+{
+  const { mainBoards } = await import('./local-hex-builder.mjs');
+  const mcus=[{id:'f7',family:'F7',status:'implemented'},{id:'f7p',family:'F7',status:'planned'},{id:'f4',family:'F4',status:'implemented'}];
+  const b=(id,mcu,build_label,support='development')=>({id,mcu,support,build_label});
+  const got=mainBoards({mcus,boards:[b('ok','f7','L'),b('nolabel','f7',null),b('planned','f7p','L'),b('f4main','f4','L'),b('host','f7','L','host-only')]}).map(x=>x.id);
+  assert.deepEqual(got,['ok']);
+  console.log('PASS local builder main boards: build_label, implemented MCU, F7 family, not host-only');
+}
