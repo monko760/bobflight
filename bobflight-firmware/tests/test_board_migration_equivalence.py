@@ -133,6 +133,15 @@ class Equivalence(unittest.TestCase):
             self.assertEqual(r.returncode, 3)
             self.assertIn("is stale", r.stderr)
 
+    def test_identity_tokens_restricted(self):
+        ir = ir_codegen.load_board(ROOT / "boards/kakute_f7_hdv.yaml")
+        self.assertEqual(ir_codegen.identity(ir), ("kakute_f7_hdv", "stm32f745", "stm32f745"))
+        for key, bad in (("board_id", "Kakute"), ("board_id", "k k"), ("mcu_target", "stm32.f745"),
+                         ("mcu", "STM32F745!"), ("board_id", 'k"x'), ("board_id", "")):
+            with self.subTest(key=key, bad=bad):
+                with self.assertRaisesRegex(ir_codegen.board_def.BoardDefError, "outside \\[a-z0-9_-\\]"):
+                    ir_codegen.identity(dict(ir, **{key: bad}))
+
     def test_linker_scripts_match_build(self):
         """The build takes mcu.linker_script from the YAML; main's choice per board is frozen here."""
         main = {"kakute_f7_hdv": "cmake/stm32f745.ld", "tmotor_f7_v2": "cmake/stm32f722.ld",
