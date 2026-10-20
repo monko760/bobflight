@@ -342,6 +342,29 @@ class Schema(unittest.TestCase):
         self.bad(KAKUTE.replace("hse_mhz: 8", "hse_mhz: *x"), "unsupported scalar")
         self.bad(KAKUTE.replace("hse_mhz: 8", "hse_mhz:"), "needs a nested block")
 
+    def test_parser_errors(self):
+        self.bad(KAKUTE.replace("adc: {vbat: PC3,", "adc: {vbat: ,"), r"empty value \(write `absent`\)")
+        self.bad(KAKUTE.replace("led: {led0: PA2}", "led: {led0: PA2}}"), "unbalanced flow collection")
+        self.bad(KAKUTE.replace("led: {led0: PA2}", "led: {led0: PA2"), "unterminated flow mapping")
+        self.bad(KAKUTE.replace("led: {led0: PA2}", "led: {led0 PA2}"), "bad flow item 'led0 PA2'")
+        self.bad(KAKUTE.replace("led: {led0: PA2}", "led: {Led0: PA2}"), "bad flow item")
+        self.bad(KAKUTE.replace("led: {led0: PA2}", "led: [PA2"), "unterminated flow list")
+        self.bad(KAKUTE.replace("  - {uart: 1, tx: PA9, rx: PA10}", "  - uart: 1"), r"use `- \{\.\.\.\}` list items")
+        no_rows = re.sub(r"\n  - \{uart: [^\n]*", "", KAKUTE).replace("\nuarts:", "\nuarts: {uart: 6}", 1)
+        self.bad(no_rows, r"^uarts: expected list \(use \[\] for none\)")
+        with self.assertRaisesRegex(BoardDefError, "board definition must be a mapping"):
+            validate(parse_yaml("- {a: 1}\n"))
+
+    def test_load_runs_tree_checks(self):
+        with tempfile.TemporaryDirectory() as t:
+            (Path(t) / "boards").mkdir()
+            (Path(t) / "boards/kakute_f7_hdv.yaml").write_text(KAKUTE)
+            with self.assertRaisesRegex(BoardDefError, "has no targets/mcus definition"):
+                board_def.load(Path(t) / "boards/kakute_f7_hdv.yaml")
+            with self.assertRaisesRegex(BoardDefError, "has no targets/mcus definition"):
+                board_def.load(Path(t) / "boards/kakute_f7_hdv.yaml", Path(t))
+        self.assertEqual(board_def.load(ROOT / "boards/kakute_f7_hdv.yaml")["board_id"], "kakute_f7_hdv")
+
     def test_bad_values(self):
         for old, new, rx in (("cs: PE4", "cs: PE16", "invalid pin 'PE16'"), ("cs: PE4", "cs: E4", "invalid pin 'E4'"),
                              ("cs: PE4", "cs: PL4", "invalid pin 'PL4'"),
