@@ -65,6 +65,10 @@ async function confirmBoard() {
   const manual=container.findAll((e)=>e.tagName==='INPUT'&&e.getAttribute('id')==='manual-board-confirm')[0];
   if(manual) await check(manual,true);
 }
+async function confirmManual() {
+  const manual=container.findAll((e)=>e.tagName==='INPUT'&&e.getAttribute('id')==='manual-board-confirm')[0];
+  if(manual) await check(manual,true);
+}
 async function click(el: FakeElement) {
   flushSync(() => reactProps(el).onClick({}));
   await sleep(10);
@@ -140,7 +144,7 @@ async function prepare() {
   scenario.pick=async()=>({vendorId:0x0483,productId:0xdf11,productName:'same device'});
   const root=mount();await prepare();
   assert(!inputById('full-chip-erase').checked,'full erase starts OFF');
-  await click(buttonByText('Select DFU device'));await check(inputById('board-match-confirmed'),true);
+  await click(buttonByText('Select DFU device'));await confirmBoard();
   await check(inputById('full-chip-erase'),true);
   assert(visibleText(container).includes('All firmware and saved settings will be erased'));
   assert(visibleText(container).includes('OTP memory, option bytes, or external memory'));
@@ -148,9 +152,9 @@ async function prepare() {
   await click(buttonByText('Flash'));assert.equal(scenario.flashes,0,'imperative handler rejects missing erase consent');
   await check(inputById('full-erase-confirmed'),true);assert(!isDisabled(buttonByText('Flash')));
   await load('bobflight.hex');assert(!inputById('full-erase-confirmed').checked,'same-name replacement resets erase consent');
-  await check(inputById('board-match-confirmed'),true);await check(inputById('full-erase-confirmed'),true);
+  await confirmBoard();await check(inputById('full-erase-confirmed'),true);
   await click(buttonByText('Select DFU device'));assert(!inputById('full-erase-confirmed').checked,'even same device selection resets consent');
-  await check(inputById('board-match-confirmed'),true);await check(inputById('full-erase-confirmed'),true);
+  await confirmBoard();await check(inputById('full-erase-confirmed'),true);
   await check(inputById('full-chip-erase'),false);await check(inputById('full-chip-erase'),true);
   assert(!inputById('full-erase-confirmed').checked,'toggling full erase does not reuse acknowledgement');
   await check(inputById('full-erase-confirmed'),true);
@@ -160,7 +164,7 @@ async function prepare() {
   assert(isDisabled(inputById('full-chip-erase')) && isDisabled(inputById('full-erase-confirmed')),'choice frozen during erase/flash');
   operation.resolve();assert(await waitFor(()=>!busy));
   assert(!inputById('full-erase-confirmed').checked,'success consumes erase consent');assert(gate,'post-flash recovery checks still required');
-  await click(buttonByText('Select DFU device'));await check(inputById('board-match-confirmed'),true);await check(inputById('full-erase-confirmed'),true);
+  await click(buttonByText('Select DFU device'));await confirmBoard();await check(inputById('full-erase-confirmed'),true);
   scenario.flash=async()=>{throw new Error('test erase failure');};await click(buttonByText('Flash'));assert(await waitFor(()=>!busy));
   assert(!inputById('full-erase-confirmed').checked,'failure consumes erase consent');assert(gate);
   await click(buttonByText('Select DFU device'));await check(inputById('full-erase-confirmed'),true);
@@ -176,7 +180,7 @@ async function prepare() {
   await check(inputById('full-chip-erase'),true);await check(inputById('full-erase-confirmed'),true);
   await check(inputById('use-mock-flash'),true);await sleep(20);
   assert(!inputById('full-erase-confirmed').checked,'switch to demo resets destructive acknowledgement');
-  await check(inputById('mock-understood'),true);
+  await check(inputById('mock-understood'),true);await confirmManual();
   assert(isDisabled(buttonByText('Flash')));await click(buttonByText('Flash'));assert.equal(scenario.flashes,0);
   await check(inputById('full-erase-confirmed'),true);await click(buttonByText('Flash'));assert(await waitFor(()=>!busy));
   assert.equal(scenario.lastOptions.eraseMode,'full-chip');assert.equal(scenario.kinds.at(-1),'mock');assert(!gate,'demo never sets physical recovery gate');
