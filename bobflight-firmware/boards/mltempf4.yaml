@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+# Motolab Tempest F4 (MLTEMPF4). Experimental USB-only diagnostic profile; there is
+# no main F405 firmware target yet, so the main codegen/CMake never selects this file.
+# Facts copied from docs/f405-imu-spi.md, docs/f405-usb-diagnostic.md and
+# src/hal/stm32f4 gyro GPIO preparation (PRs #76-#93), which cite
+# https://github.com/betaflight/config/blob/e0273b9564854e0ee1fbadd8200875b30bd35650/configs/MOLA/MLTEMPF4/config.h
+# Assumptions, not measurements: STM32F405xG, 1 MiB flash, 8 MHz crystal.
+# USB is PA11/PA12; PA9 is left untouched. Motors, UARTs, LED, ADC unknown here -> absent.
+schema_version: 1
+board_id: mltempf4
+display_name: Motolab Tempest F4 / MLTEMPF4 USB diagnostic
+manufacturer: Motolab
+status: bf-derived
+support: diagnostic
+capabilities: {motor_output: false, usb_cdc: true, sd_logging: false}
+configurator:
+  image_profile: f405-usb-diagnostic
+  build_label: "Experimental USB-only reference image; no sensors, motors, storage or bl command."
+  artifact_name: bobflight-mltempf4-usb-diagnostic.hex
+  mcu_display: STM32F405xG
+  menu_order: 1               # Configurator flasher list position
+  support_label: diagnostic only
+mcu:
+  target: stm32f405
+  part: STM32F405
+  hse_mhz: 8
+  flash_kib: 1024
+  linker_script: cmake/components/f405xg.ld
+usb: {cdc: true, dm: PA11, dp: PA12}
+gyro:
+  chip: MPU6000
+  spi_bus: 1
+  cs: PA4
+  exti: PC5
+  sck: PA5
+  miso: PA6
+  mosi: PA7
+  orientation: CW180_DEG
+baro: absent
+nor_flash: absent
+sd: absent
+adc: {vbat: absent, current: absent}
+motors: []
+led: {led0: absent}
+beeper: absent
+uarts: []
+receiver: absent

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+# Custom / unknown F405 board: basic USB-only bring-up profile (same diagnostic image as
+# MLTEMPF4). Not arbitrary board generation: motors, sensors, receiver, UARTs and storage
+# stay unassigned (absent). The user must confirm the fixed custom parameters below.
+schema_version: 1
+board_id: custom_f405xg_usb
+display_name: Custom / unknown board (basic bring-up)
+manufacturer: absent
+status: stub
+support: diagnostic
+capabilities: {motor_output: false, usb_cdc: true, sd_logging: false}
+configurator:
+  image_profile: f405-usb-diagnostic
+  build_label: "Experimental USB-only reference image; no sensors, motors, storage or bl command."
+  artifact_name: bobflight-custom-f405xg-usb-diagnostic.hex
+  mcu_display: STM32F405xG
+  menu_order: 2               # Configurator flasher list position
+  support_label: USB-only reference profile
+  custom: {mcu: STM32F405, flash_kib: 1024, hse_hz: 8000000}
+mcu:
+  target: stm32f405
+  part: STM32F405
+  hse_mhz: 8
+  flash_kib: 1024
+  linker_script: cmake/components/f405xg.ld
+usb: {cdc: true, dm: PA11, dp: PA12}
+gyro: absent
+baro: absent
+nor_flash: absent
+sd: absent
+adc: {vbat: absent, current: absent}
+motors: []
+led: {led0: absent}
+beeper: absent
+uarts: []
+receiver: absent

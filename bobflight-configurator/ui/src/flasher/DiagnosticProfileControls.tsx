@@ -1,10 +1,21 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
-import { catalog } from '../targets/catalog';
-export function customProfileProblem(custom: boolean,mcu: string,flash: string,hse: string): string|null {
+import { catalog, diagnosticProfiles } from '../targets/catalog';
+type CustomLimits = { mcu: string; flash_kib: number; hse_hz: number };
+const customDiag = diagnosticProfiles.find(p => p.custom) ?? null;
+const catalogCustom = customDiag?.custom ?? null;
+/** "STM32F405xG, 1 MiB flash, 8 MHz HSE" from the custom profile's boards/<id>.yaml. */
+export function diagnosticAssumptionText(p: { mcu_display: string; custom: CustomLimits | null } | null = customDiag): string {
+  if (!p || !p.custom) return "Diagnostic profile limits unavailable";
+  const kib = p.custom.flash_kib;
+  const flash = kib % 1024 === 0 ? `${kib / 1024} MiB` : `${kib} KiB`;
+  return `${p.mcu_display}, ${flash} flash, ${p.custom.hse_hz / 1000000} MHz HSE`;
+}
+/** Limits come from the custom profile's boards/<id>.yaml (configurator.custom). */
+export function customProfileProblem(custom: boolean,mcu: string,flash: string,hse: string,limits: CustomLimits|null = catalogCustom): string|null {
   if(!custom)return null;
   if(!mcu||!flash||!hse)return "Confirm the custom board's MCU, flash density and external crystal frequency.";
-  if(mcu!=='STM32F405')return `A basic USB-only image is not implemented here for ${mcu}. No MCU fallback will be used.`;
-  if(flash!=='1024'||hse!=='8000000')return 'The available basic image requires STM32F405xG, 1024 KiB flash and an 8 MHz external crystal. Other combinations need a matching build.';
+  if(!limits||mcu!==limits.mcu)return `A basic USB-only image is not implemented here for ${mcu}. No MCU fallback will be used.`;
+  if(flash!==String(limits.flash_kib)||hse!==String(limits.hse_hz))return `The available basic image requires ${limits.mcu}xG, ${limits.flash_kib} KiB flash and an ${limits.hse_hz/1000000} MHz external crystal. Other combinations need a matching build.`;
   return null;
 }
 interface Props {
@@ -31,7 +42,7 @@ export function DiagnosticProfileControls(p:Props) {
       </select>
       {problem&&<p role="status">{problem}</p>}
     </>}
-    <p>STM32F405xG, 1 MiB flash, 8 MHz HSE, 3.3 V. USB on PA11/PA12; PA9 unchanged. No motors, sensors, configuration writes or software bootloader command. Use USB power only with no attached peripherals. Motolab values are reference assumptions, not automatic board detection.</p>
+    <p>{diagnosticAssumptionText()}, 3.3 V. USB on PA11/PA12; PA9 unchanged. No motors, sensors, configuration writes or software bootloader command. Use USB power only with no attached peripherals. Motolab values are reference assumptions, not automatic board detection.</p>
     <label><input id="diagnostic-assumptions" type="checkbox" checked={p.confirmed} disabled={p.disabled||!!problem} onChange={e=>p.onConfirm(e.target.checked)}/> I confirm these MCU/flash/crystal/USB-routing assumptions match my board and independent BOOT recovery works.</label>
     <p>The flasher checks embedded diagnostic identity and the DFU flash layout before erase. Layout is not exact chip identity. Build a matching diagnostic below or reuse an existing matching HEX. Other MCU/crystal combinations remain unavailable until their backends are implemented.</p>
   </div>;

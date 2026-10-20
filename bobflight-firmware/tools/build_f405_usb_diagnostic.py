@@ -4,8 +4,13 @@
 import argparse
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'scripts'))
+import board_def  # noqa: E402
+# Linker script comes from the board definition (boards/mltempf4.yaml mcu.linker_script).
+LINKER=ROOT/board_def.load(ROOT/'boards/mltempf4.yaml')['mcu']['linker_script']
 FLAGS=['-std=c11','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin',
        '-mcpu=cortex-m4','-mthumb','-mfpu=fpv4-sp-d16','-mfloat-abi=hard','-Os']
 def build(out):
@@ -23,7 +28,7 @@ def build(out):
         obj=out/f'unit-{i}.o';subprocess.run([cc,*flags,'-c',str(source),'-o',str(obj)],check=True,timeout=60);objects.append(str(obj))
     elf=out/'bobflight-mltempf4-usb-diagnostic.elf'
     subprocess.run([cc,*FLAGS,'-nostdlib',*objects,'-Wl,-L,'+str(ROOT/'cmake/components'),
-        '-Wl,-T,'+str(ROOT/'cmake/components/f405xg.ld'),
+        '-Wl,-T,'+str(LINKER),
         '-Wl,--orphan-handling=error,--build-id=none,--strip-debug',
         '-Wl,--start-group','-lc','-lgcc','-Wl,--end-group','-o',str(elf)],check=True,timeout=60)
     for fmt,suffix in [('binary','.bin'),('ihex','.hex')]:

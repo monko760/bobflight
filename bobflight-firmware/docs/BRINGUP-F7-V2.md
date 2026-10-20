@@ -79,7 +79,7 @@ See also: `tmotor_f7_v2.PROVENANCE.md`, `NOTICE-BF-DERIVED-IR.md` under board-de
 
 ## 0. Prep (host / CI)
 
-- [ ] `python3 scripts/ir_codegen.py boards/tmotor-ir/tmotor_f7_v2.yaml -o src/board/pins_generated.h`  
+- [ ] `python3 scripts/ir_codegen.py boards/tmotor_f7_v2.yaml -o src/board/pins_generated.h`  
       (or `-DBOBFLIGHT_BOARD=tmotor_f7_v2` once FW Lead lands the CMake switch)
 - [ ] Host smoke: `./scripts/test_dual_board_ci.sh` (or `BOARD=tmotor_f7_v2 ./scripts/test_host_cli.sh` after select)
 - [ ] F722 image:  

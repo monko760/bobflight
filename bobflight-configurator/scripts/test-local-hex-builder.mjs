@@ -5,6 +5,18 @@ import { createBuildMiddleware, resolveBuildProfile } from './local-hex-builder.
 const selection=(boardId='mltempf4',extra={})=>({boardId,customMcu:'',customFlash:'',customHse:'',...extra});
 for(const id of ['kakute_f7_hdv','tmotor_f7_v2','matek_f722_px','mltempf4'])assert.equal(resolveBuildProfile(selection(id)).boardId,id);
 assert(resolveBuildProfile(selection('custom_f405xg_usb',{customMcu:'STM32F405',customFlash:'1024',customHse:'8000000'})).diagnostic);
+// Migration equivalence (main 5bea523): the board-file-driven recipes match the former hardcoded ones.
+const mainLabels={kakute_f7_hdv:'Kakute F7 HDV development firmware; not flight-qualified.',
+  matek_f722_px:'Matek F722-PX sensor/CRSF bring-up with settings storage; no motor output, OSD or onboard blackbox logging.',
+  tmotor_f7_v2:'T-Motor F7 V2 sensor-only firmware; no motor output.',
+  mltempf4:'Experimental USB-only reference image; no sensors, motors, storage or bl command.',
+  custom_f405xg_usb:'Experimental USB-only reference image; no sensors, motors, storage or bl command.'};
+const customOk={customMcu:'STM32F405',customFlash:'1024',customHse:'8000000'};
+for(const [id,label] of Object.entries(mainLabels)){const p=resolveBuildProfile(selection(id,id==='custom_f405xg_usb'?customOk:{}));
+  assert.equal(p.label,label);assert.equal(p.diagnostic,id==='mltempf4'||id==='custom_f405xg_usb');assert.equal(p.profile,p.diagnostic?'f405-usb-diagnostic':'main');}
+assert.equal(resolveBuildProfile(selection('mltempf4')).artifactName,'bobflight-mltempf4-usb-diagnostic.hex');
+assert.equal(resolveBuildProfile(selection('custom_f405xg_usb',customOk)).artifactName,'bobflight-custom-f405xg-usb-diagnostic.hex');
+assert.throws(()=>resolveBuildProfile(selection('custom_f405xg_usb',{...customOk,customHse:'12000000'})),/F405xG \/ 1024 KiB \/ 8 MHz/);
 for(const bad of [null,[],{},selection('dummy'),selection('../kakute_f7_hdv'),selection('stm32h743'),selection('mltempf4',{flags:'-DARM=1'}),selection('custom_f405xg_usb'),selection('custom_f405xg_usb',{customMcu:'STM32F405',customFlash:'512',customHse:'8000000'})])assert.throws(()=>resolveBuildProfile(bad));
 let starts=0,finish,aborted=false;
 const middleware=createBuildMiddleware({compile:async(p,ctx)=>{starts++;ctx.log('bounded build log');return await new Promise((resolve,reject)=>{finish=()=>resolve({fileName:'verified.hex',hex:':00000001FF\n',profile:p.profile});ctx.signal.addEventListener('abort',()=>{aborted=true;reject(new Error('aborted'));});});}});
@@ -31,3 +43,11 @@ try {
   for(let i=0;i<100&&!aborted;i++)await new Promise(r=>setTimeout(r,5));assert(aborted);
   console.log('PASS local builder: exact recipes, unsupported generic blocked, no arbitrary parameters, GET never compiles, origin/host/token/type guards, one active build, disconnect cancellation.');
 } finally {server.closeAllConnections();await new Promise(r=>server.close(r));}
+{
+  const { mainBoards } = await import('./local-hex-builder.mjs');
+  const mcus=[{id:'f7',family:'F7',status:'implemented'},{id:'f7p',family:'F7',status:'planned'},{id:'f4',family:'F4',status:'implemented'}];
+  const b=(id,mcu,build_label,support='development')=>({id,mcu,support,build_label});
+  const got=mainBoards({mcus,boards:[b('ok','f7','L'),b('nolabel','f7',null),b('planned','f7p','L'),b('f4main','f4','L'),b('host','f7','L','host-only')]}).map(x=>x.id);
+  assert.deepEqual(got,['ok']);
+  console.log('PASS local builder main boards: build_label, implemented MCU, F7 family, not host-only');
+}

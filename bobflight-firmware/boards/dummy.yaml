@@ -1,30 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
-# Dummy F722 IR — no pins. status: stub until Hardware verifies a real board.
-meta:
-  board_id: dummy
-  product_name: BobFlight dummy
-  manufacturer: BobDroneCo
-  ir_version: 1
-  status: stub
-  sources:
-    - "owned skeleton — not a T-Motor pinout"
+# Dummy F722 board for host builds. No pins: status stub, every pin HAL_PIN_INVALID.
+schema_version: 1
+board_id: dummy
+display_name: Host simulation
+manufacturer: BobDroneCo
+status: stub
+support: host-only
+capabilities: {motor_output: false, usb_cdc: false, sd_logging: false}
+configurator:
+  image_profile: main
 mcu:
-  family: STM32F722
-usb:
-  enable_cdc: true
-gyro:
-  chip: none
-  spi_bus: 0
-  cs_pin: ""
-  exti_pin: ""
-motors:
-  count: 4
-  protocol_default: DShot600
-  dshot_mode: pwm_timer
-  channels: []
-uart:
-  serial_rx:
-    uart: ""
-    pins:
-      rx: ""
-    protocol_default: CRSF
+  target: stm32f722
+  part: STM32F722
+  hse_mhz: absent
+  flash_kib: absent
+  linker_script: absent
+usb: {cdc: true, dm: absent, dp: absent}
+gyro: absent
+baro: absent
+nor_flash: absent
+sd: absent
+adc: {vbat: absent, current: absent}
+motors: []
+led: {led0: absent}
+beeper: absent
+uarts: []
+receiver: absent

@@ -15,7 +15,7 @@ import type { ParsedHex } from "./intel-hex";
 import { assertMcuGate, normalizeFirmware } from "./mcu-gate";
 import { readDfuInterfaceName } from "./dfu-descriptors";
 import { assertF405DfuLayout } from "./f405-diagnostic";
-import { planSectorErases, planFullChipErases, assertMainFlashLayout } from "./flash-sectors";
+import { planSectorErases, planFullChipErases, assertMainFlashLayout, parseDfuFlashLayout, planSectorErasesFromLayout } from "./flash-sectors";
 import {
   DEFAULT_FLASH_BASE,
   MCU_FLASH_SIZE,
@@ -572,8 +572,9 @@ export class WebUsbDfuFlasher implements Flasher {
 
     const regions = parsed.regions.length > 0
       ? parsed.regions : [{ address: parsed.baseAddress, data: parsed.bytes }];
-    const imageSectors = planSectorErases(regions, opts?.expectedMcu ?? parsed.mcu);
-    const eraseAddresses = fullErase ? planFullChipErases(opts?.expectedMcu) : imageSectors;
+    // Static-table check (offline, before USB); the device's own DFU layout decides below.
+    planSectorErases(regions, opts?.expectedMcu ?? parsed.mcu);
+    let eraseAddresses: number[] = [];
     if (!Number.isSafeInteger(startAddress) || startAddress !== DEFAULT_FLASH_BASE) {
       throw new Error("This board flasher requires application base 0x08000000.");
     }
@@ -602,7 +603,9 @@ export class WebUsbDfuFlasher implements Flasher {
     try {
       device = await this.openDevice(DEFAULT_ALT);
       this.assertClaimedForFlash();
-      if (fullErase || opts?.imageProfile === "f405-usb-diagnostic") {
+      // Read the DFU flash-layout descriptor for every MCU and plan erases from it.
+      // Missing/malformed descriptor or an image that does not fit: refuse before any erase/write.
+      {
         const selected = device.configuration?.interfaces.find(i => i.interfaceNumber === this.interfaceNumber);
         const alternate = selected?.alternates.find(a => a.alternateSetting === DEFAULT_ALT);
         let name = alternate?.interfaceName;
@@ -611,7 +614,9 @@ export class WebUsbDfuFlasher implements Flasher {
             this.interfaceNumber, DEFAULT_ALT, () => this.throwIfCancelled(0, total));
         }
         if (fullErase) assertMainFlashLayout(name, opts?.expectedMcu);
-        else assertF405DfuLayout(name);
+        if (opts?.imageProfile === "f405-usb-diagnostic") assertF405DfuLayout(name);
+        const layoutSectors = planSectorErasesFromLayout(regions, parseDfuFlashLayout(name));
+        eraseAddresses = fullErase ? planFullChipErases(opts?.expectedMcu) : layoutSectors;
         this.throwIfCancelled(0, total);
       }
       await this.prepareDevice(device);

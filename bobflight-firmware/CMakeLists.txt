@@ -28,9 +28,9 @@ endif()
 file(WRITE "${CMAKE_BINARY_DIR}/resolved-target.cmake" "${_target_cmake}")
 include("${CMAKE_BINARY_DIR}/resolved-target.cmake")
 set(BOBFLIGHT_IR_YAML "${CMAKE_SOURCE_DIR}/${BOBFLIGHT_IR_RELATIVE}")
-file(GLOB _bf_target_defs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/targets/mcus/*.json" "${CMAKE_SOURCE_DIR}/targets/boards/*.json")
+file(GLOB _bf_target_defs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/targets/mcus/*.json" "${CMAKE_SOURCE_DIR}/boards/*.yaml")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_bf_target_defs}
-  "${CMAKE_SOURCE_DIR}/scripts/target_registry.py" "${BOBFLIGHT_IR_YAML}")
+  "${CMAKE_SOURCE_DIR}/scripts/target_registry.py" "${CMAKE_SOURCE_DIR}/scripts/board_def.py" "${BOBFLIGHT_IR_YAML}")
 if(CMAKE_CROSSCOMPILING)
   if(BOBFLIGHT_BOARD_SUPPORT STREQUAL "host-only" OR NOT BOBFLIGHT_MCU_STATUS STREQUAL "implemented")
     message(FATAL_ERROR "This target has no implemented hardware backend")
@@ -69,7 +69,7 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/generated/board"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/ir_codegen.py"
           "${BOBFLIGHT_IR_YAML}" -o "${BOBFLIGHT_PINS_GEN}"
-  DEPENDS "${BOBFLIGHT_IR_YAML}" "${CMAKE_SOURCE_DIR}/scripts/ir_codegen.py"
+  DEPENDS "${BOBFLIGHT_IR_YAML}" "${CMAKE_SOURCE_DIR}/scripts/ir_codegen.py" "${CMAKE_SOURCE_DIR}/scripts/board_def.py"
   COMMENT "BobFlight IR codegen → ${BOBFLIGHT_PINS_GEN}"
   VERBATIM)
 add_custom_target(bobflight_pins_gen DEPENDS "${BOBFLIGHT_PINS_GEN}")
@@ -156,6 +156,8 @@ include_directories(
 if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME target_registry_validation COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_target_registry.py)
   add_test(NAME target_artifact_publication COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_target_artifact.py)
+  add_test(NAME board_definition_schema COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_board_schema.py)
+  add_test(NAME board_migration_equivalence COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_board_migration_equivalence.py ${CMAKE_C_COMPILER})
   add_executable(bobflight_capture_test src/flight/blackbox_capture.c src/flight/flight_recorder.c src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_blackbox_capture.c)
   target_link_libraries(bobflight_capture_test m)
   add_test(NAME blackbox_production_capture COMMAND bobflight_capture_test)
@@ -750,7 +752,6 @@ else()
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_NOR_PROBE=1 BOBFLIGHT_BARO=1)
     target_sources(bobflight.elf PRIVATE src/hal/stm32f7/i2c_reg.c src/drivers/bmp280.c src/drivers/barometer.c)
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_CONFIG_FLASH_F722=1)
-    set(BF_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/stm32f722_config.ld")
   endif()
   # Kakute has an implemented motor backend; all normal runtime guards remain.
   if(BOBFLIGHT_BOARD STREQUAL "kakute_f7_hdv")
@@ -768,7 +769,11 @@ else()
   if(DEFINED BOBFLIGHT_TARGET_MCU)
     target_compile_definitions(bobflight.elf PRIVATE BOBFLIGHT_TARGET_MCU=${BOBFLIGHT_TARGET_MCU})
   endif()
-  set(_BF_LD_SCRIPT "${BF_LINKER_SCRIPT}")
+  # boards/<id>.yaml mcu.linker_script is the only linker-script source for firmware images.
+  if(NOT BOBFLIGHT_BOARD_LINKER_SCRIPT)
+    message(FATAL_ERROR "boards/${BOBFLIGHT_BOARD}.yaml must set mcu.linker_script for a hardware build")
+  endif()
+  set(_BF_LD_SCRIPT "${CMAKE_SOURCE_DIR}/${BOBFLIGHT_BOARD_LINKER_SCRIPT}")
   message(STATUS "BobFlight: linker ${_BF_LD_SCRIPT} MCU=${BOBFLIGHT_TARGET_MCU}")
   target_link_options(bobflight.elf PRIVATE
     -nostartfiles

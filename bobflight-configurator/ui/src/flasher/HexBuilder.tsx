@@ -1,6 +1,6 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useRef, useState } from "react";
-import { catalog } from "../targets/catalog";
+import { buildableBoard, catalog, diagnosticProfile } from "../targets/catalog";
 
 export interface HexBuilderProps {
   boardId: string;
@@ -32,28 +32,24 @@ export function isBoardSupported(
     };
   }
 
-  if (boardId === "custom_f405xg_usb") {
-    const normMcu = customMcu;
-    const valid = normMcu === "STM32F405" && customFlash === "1024" && customHse === "8000000";
-    if (!valid) {
+  // Every buildable board and profile comes from boards/<board_id>.yaml via the generated catalog.
+  const profile = diagnosticProfile(boardId);
+  if (profile) {
+    const c = profile.custom;
+    if (c && !(customMcu === c.mcu && customFlash === String(c.flash_kib) && customHse === String(c.hse_hz))) {
       return {
         supported: false,
         isF405Diagnostic: true,
         reason:
-          "Custom basic build is only supported for STM32F405, 1024 KiB flash, and 8 MHz HSE external crystal.",
+          `Custom basic build is only supported for ${c.mcu}, ${c.flash_kib} KiB flash, and ${c.hse_hz / 1000000} MHz HSE external crystal.`,
       };
     }
     return { supported: true, isF405Diagnostic: true };
   }
 
-  if (boardId === "mltempf4") {
-    return { supported: true, isF405Diagnostic: true };
-  }
-
   const board = catalog.boards.find((b) => b.id === boardId);
   if (board) {
-    const mcu = catalog.mcus.find((m) => m.id === board.mcu);
-    if (["kakute_f7_hdv", "tmotor_f7_v2", "matek_f722_px"].includes(boardId) && board.support !== "host-only" && mcu && mcu.family === "F7" && mcu.status === "implemented") {
+    if (buildableBoard(boardId)) {
       return { supported: true, isF405Diagnostic: false };
     }
     return {

@@ -2,9 +2,10 @@
 # Copyright 2026 Robert Leclercq
 # SPDX-License-Identifier: Apache-2.0
 """
-Owned board IR → src/board/pins_generated.h
+Board definition (boards/<board_id>.yaml) → src/board/pins_generated.h
 
-Never invents pins. Reads pin strings from IR YAML only.
+Never invents pins. Reads pin strings from the validated board definition only
+(scripts/board_def.py); `absent` renders as HAL_PIN_INVALID.
 stub/draft → HAL_PIN_INVALID.
 bf-derived / verified / golden / ready → pack pins from YAML (no BF config.h).
 Do not vendor GPL config.h into the firmware tree.
@@ -16,8 +17,10 @@ import re
 import sys
 from pathlib import Path
 
-PACKABLE = {"bf-derived", "verified", "golden", "ready"}
-IMU_ORIENTATIONS = {"CW0_DEG", "CW90_DEG", "CW180_DEG", "CW270_DEG", "CW180_DEG_FLIP"}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import board_def  # noqa: E402
+
+PACKABLE = board_def.PACKABLE
 
 
 def _pin_pack(token: str) -> str:
@@ -38,131 +41,13 @@ def _tim_num(token: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def _field(text: str, key: str, default: str = "") -> str:
-    m = re.search(rf"^\s*{re.escape(key)}:\s*(.+)$", text, re.M)
-    if not m:
-        return default
-    v = m.group(1).strip().strip("\"'")
-    if v in ("null", "~", ""):
-        return default
-    return v
+def load_board(path: Path) -> dict:
+    """Validated boards/<board_id>.yaml -> flat view used by render()."""
+    return board_def.to_ir(board_def.load(path))
 
 
-def _channel_pins(text: str) -> list[dict]:
-    chans: list[dict] = []
-    for m in re.finditer(
-        r"-\s*\{\s*index:\s*(\d+)\s*,\s*pin:\s*([A-Z0-9]+)\s*,\s*timer:\s*([A-Z0-9]+)\s*,\s*channel:\s*(\d+)",
-        text,
-    ):
-        chans.append(
-            {
-                "index": int(m.group(1)),
-                "pin": m.group(2),
-                "timer": m.group(3),
-                "channel": int(m.group(4)),
-            }
-        )
-    chans.sort(key=lambda c: c["index"])
-    return chans
-
-
-def parse_ir(raw: str, fallback_id: str) -> dict:
-    status = _field(raw, "status", "stub").lower()
-    align_fields = re.findall(r"^[ \t]*gyro_align:[ \t]*([^\r\n]*)$", raw, re.M)
-    if len(align_fields) > 1 or (status in PACKABLE and len(align_fields) != 1):
-        raise ValueError("physical board requires exactly one gyro_align")
-    align = align_fields[0].strip().strip("\"'") if align_fields else "CW0_DEG"
-    if align not in IMU_ORIENTATIONS:
-        raise ValueError("unsupported gyro_align: " + repr(align))
-    board_id = _field(raw, "board_id", fallback_id)
-    mcu = _field(raw, "family", "STM32F722")
-    hse = _field(raw, "hse_mhz", "0")
-    try:
-        hse_i = int(float(hse))
-    except ValueError:
-        hse_i = 0
-    chip = _field(raw, "chip", "none")
-    try:
-        spi = int(_field(raw, "spi_bus", "0") or "0")
-    except ValueError:
-        spi = 0
-    cs = _field(raw, "cs_pin")
-    exti = _field(raw, "exti_pin")
-    rx_uart = 0
-    tx = rx = ""
-    proto = "CRSF"
-    sm = re.search(r"serial_rx:\s*\n(?P<body>(?:[ \t].*\n)+)", raw)
-    if sm:
-        body = sm.group("body")
-        um = re.search(r"uart:\s*(\d+)", body)
-        if um:
-            rx_uart = int(um.group(1))
-        pm = re.search(r"pins:\s*\{\s*tx:\s*([A-Z0-9]+)\s*,\s*rx:\s*([A-Z0-9]+)", body)
-        if pm:
-            tx, rx = pm.group(1), pm.group(2)
-        pr = re.search(r"protocol_default:\s*([A-Za-z0-9_]+)", body)
-        if pr:
-            proto = pr.group(1)
-    for key in ("flash_spi_bus","flash_cs_pin","flash_sck_pin","flash_miso_pin","flash_mosi_pin"):
-        if len(re.findall(r"^[ \t]*"+key+r":[ \t]*[^\r\n]*$", raw, re.M))>1:
-            raise ValueError("duplicate flash field: "+key)
-    flash_spi = int(_field(raw,"flash_spi_bus","0"))
-    flash_pins = [_field(raw,"flash_"+k+"_pin") for k in ("cs","sck","miso","mosi")]
-    if flash_spi:
-        if flash_spi != 2 or mcu != "STM32F722" or flash_pins != ["PB12","PB13","PB14","PC3"]:
-            raise ValueError("unsupported flash SPI routing")
-        used = [_field(raw,"vbat_pin"),_field(raw,"current_pin"),_field(raw,"led0_pin"),cs,exti,_field(raw,"sck_pin"),_field(raw,"miso_pin"),_field(raw,"mosi_pin"),tx,rx]
-        used += [c["pin"] for c in _channel_pins(raw)]
-        used += [_field(raw,"sd_"+k+"_pin") for k in ("cs","sck","miso","mosi","detect")]
-        if spi == flash_spi or int(_field(raw,"sd_spi_bus","0")) == flash_spi or any(p in used for p in flash_pins):
-            raise ValueError("flash SPI resource conflict")
-    elif any(flash_pins):
-        raise ValueError("flash pins require explicit bus")
-    for key in ("baro_i2c_bus","baro_scl_pin","baro_sda_pin"):
-        if len(re.findall(r"^[ \t]*"+key+r":[ \t]*[^\r\n]*$",raw,re.M))>1:
-            raise ValueError("duplicate barometer field: "+key)
-    baro_i2c=int(_field(raw,"baro_i2c_bus","0"))
-    baro_pins=[_field(raw,"baro_scl_pin"),_field(raw,"baro_sda_pin")]
-    if baro_i2c:
-        if baro_i2c!=1 or mcu!="STM32F722" or baro_pins!=["PB8","PB9"]:
-            raise ValueError("unsupported barometer I2C routing")
-        taken=[cs,exti,tx,rx]+flash_pins+[_field(raw,k) for k in ("sck_pin","miso_pin","mosi_pin","vbat_pin","current_pin","led0_pin","sd_cs_pin","sd_sck_pin","sd_miso_pin","sd_mosi_pin","sd_detect_pin")]
-        taken += [c["pin"] for c in _channel_pins(raw)]
-        if any(pin in taken for pin in baro_pins):raise ValueError("barometer I2C resource conflict")
-    elif any(baro_pins):raise ValueError("barometer pins require explicit bus")
-    led0 = _field(raw, "led0_pin")
-    return {
-        "status": status,
-        "board_id": board_id,
-        "mcu": mcu,
-        "hse": hse_i,
-        "chip": chip[:23],
-        "spi": spi,
-        "cs": cs,
-        "exti": exti,
-        "rx_uart": rx_uart,
-        "tx": tx,
-        "rx": rx,
-        "proto": proto[:11],
-        "led0": led0,
-        "vbat": _field(raw, "vbat_pin"),
-        "current": _field(raw, "current_pin"),
-        "sck": _field(raw, "sck_pin"),
-        "miso": _field(raw, "miso_pin"),
-        "mosi": _field(raw, "mosi_pin"),
-        "align": align,
-        "motors": _channel_pins(raw),
-        "baro_i2c": baro_i2c,
-        "baro_pins": baro_pins,
-        "flash_spi": flash_spi,
-        "flash_pins": flash_pins,
-        "sd_spi": int(_field(raw,"sd_spi_bus","0")),
-        "sd_cs": _field(raw,"sd_cs_pin"),
-        "sd_sck": _field(raw,"sd_sck_pin"),
-        "sd_miso": _field(raw,"sd_miso_pin"),
-        "sd_mosi": _field(raw,"sd_mosi_pin"),
-        "sd_detect": _field(raw,"sd_detect_pin"),
-    }
+UART_BEGIN = "/* BEGIN runtime-selectable serial RX UARTs {uart, tx, rx} */"
+UART_END = "/* END runtime-selectable serial RX UARTs */"
 
 
 def render(src: Path, ir: dict) -> str:
@@ -180,6 +65,7 @@ def render(src: Path, ir: dict) -> str:
     def ch(n: int) -> int:
         return n if pack and n else 0
 
+    uarts = ir.get("uarts", []) if pack else []
     bf = 1 if ir["status"] == "bf-derived" else 0
     verified = 1 if ir["status"] in {"verified", "golden", "ready"} else 0
     dummy = 0 if pack else 1
@@ -257,6 +143,13 @@ def render(src: Path, ir: dict) -> str:
         f"#define BOARD_GENERATED_VBAT_PIN    {pin(ir['vbat'])}",
         f"#define BOARD_GENERATED_CURRENT_PIN {pin(ir['current'])}",
         "",
+        UART_BEGIN,
+        f"#define BOARD_GENERATED_UART_COUNT {len(uarts)}u",
+        "#define BOARD_GENERATED_UART_TABLE" + "".join(
+            f" \\\n    {{{u['uart']}u, {_pin_pack(u['tx'])}, {_pin_pack(u['rx'])}}}," for u in uarts),
+        UART_END,
+        f"#define BOARD_GENERATED_FLASH_KIB {int(ir.get('flash_kib') or 0)}u /* boards/<id>.yaml mcu.flash_kib; 0 = not checked */",
+        "",
         "#endif /* BOBFLIGHT_PINS_GENERATED_H */",
         "",
     ]
@@ -265,22 +158,31 @@ def render(src: Path, ir: dict) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="BobFlight IR → pins_generated.h")
-    ap.add_argument("ir_yaml", type=Path, help="Path to owned board IR YAML")
+    ap.add_argument("ir_yaml", type=Path, help="Path to boards/<board_id>.yaml")
     ap.add_argument("-o", "--output", type=Path, required=True)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--check", action="store_true", help="fail (rc 3) if --output differs from the generated text")
     args = ap.parse_args()
 
     if not args.ir_yaml.is_file():
         print(f"error: IR not found: {args.ir_yaml}", file=sys.stderr)
         return 1
 
-    raw = args.ir_yaml.read_text(encoding="utf-8")
-    if "betaflight/config" in raw.lower() and args.ir_yaml.suffix == ".h":
-        print("error: refuse GPL config.h — pass owned IR YAML only", file=sys.stderr)
-        return 3
-
-    ir = parse_ir(raw, args.ir_yaml.stem)
+    try:
+        ir = load_board(args.ir_yaml)
+    except board_def.BoardDefError as e:
+        print(f"error: {args.ir_yaml}: {e}", file=sys.stderr)
+        return 2
     text = render(args.ir_yaml, ir)
+
+    if args.check:
+        current = args.output.read_text(encoding="utf-8") if args.output.is_file() else None
+        if current != text:
+            print(f"error: {args.output} is stale; regenerate with scripts/ir_codegen.py {args.ir_yaml} -o {args.output}",
+                  file=sys.stderr)
+            return 3
+        print(f"{args.output} is up to date")
+        return 0
 
     if args.dry_run:
         sys.stdout.write(text)

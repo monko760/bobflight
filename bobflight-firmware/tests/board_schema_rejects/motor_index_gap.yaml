@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+# Holybro Kakute F7 HDV. Migrated verbatim from boards/holybro-ir/kakute_f7_hdv.yaml
+# and the UART table in src/board/ir_load.c (main 5bea523).
+# Board facts: betaflight/unified-targets configs/default/HBRO-KAKUTEF7HDV.config
+# https://github.com/betaflight/unified-targets/blob/master/configs/default/HBRO-KAKUTEF7HDV.config
+# Pin facts only; independently implemented drivers. Not bench-verified.
+# Motors 5-6 are in the reference but deferred (firmware packs 4); not listed here.
+schema_version: 1
+board_id: kakute_f7_hdv
+display_name: Kakute F7 HDV
+manufacturer: Holybro
+status: bf-derived
+support: development
+capabilities: {motor_output: true, usb_cdc: true, sd_logging: true}
+configurator:
+  image_profile: main
+  build_label: "Kakute F7 HDV development firmware; not flight-qualified."
+mcu:
+  target: stm32f745
+  part: STM32F745
+  hse_mhz: 8
+  flash_kib: absent          # device size not checked by firmware; image layout is the linker script
+  linker_script: cmake/stm32f745.ld
+usb:
+  cdc: true
+  dm: absent                 # not recorded in the verified IR
+  dp: absent
+gyro:
+  chip: MPU6000
+  spi_bus: 4
+  cs: PE4
+  exti: PE1
+  sck: PE2
+  miso: PE5
+  mosi: PE6
+  orientation: CW270_DEG
+baro: absent
+nor_flash: absent
+sd:                          # SD slot, separate from gyro SPI4
+  spi_bus: 1
+  cs: PA4
+  sck: PA5
+  miso: PA6
+  mosi: PA7
+  detect: PD8
+adc: {vbat: PC3, current: PC2}
+motors:
+  - {index: 1, pin: PB0, timer: TIM3, channel: 3, dma: absent}
+  - {index: 2, pin: PB1, timer: TIM3, channel: 4, dma: absent}
+  - {index: 3, pin: PE9, timer: TIM1, channel: 1, dma: absent}
+  - {index: 5, pin: PE11, timer: TIM1, channel: 2, dma: absent}
+led: {led0: PA2}
+beeper: absent               # not recorded in the verified IR
+uarts:                       # runtime-selectable serial RX ports (board_select_rx_uart)
+  - {uart: 1, tx: PA9, rx: PA10}
+  - {uart: 2, tx: PD5, rx: PD6}
+  - {uart: 3, tx: PB10, rx: PB11}
+  - {uart: 4, tx: PA0, rx: PA1}
+  - {uart: 6, tx: PC6, rx: PC7}
+  - {uart: 7, tx: absent, rx: PE7}
+receiver: {uart: 6, tx: PC6, rx: PC7, protocol: CRSF}

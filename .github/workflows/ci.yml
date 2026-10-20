@@ -25,6 +25,25 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  board-definitions:
+    name: Board definitions — schema validator and migration equivalence
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate every boards/<board_id>.yaml
+        run: python3 scripts/board_def.py
+      - name: Schema validator rejects missing fields and duplicate pin/timer use
+        run: python3 tests/test_board_schema.py
+      - name: Generated pin headers, UART tables and catalog identical to main 5bea523
+        run: python3 tests/test_board_migration_equivalence.py cc
+      - name: Target registry reads only board definitions
+        run: python3 tests/test_target_registry.py
+      - name: Checked-in src/board/pins_generated.h is not stale
+        run: python3 scripts/ir_codegen.py boards/dummy.yaml -o src/board/pins_generated.h --check
+
   firmware-kakute:
     name: Firmware — Kakute F7 HDV cross build
     runs-on: ubuntu-latest

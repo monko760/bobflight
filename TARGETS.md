@@ -13,8 +13,7 @@ Runtime receiver-routing refactoring, flipped/arbitrary sensor transforms and ad
 ## Source of truth
 
 - `bobflight-firmware/targets/mcus/*.json`: schema version, canonical MCU backend ID/part, family, core, toolchain and implementation state.
-- `bobflight-firmware/targets/boards/*.json`: board ID/display name, MCU reference, board IR path, support level and implemented capability metadata.
-- Referenced `boards/**/*.yaml`: existing physical pin, sensor and oscillator facts.
+- `bobflight-firmware/boards/<board_id>.yaml`: one file per board with identity, MCU reference, support level, capabilities, Configurator/HEX-builder data and all pin, sensor and oscillator facts. See [bobflight-firmware/docs/BOARDS.md](bobflight-firmware/docs/BOARDS.md).
 - `scripts/target_registry.py`: standard-library-only validation and resolution.
 
 MCU `id`/`part` identify a canonical backend such as `stm32f722`/`STM32F722`, not a complete package ordering code. Package/bonded-pin validation and broader timer/DMA resource validation remain future work. Do not imply that this registry proves physical wiring or flash size on a connected controller.

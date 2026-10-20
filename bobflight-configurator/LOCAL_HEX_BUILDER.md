@@ -36,4 +36,4 @@ F7 outputs pass the existing independent image check and provenance publisher. F
 
 `npm run test:local-builder` covers endpoint restrictions and UI build flow; normal flasher journey/safety suites continue to run. Test on Windows as well before treating a new toolchain installation as qualified. First use should build/download without flashing, check the selected board/profile/revision, then follow the normal USB-only/props-off flashing procedure if an installation is intended.
 
-Matek installation, sparse-HEX settings layout and hardware checks: [bring-up guide](../bobflight-firmware/boards/matek-ir/BRINGUP.md).
+Matek installation, sparse-HEX settings layout and hardware checks: [bring-up guide](../bobflight-firmware/docs/boards/matek_f722_px-BRINGUP.md).

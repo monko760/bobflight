@@ -93,8 +93,11 @@ bool board_init(void)
 #if defined(BOBFLIGHT_MCU) && (defined(BOBFLIGHT_TARGET_TMOTORF7V2) || defined(BOBFLIGHT_TARGET_MATEKF722PX))
     /* RM0431 F72x/73x device family + ST F722 FLASHSIZE register.
      * Not proof of board identity; reject wrong family/capacity before peripherals. */
+#if BOARD_GENERATED_FLASH_KIB == 0u
+#error "boards/<id>.yaml must give mcu.flash_kib for a board whose FLASHSIZE is checked at boot"
+#endif
     target_mcu_ok=((*(volatile const uint32_t *)(uintptr_t)0xE0042000u & 0xFFFu)==0x452u);
-    if(target_mcu_ok)target_mcu_ok=(*(volatile const uint16_t *)(uintptr_t)0x1FF07A22u==512u);
+    if(target_mcu_ok)target_mcu_ok=(*(volatile const uint16_t *)(uintptr_t)0x1FF07A22u==BOARD_GENERATED_FLASH_KIB);
 #endif
     return loaded && target_mcu_ok;
 }
@@ -112,28 +115,22 @@ bool board_pins_live(void)
     return target_mcu_ok && !g_board.is_dummy && (g_board.ir_verified || g_board.ir_bf_derived);
 }
 
+/* Selectable serial RX UARTs come only from the board definition
+ * (boards/<board_id>.yaml `uarts:` -> BOARD_GENERATED_UART_TABLE). */
+typedef struct { uint8_t uart; hal_pin_t tx, rx; } board_uart_row_t;
+#if BOARD_GENERATED_UART_COUNT > 0
+static const board_uart_row_t k_uarts[BOARD_GENERATED_UART_COUNT] = { BOARD_GENERATED_UART_TABLE };
+#endif
+
 bool board_select_rx_uart(unsigned uart){
-    if(!strcmp(g_board.board_id,"matek_f722_px")){
-        hal_pin_t rx,tx;
-        switch(uart){
-        case 1:rx=HAL_PIN_PACK(0,10);tx=HAL_PIN_PACK(0,9);break;
-        case 2:rx=HAL_PIN_PACK(0,3);tx=HAL_PIN_PACK(0,2);break;
-        case 3:rx=HAL_PIN_PACK(2,11);tx=HAL_PIN_PACK(2,10);break;
-        case 4:rx=HAL_PIN_PACK(0,1);tx=HAL_PIN_PACK(0,0);break;
-        default:return false; /* UART5 lacks a driver; UART6 belongs to Pixel OSD. */
+#if BOARD_GENERATED_UART_COUNT > 0
+    for(unsigned i=0;i<BOARD_GENERATED_UART_COUNT;i++){
+        if(k_uarts[i].uart==uart){
+            g_board.rx_uart=uart;g_board.rx_pin=k_uarts[i].rx;g_board.tx_pin=k_uarts[i].tx;return true;
         }
-        g_board.rx_uart=uart;g_board.rx_pin=rx;g_board.tx_pin=tx;return true;
     }
-    if(strcmp(g_board.board_id,"kakute_f7_hdv"))return false;
-    hal_pin_t rx,tx;
-    switch(uart){
-    case 1:rx=HAL_PIN_PACK(0,10);tx=HAL_PIN_PACK(0,9);break;
-    case 2:rx=HAL_PIN_PACK(3,6);tx=HAL_PIN_PACK(3,5);break;
-    case 3:rx=HAL_PIN_PACK(1,11);tx=HAL_PIN_PACK(1,10);break;
-    case 4:rx=HAL_PIN_PACK(0,1);tx=HAL_PIN_PACK(0,0);break;
-    case 6:rx=HAL_PIN_PACK(2,7);tx=HAL_PIN_PACK(2,6);break;
-    case 7:rx=HAL_PIN_PACK(4,7);tx=HAL_PIN_INVALID;break;
-    default:return false;
-    }
-    g_board.rx_uart=uart;g_board.rx_pin=rx;g_board.tx_pin=tx;return true;
+#else
+    (void)uart;
+#endif
+    return false;
 }

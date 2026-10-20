@@ -1,4 +1,5 @@
-import { catalog, mcuForBoard } from "../targets/catalog";
+import { catalog, mcuForBoard, diagnosticProfiles } from "../targets/catalog";
+const mcuById = (id: string) => catalog.mcus.find(m => m.id === id);
 /**
  * Firmware flasher types — Protocol shapes + UI board helpers.
  * SPDX-License-Identifier: Apache-2.0
@@ -50,10 +51,10 @@ export const BOARD_OPTIONS: BoardOption[] = catalog.boards.flatMap<BoardOption>(
   const mcu = normalizeMcu(target?.part);
   if (board.support === 'host-only' || target?.status !== 'implemented' || !mcu) return [];
   return [{boardId: board.id, label: board.display_name, mcu, mcuDisplay: target.part, support: board.support, motorOutput: board.capabilities.motor_output, primary: false}];
-}).concat([
-  {boardId:'mltempf4', label:'Motolab Tempest F4 / MLTEMPF4 USB diagnostic', mcu:'F405', mcuDisplay:'STM32F405xG', support:'diagnostic only', motorOutput:false, primary:false, imageProfile:'f405-usb-diagnostic'},
-  {boardId:'custom_f405xg_usb', label:'Custom / unknown board (basic bring-up)', mcu:'F405', mcuDisplay:'STM32F405xG', support:'USB-only reference profile', motorOutput:false, primary:false, imageProfile:'f405-usb-diagnostic'},
-]);
+}).concat(diagnosticProfiles.flatMap<BoardOption>(p => {
+  const mcu = normalizeMcu(mcuById(p.mcu)?.part);
+  return mcu ? [{boardId: p.id, label: p.display_name, mcu, mcuDisplay: p.mcu_display, support: p.support_label, motorOutput: false, primary: false, imageProfile: p.image_profile}] : [];
+}));
 export type BoardId = string;
 
 export function normalizeMcu(mcu: ExpectedMcu | undefined): BobFlightMcu | null {

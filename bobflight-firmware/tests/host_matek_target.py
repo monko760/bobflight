@@ -5,7 +5,7 @@ import importlib.util,subprocess,sys,tempfile
 from pathlib import Path
 root=Path(sys.argv[1]).resolve()
 spec=importlib.util.spec_from_file_location('ir',root/'scripts/ir_codegen.py');ir=importlib.util.module_from_spec(spec);spec.loader.exec_module(ir)
-p=root/'boards/matek-ir/matek_f722_px.yaml';d=ir.parse_ir(p.read_text(),p.stem);header=ir.render(p,d)
+p=root/'boards/matek_f722_px.yaml';d=ir.load_board(p);header=ir.render(p,d)
 for expected in ['"matek_f722_px"','"STM32F722"','"CW180_DEG_FLIP"','BOARD_GENERATED_HSE_MHZ      8u','BOARD_GENERATED_GYRO_CS      HAL_PIN_PACK(1u, 2u)','BOARD_GENERATED_GYRO_EXTI    HAL_PIN_PACK(2u, 4u)','BOARD_GENERATED_RX_UART      2u','BOARD_GENERATED_LED0_PIN    HAL_PIN_PACK(0u, 14u)','BOARD_GENERATED_IR_VERIFIED  0']:
  assert expected in header,expected
 with tempfile.TemporaryDirectory() as td:
