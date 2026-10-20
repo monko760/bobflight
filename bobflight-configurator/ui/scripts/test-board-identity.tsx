@@ -8,7 +8,6 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { FlasherPage } from "../src/pages/FlasherPage";
-import { CliPage } from "../src/pages/CliPage";
 import { CommandGate } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { readBoardIdentity, identityView, identityGate } from "../src/flasher/boardIdentity";
@@ -16,7 +15,6 @@ import { BOARD_OPTIONS } from "../src/flasher/types";
 import { RPM_GATE_ATTEMPTS, RPM_GATE_DELAY_MS } from "../src/filters/rpmFilter";
 import { BOARD_ID_MOCK_SCENARIOS, BobFlightCliClient, parseBoardIdentity, type BoardIdMockScenario } from "@bobflight/protocol";
 import { EventEmitter } from "node:events";
-import { cdcStatusChanged, noteBootloaderReboot, resetIdentitySession } from "../src/flasher/identitySession";
 import { scenario as dfu } from "./fixtures/flasherBackendStub";
 import replies from "./fixtures/version-replies.json";
 
@@ -151,7 +149,6 @@ const HEX = [record([2, 0, 0, 4, 8, 0]), record([16, 0, 0, 0, 0, 0, 1, 32, 9, 0,
 
 async function page(scenario: BoardIdMockScenario | undefined, connected = true) {
   const { host } = await gatedMock(scenario);
-  resetIdentitySession(); if (connected) cdcStatusChanged("connected");
   (globalThis as any).__setupTestHost = { host, connectionStatus: connected ? "connected" : "disconnected", postFlashGate: false,
     setPostFlashGate: () => {}, clearPostFlashGateAfterReconnect: async () => false };
   const root = createRoot(container as never); flushSync(() => root.render(<FlasherPage />));
@@ -168,7 +165,7 @@ async function readyMockFlash(file = "bobflight.hex") {
   assert(await waitFor(() => byId("SELECT", "board").value === "kakute_f7_hdv" || props(byId("SELECT", "board")).value === "kakute_f7_hdv"));
   assert.equal(text(byId("CODE", "fc-board-id")), "kakute_f7_hdv"); assert.equal(text(byId("CODE", "fc-board-mcu")), "stm32f745");
   assert.equal(text(byId("CODE", "hex-board-marker")), "unknown");
-  assert.equal(byId("INPUT", "manual-board-confirm"), undefined);
+  assert(byId("INPUT", "manual-board-confirm"), "live DFU default: the confirm is always offered, even on a match");
   assert(text(container).includes("Kakute F7 HDV development firmware") || text(container).includes("Build"), "HEX builder rendered for the pre-selected board");
   flushSync(() => root.unmount());
 }
@@ -289,11 +286,10 @@ const idText = () => text(byId("CODE", "fc-board-id"));
 const pickDfu = async () => { dfu.pick = async () => ({ vendorId: 0x0483, productId: 0xdf11, productName: "DFU" });
   flushSync(() => props(container.findAll((e) => e.tagName === "BUTTON" && text(e).startsWith("Select DFU device"))[0]).onClick({})); await sleep(30); };
 async function setConn(host: unknown, status: string) {
-  if (status === "connected") cdcStatusChanged("connected"); else cdcStatusChanged(status);
   (globalThis as any).__setupTestHost = { ...(globalThis as any).__setupTestHost, host, connectionStatus: status };
 }
 { // X9: auto-detect never overrides a selection the user already made
-  const { host } = await gatedMock("match"); resetIdentitySession();
+  const { host } = await gatedMock("match");
   (globalThis as any).__setupTestHost = { host, connectionStatus: "disconnected", postFlashGate: false, setPostFlashGate: () => {}, clearPostFlashGateAfterReconnect: async () => false };
   const root = createRoot(container as never); flushSync(() => root.render(<FlasherPage />));
   await pick(select(), "matek_f722_px");
@@ -316,7 +312,6 @@ async function setConn(host: unknown, status: string) {
   await mock.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
   let calls = 0; const gate = new CommandGate(() => 1);
   const host = { sendCommand: (c: "version") => gate.run(() => { calls++; if (calls === 1) return Promise.reject(new Error("transport glitch")); return mock.sendCommand(c); }) };
-  resetIdentitySession(); cdcStatusChanged("connected");
   (globalThis as any).__setupTestHost = { host, connectionStatus: "connected", postFlashGate: false, setPostFlashGate: () => {}, clearPostFlashGateAfterReconnect: async () => false };
   const root = createRoot(container as never); flushSync(() => root.render(<FlasherPage />));
   assert(await waitFor(() => text(container).includes("transport glitch")));
@@ -326,84 +321,86 @@ async function setConn(host: unknown, status: string) {
   assert.equal(byId("BUTTON", "board-identity-reread"), undefined, "no Read again once matched");
   flushSync(() => root.unmount());
 }
-{ // B1: a match carries to DFU only after `bl` from the same CDC session
-  const root = await page("match"); assert(await waitFor(() => props(select()).value === "kakute_f7_hdv"));
-  const host = (globalThis as any).__setupTestHost.host;
-  noteBootloaderReboot();
-  await setConn(host, "disconnected"); flushSync(() => root.render(<FlasherPage />)); await pickDfu();
-  assert.equal(idText(), "kakute_f7_hdv", "DFU after bl from the same session keeps the identity");
-  assert.equal(byId("INPUT", "manual-board-confirm"), undefined, "no manual confirm");
-  // A second device selection (another board, or the same one again) is unknown.
-  await pickDfu(); assert.equal(idText(), "unknown"); assert(byId("INPUT", "manual-board-confirm"), "manual confirm required");
-  flushSync(() => root.unmount());
-}
-{ // B1: no bl (BOOT button / other board) -> unknown; a re-plug after a carried identity -> unknown
-  const root = await page("match"); assert(await waitFor(() => idText() === "kakute_f7_hdv"));
-  const host = (globalThis as any).__setupTestHost.host;
-  await setConn(host, "disconnected"); flushSync(() => root.render(<FlasherPage />)); await pickDfu();
-  assert.equal(idText(), "unknown"); assert(byId("INPUT", "manual-board-confirm")); assert.match(text(byId("P", "board-identity-note")), /bootloader reboot/);
-  flushSync(() => root.unmount());
-  const root2 = await page("match"); assert(await waitFor(() => idText() === "kakute_f7_hdv"));
-  noteBootloaderReboot(); await setConn((globalThis as any).__setupTestHost.host, "disconnected"); flushSync(() => root2.render(<FlasherPage />)); await pickDfu();
-  assert.equal(idText(), "kakute_f7_hdv");
-  flushSync(() => (navigator as any).usb.dispatchEvent(new Event("disconnect"))); await sleep(20);
-  assert.equal(idText(), "unknown", "re-plug: identity unknown"); await pickDfu(); assert.equal(idText(), "unknown");
-  flushSync(() => root2.unmount());
-}
-{ // A stale mismatch clears without a reconnect
-  const root = await page("board-mismatch"); assert(await waitFor(() => props(select()).value === "matek_f722_px"));
-  await pick(select(), "kakute_f7_hdv"); assert(text(container).includes("Board mismatch"));
-  const host = (globalThis as any).__setupTestHost.host;
-  await setConn(host, "disconnected"); flushSync(() => root.render(<FlasherPage />)); await pickDfu();
-  assert(!text(container).includes("Board mismatch"), "stale mismatch cleared by the DFU device change");
-  assert(byId("INPUT", "manual-board-confirm"), "manual confirm instead");
-  flushSync(() => root.unmount());
-}
-{ // A new CDC session never inherits an older bl
-  resetIdentitySession(); cdcStatusChanged("connected");
-  const { host } = await gatedMock("match");
-  const r = await readBoardIdentity(host);
-  const { recordSessionIdentity, currentCdcSession, identityForDfuDevice } = await import("../src/flasher/identitySession");
-  recordSessionIdentity(currentCdcSession(), r); noteBootloaderReboot();
-  cdcStatusChanged("disconnected"); cdcStatusChanged("connected"); cdcStatusChanged("disconnected");
-  assert.equal(identityForDfuDevice().kind, "stale", "reconnect between bl and DFU: unknown");
-}
-{ // Live path, single layers: canFlashLive disables Flash, and onFlash refuses on its own
-  const root = await page("match"); assert(await waitFor(() => idText() === "kakute_f7_hdv"));
-  await setConn((globalThis as any).__setupTestHost.host, "disconnected"); flushSync(() => root.render(<FlasherPage />));
-  await pick(select(), "tmotor_f7_v2");
+async function liveReady(boardId: string) {
+  if (props(select()).value !== boardId) await pick(select(), boardId);
   flushSync(() => props(byId("INPUT", "hex-file")).onChange({ target: { files: [{ name: "bobflight.hex", size: HEX.length, text: async () => HEX }] } })); await sleep(30);
   await pickDfu(); await check(byId("INPUT", "props-off"), true); await check(byId("INPUT", "backup-taken"), true);
   await check(byId("INPUT", "board-match-confirmed"), true);
-  assert(byId("INPUT", "manual-board-confirm"), "DFU without bl: manual confirm required");
-  assert(disabled(flashButton()), "canFlashLive: identity gate disables live Flash");
+}
+/** Live DFU: Flash stays disabled and onFlash refuses until the manual confirm is ticked. */
+async function confirmRequired(why: string) {
+  const box = byId("INPUT", "manual-board-confirm"); assert(box, `${why}: manual confirm offered`);
+  assert.equal(box.checked, false, why);
+  assert(disabled(flashButton()), `${why}: Flash disabled without the confirm`);
   const before = dfu.flashes; flushSync(() => props(flashButton()).onClick({})); await sleep(30);
-  assert.equal(dfu.flashes, before, "onFlash guard refuses even when the button is bypassed");
-  await check(byId("INPUT", "manual-board-confirm"), true);
-  assert(!disabled(flashButton()), `confirmed manual selection enables live Flash: ${flashButton().getAttribute("title")} / ${text(container).match(/Flash \(blocked[^)]*\)|Claim ST[^.]*|Confirm exact[^.]*/)}`);
+  assert.equal(dfu.flashes, before, `${why}: onFlash refuses without the confirm`);
+  await check(box, true);
+  assert(!disabled(flashButton()), `${why}: confirm enables Flash (${flashButton().getAttribute("title")})`);
+}
+const cdcOff = async (root: ReturnType<typeof createRoot>) => {
+  (globalThis as any).__setupTestHost = { ...(globalThis as any).__setupTestHost, connectionStatus: "disconnected" };
+  flushSync(() => root.render(<FlasherPage />)); await sleep(10);
+};
+const replug = async () => { flushSync(() => (navigator as any).usb.dispatchEvent(new Event("disconnect"))); await sleep(20); };
+{ // Ruling (c): identity matches exactly -> pre-selected, still the manual confirm in DFU
+  const root = await page("match"); assert(await waitFor(() => props(select()).value === "kakute_f7_hdv"));
+  await cdcOff(root); await liveReady("kakute_f7_hdv");
+  assert.equal(idText(), "kakute_f7_hdv", "identity kept for pre-select");
+  await confirmRequired("exact match");
   // X8 (file): replacing the file resets the manual confirm.
   flushSync(() => props(byId("INPUT", "hex-file")).onChange({ target: { files: [{ name: "other.hex", size: HEX.length, text: async () => HEX }] } })); await sleep(30);
   assert.equal(byId("INPUT", "manual-board-confirm").checked, false, "X8: confirm reset on file change");
   flushSync(() => root.unmount());
 }
-{ // The CLI page records an acknowledged `bl` for the session; an unacknowledged one does not count
-  const { identityForDfuDevice, recordSessionIdentity, currentCdcSession } = await import("../src/flasher/identitySession");
-  for (const [reply, carried] of [["bl: resetting to ST ROM bootloader\r\n", true], ["bl refused: unsaved configuration\r\n", false]] as const) {
-    resetIdentitySession(); cdcStatusChanged("connected");
-    const { host } = await gatedMock("match"); recordSessionIdentity(currentCdcSession(), await readBoardIdentity(host));
-    (globalThis as any).__setupTestHost = { host: { sendCommand: async () => reply, getConnectionStatus: () => "connected" }, connectionStatus: "connected",
-      cliLines: [], appendCli: () => {}, refreshStatus: async () => {} };
-    const root = createRoot(container as never); flushSync(() => root.render(<CliPage />));
-    await pick(byId("INPUT", "cli-input"), "bl");
-    flushSync(() => props(container.findAll((e) => e.tagName === "FORM")[0]).onSubmit({ preventDefault() {} })); await sleep(10);
-    flushSync(() => props(container.findAll((e) => e.tagName === "BUTTON" && text(e) === "Send bl")[0]).onClick({})); await sleep(30);
-    assert.equal(identityForDfuDevice().kind, carried ? "read" : "stale", reply);
-    flushSync(() => root.unmount());
-  }
+{ // after an acknowledged `bl` in the same CDC session: still the confirm
+  const root = await page("match"); assert(await waitFor(() => idText() === "kakute_f7_hdv"));
+  const host = (globalThis as any).__setupTestHost.host;
+  (globalThis as any).__setupTestHost = { ...(globalThis as any).__setupTestHost, host: { ...host, sendCommand: async (c: string) => c === "bl" ? "bl: resetting to ST ROM bootloader\r\n" : host.sendCommand(c) } };
+  assert.match(await (globalThis as any).__setupTestHost.host.sendCommand("bl"), /resetting to ST ROM bootloader/);
+  await cdcOff(root); await liveReady("kakute_f7_hdv");
+  await confirmRequired("after bl ack, same session");
+  flushSync(() => root.unmount());
+}
+{ // after a re-plug: identity stale (unknown) and the confirm
+  const root = await page("match"); assert(await waitFor(() => idText() === "kakute_f7_hdv"));
+  await cdcOff(root); await pickDfu(); await replug();
+  assert.equal(idText(), "unknown", "re-plug: identity unknown"); assert.match(text(byId("P", "board-identity-note")), /disconnected/);
+  await liveReady("kakute_f7_hdv"); await confirmRequired("after re-plug");
+  flushSync(() => root.unmount());
+}
+{ // same-MCU board swap: FC reported matek (F722), a T-Motor (F722) is in DFU. Pre-select is matek.
+  const root = await page("board-mismatch"); assert(await waitFor(() => props(select()).value === "matek_f722_px"));
+  await cdcOff(root); await liveReady("matek_f722_px");
+  await confirmRequired("same-MCU swap");
+  // Mismatch still hard-blocks: selecting the swapped-in board against the detected id.
+  await pick(select(), "tmotor_f7_v2"); assert(text(container).includes("Board mismatch"));
+  assert.equal(byId("INPUT", "manual-board-confirm"), undefined, "mismatch: no confirm override"); assert(disabled(flashButton()));
+  flushSync(() => root.unmount());
+}
+{ // Mismatch blocks across the DFU pick, and a stale one clears after a re-plug (no reconnect)
+  const root = await page("board-mismatch"); assert(await waitFor(() => props(select()).value === "matek_f722_px"));
+  await pick(select(), "kakute_f7_hdv"); await cdcOff(root); await liveReady("kakute_f7_hdv");
+  assert(text(container).includes("Board mismatch"), "detected mismatch still blocks in DFU"); assert(disabled(flashButton()));
+  await replug(); assert(!text(container).includes("Board mismatch"), "stale mismatch cleared by re-plug");
+  await liveReady("kakute_f7_hdv"); await confirmRequired("after stale mismatch cleared");
+  flushSync(() => root.unmount());
+}
+{ // MCU mismatch (board_mcu / board_target) still blocks in DFU
+  const root = await page("mcu-mismatch"); assert(await waitFor(() => idText() === "kakute_f7_hdv"));
+  await pick(select(), "kakute_f7_hdv"); await cdcOff(root); await liveReady("kakute_f7_hdv");
+  assert(text(container).includes("MCU mismatch")); assert.equal(byId("INPUT", "manual-board-confirm"), undefined); assert(disabled(flashButton()));
+  flushSync(() => root.unmount());
+}
+{ // gate API: in DFU the confirm is needed even for a trusted exact match; mock path keeps auto-match
+  const ok = identityView({ kind: "read", identity: parseBoardIdentity("board_id: kakute_f7_hdv\r\nboard_target: stm32f745\r\nboard_mcu: stm32f745\r\n") });
+  assert.equal(identityGate(ok, kakute, "F745", false, true).needsConfirm, true);
+  assert.equal(identityGate(ok, kakute, "F745", false, true).blocked, true);
+  assert.equal(identityGate(ok, kakute, "F745", true, true).blocked, false);
+  assert.equal(identityGate(ok, matek, "F722", true, true).blocked, true, "mismatch blocks in DFU even confirmed");
 }
 { // Gate on its own (defensive API): an untrusted id/mcu/target never auto-matches
   const ok = identityView({ kind: "read", identity: parseBoardIdentity("board_id: kakute_f7_hdv\r\nboard_target: stm32f745\r\nboard_mcu: stm32f745\r\n") });
   for (const v of [{ ...ok, fcBoardId: null }, { ...ok, fcMcu: null }, { ...ok, fcTarget: null }, { ...ok, fcMcu: null, fcTarget: null }])
     assert.equal(identityGate(v, kakute, "F745", false).needsConfirm, true, JSON.stringify(v));
 }
-console.log("PASS FlasherPage: X8 confirm reset, X9 selection kept, Read again, DFU identity only after bl in the same session, re-plug/other device unknown, stale mismatch cleared");
+console.log("PASS FlasherPage: X8 confirm reset, X9 selection kept, Read again, DFU confirm always required (match, bl ack, re-plug, same-MCU swap), mismatch blocks, stale mismatch cleared by re-plug");

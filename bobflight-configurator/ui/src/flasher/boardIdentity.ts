@@ -85,7 +85,10 @@ export interface IdentityGate { blocked: boolean; needsConfirm: boolean; reasons
  * - Otherwise a selection that the FC did not confirm (unknown/missing/malformed/busy id) is a
  *   manual selection and needs the explicit confirm. HEX board markers arrive in PR C: `unknown`.
  */
-export function identityGate(view: IdentityView, selected: BoardOption | undefined, hexMcu: string | null | undefined, manualConfirmed: boolean, options: readonly BoardOption[] = BOARD_OPTIONS): IdentityGate {
+/** `dfu`: live DFU flashing. The DFU device cannot be tied to the CDC session that reported the
+ *  identity, so there the identity only pre-selects and hard-blocks mismatches; the manual confirm
+ *  is always required (Config Lead ruling (c) on #97). */
+export function identityGate(view: IdentityView, selected: BoardOption | undefined, hexMcu: string | null | undefined, manualConfirmed: boolean, dfu = false, options: readonly BoardOption[] = BOARD_OPTIONS): IdentityGate {
   const reasons: string[] = [];
   let hard = false;
   if (view.fcBoardId !== null && !options.some((b) => b.boardId === view.fcBoardId)) {
@@ -106,7 +109,7 @@ export function identityGate(view: IdentityView, selected: BoardOption | undefin
   // Auto-match (B2): trusted id+target+mcu, all equal to the selected catalog entry.
   const autoMatched = !!selected && view.fcBoardId === selected.boardId
     && view.fcMcu !== null && view.fcMcu === catalogMcuToken(selected.mcu) && view.fcTarget === view.fcMcu;
-  const needsConfirm = !hard && !!selected && !autoMatched;
+  const needsConfirm = !hard && !!selected && (dfu || !autoMatched);
   if (needsConfirm && !manualConfirmed) reasons.push("Manual board selection: confirm the board is correct.");
   return { blocked: hard || (needsConfirm && !manualConfirmed), needsConfirm, reasons, hexMarker: "unknown" };
 }
