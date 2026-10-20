@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { WebUsbDfuFlasher } = require('../dist/flasher/webusb-dfu.js');
 const { parseIntelHex } = require('../dist/flasher/intel-hex.js');
-const { planSectorErases, planFullChipErases, assertMainFlashLayout } = require('../dist/flasher/flash-sectors.js');
+const { planSectorErases, planFullChipErases, assertMainFlashLayout, parseDfuFlashLayout } = require('../dist/flasher/flash-sectors.js');
 const { F405_DIAGNOSTIC_MARKERS, validateF405DiagnosticImage } = require('../dist/flasher/f405-diagnostic.js');
 const BASE = 0x08000000;
 
@@ -260,6 +260,36 @@ function parsed(regions) { return {baseAddress:regions[0].address,regions,bytes:
     const missing2=await run(image,'',{layout:null,rawDescriptor:{stall:true}});
     assert.ok(missing2.error);assert.equal(missing2.device.erases.length,0);
     console.log('PASS F7 DFU layout: 512 KiB device refuses 600 KiB (0 erase/0 write), 1 MiB erases descriptor sectors, malformed/missing refused before erase.');
+  }
+  {
+    // One shared descriptor parser. Missing/blank never defaults to a size (K8d).
+    for(const name of [null,undefined,'','   ','\t'])
+      assert.throws(()=>parseDfuFlashLayout(name),/^Error: DFU flash-layout descriptor missing: cannot verify the device flash size\. No erase\/program issued\.$/);
+    for(const name of [null,'']) assert.throws(()=>assertMainFlashLayout(name,'F745'),/descriptor missing/);
+    // Extra segments (second region, appended option bytes) are refused, never truncated to the first (K8g).
+    const one='@Internal Flash /0x08000000/04*032Kg,01*128Kg,03*256Kg';
+    assert.equal(parseDfuFlashLayout(one).totalBytes,1024*1024);
+    for(const extra of [one+'/0x1FFF0000/01*032 e', one+'/0x1FFFC000/01*016 e', one+' /@Option Bytes /0x1FFF0000/01*032 e', one+'/']) {
+      assert.throws(()=>parseDfuFlashLayout(extra),/DFU flash-layout descriptor not understood/,extra);
+      assert.throws(()=>assertMainFlashLayout(extra,'F745'),/not understood/,extra);
+      const r=await run(image,'',{layout:extra});
+      assert.match(r.error?.message??'',/not understood/);assert.equal(r.device.erases.length,0);assert.equal(r.device.writes,0);
+      const f=await run(small,'',{expectedMcu:'F745',eraseMode:'full-chip',layout:extra});
+      assert.match(f.error?.message??'',/not understood/);assert.equal(f.device.outRequests||0,0);
+    }
+    // Full erase keeps the descriptor fit check (K8j): a 600 KiB image on a 512 KiB F722 is refused before any write.
+    {
+      const big=new Uint8Array(600*1024);const bv=new DataView(big.buffer);bv.setUint32(0,0x20010000,true);bv.setUint32(4,BASE+9,true);
+      const r=await run({baseAddress:BASE,bytes:big,regions:[{address:BASE,data:big}]},'',{expectedMcu:'F722',eraseMode:'full-chip',layout:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg'});
+      assert.match(r.error?.message??'',/exceed selected flash/);assert.equal(r.device.outRequests||0,0);
+    }
+    // Full-erase start-vector gate (S8b): bad initial SP, even reset vector -> refused before any DFU write.
+    for(const [sp,reset] of [[0x20020000,BASE+9],[0x20010000,BASE+8]]) {
+      const d=region(BASE,128).data;const v=new DataView(d.buffer);v.setUint32(0,sp,true);v.setUint32(4,reset,true);
+      const r=await run({baseAddress:BASE,bytes:d,regions:[{address:BASE,data:d}]},'',{expectedMcu:'F722',eraseMode:'full-chip',layout:'@Internal Flash /0x08000000/04*016Kg,01*064Kg,03*128Kg'});
+      assert.match(r.error?.message??'',/Full erase requires valid BobFlight F7 stack and mapped Thumb reset vectors/);assert.equal(r.device.outRequests||0,0);
+    }
+    console.log('PASS descriptor parser: missing/blank refused (no default size), extra segments and option bytes refused for sector and full erase.');
   }
   console.log('PASS: sector coverage, deduplication, F722/F745 boundaries, stale-error recovery, programming errors, short transfers, readback mismatch, cancellation, DFU state transitions, leave errors, and address bounds.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
