@@ -66,4 +66,10 @@
 #define BOARD_GENERATED_UART_TABLE
 /* END runtime-selectable serial RX UARTs */
 
+/* BEGIN board identity reported by `version` (from boards/<board_id>.yaml) */
+#define BOARD_GENERATED_IDENT_ID     "dummy"
+#define BOARD_GENERATED_IDENT_TARGET "stm32f722"
+#define BOARD_GENERATED_IDENT_MCU    "stm32f722"
+/* END board identity */
+
 #endif /* BOBFLIGHT_PINS_GENERATED_H */

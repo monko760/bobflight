@@ -148,6 +148,10 @@ async function main() {
     flushSync(() => reactProps(fileInput).onChange({ target: { files: [file] }, currentTarget: { files: [file] } }));
     await sleep(20);
 
+    // No flight-controller board identity in this harness: manual selection needs the explicit confirm.
+    assert.equal(isDisabled(buttonByText("Flash")), true);
+    await check(inputById("manual-board-confirm"), true);
+
     // Flash button should now be enabled for demo
     const flashBtn = buttonByText("Flash");
     assert.equal(isDisabled(flashBtn), false);

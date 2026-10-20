@@ -58,6 +58,13 @@ async function selectOption(el: FakeElement, value: string) {
   flushSync(() => reactProps(el).onChange({ target: { value }, currentTarget: { value } }));
   await sleep(10);
 }
+/** Both explicit acknowledgements: the physical board/image match and (no FC board identity
+ * in this harness, so the selection is manual) the manual-board confirm. */
+async function confirmBoard() {
+  await check(inputById('board-match-confirmed'),true);
+  const manual=container.findAll((e)=>e.tagName==='INPUT'&&e.getAttribute('id')==='manual-board-confirm')[0];
+  if(manual) await check(manual,true);
+}
 async function click(el: FakeElement) {
   flushSync(() => reactProps(el).onClick({}));
   await sleep(10);
@@ -104,9 +111,9 @@ async function prepare() {
   flushSync(()=>{clickPicker({});clickPicker({})});assert.equal(scenario.picks,1);
   assert(isDisabled(inputById('use-mock-flash')));
   picker.resolve({vendorId:0x0483,productId:0xdf11});await sleep(30);
-  await check(inputById('board-match-confirmed'),true);assert(!isDisabled(buttonByText('Flash')));
+  await confirmBoard();assert(!isDisabled(buttonByText('Flash')));
   await load('bobflight.hex'); assert(!inputById('board-match-confirmed').checked, 'same filename replacement must invalidate acknowledgement');
-  await check(inputById('board-match-confirmed'),true);
+  await confirmBoard();
   flushSync(()=>usbEvents.dispatchEvent(new Event('disconnect')));await sleep(20);
   assert(isDisabled(buttonByText('Flash')),'USB detach must invalidate selection');
   // Changing the target invalidates the physical board/image acknowledgement.
@@ -116,7 +123,7 @@ async function prepare() {
 }
 {
   gate=false;const root=mount();await prepare();scenario.pick=async()=>({vendorId:0x0483,productId:0xdf11});
-  await click(buttonByText('Select DFU device'));await check(inputById('board-match-confirmed'),true);
+  await click(buttonByText('Select DFU device'));await confirmBoard();
   assert(!isDisabled(buttonByText('Flash')));const operation=deferred<void>();scenario.flash=()=>operation.promise;scenario.flashes=0;
   const start=reactProps(buttonByText('Flash')).onClick;flushSync(()=>{start({});start({})});
   assert.equal(scenario.flashes,1);assert(gate);assert(busy);
@@ -147,7 +154,7 @@ function f405Hex() {
   assert(isDisabled(buttonByText('Flash')),'diagnostic assumptions require explicit acknowledgement');
   await check(inputById('diagnostic-assumptions'),true);
   await click(buttonByText('Select DFU device'));
-  await check(inputById('board-match-confirmed'),true);
+  await confirmBoard();
   assert(!isDisabled(buttonByText('Flash')),'explicit diagnostic profile must accept matching test image');
   await click(buttonByText('Flash'));await sleep(30);
   assert.deepEqual(scenario.lastOptions,{expectedMcu:'F405',verify:true,leave:false,imageProfile:'f405-usb-diagnostic'});

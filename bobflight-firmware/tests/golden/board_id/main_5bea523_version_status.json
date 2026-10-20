@@ -1,0 +1,21 @@
+{
+ "_comment": "SPDX-License-Identifier: Apache-2.0. Captured from origin/main 5bea523 host builds (bobflight_host) per board; frozen for the board-id additive-only test.",
+ "boards": {
+  "dummy": {
+   "version_reply": "BobFlight 0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2-sdprobe2-bbl2-sdread1\r\n",
+   "status_board_line": "board: dummy\r\n"
+  },
+  "kakute_f7_hdv": {
+   "version_reply": "BobFlight 0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2-sdprobe2-bbl2-sdread1\r\n",
+   "status_board_line": "board: kakute_f7_hdv\r\n"
+  },
+  "tmotor_f7_v2": {
+   "version_reply": "BobFlight 0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore2-flightdev1\r\n",
+   "status_board_line": "board: tmotor_f7_v2\r\n"
+  },
+  "matek_f722_px": {
+   "version_reply": "BobFlight 0.2.0-prototype-matekf722px-bench1-crsf1-bl1-store13-cal2-mount1-actual1-dshot1-flash",
+   "status_board_line": "board: matek_f722_px\r\n"
+  }
+ }
+}

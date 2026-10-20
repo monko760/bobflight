@@ -46,7 +46,7 @@ int main(void){
 
 
 def strip(text: str) -> str:
-    """Drop the Source IR path comment and the UART block (plus its one separating blank line)."""
+    """Drop the Source IR path comment, the UART block and the board identity block (each plus its one separating blank line)."""
     out, skip, eat_blank = [], False, False
     for line in text.splitlines(keepends=True):
         if eat_blank:
@@ -55,11 +55,11 @@ def strip(text: str) -> str:
                 continue
         if line.startswith(" * Source IR:"):
             continue
-        if line.startswith(ir_codegen.UART_BEGIN):
+        if line.startswith(ir_codegen.UART_BEGIN) or line.startswith(ir_codegen.IDENT_BEGIN):
             skip = True
         if not skip:
             out.append(line)
-        if skip and line.startswith(ir_codegen.UART_END):
+        if skip and (line.startswith(ir_codegen.UART_END) or line.startswith(ir_codegen.IDENT_END)):
             skip, eat_blank = False, True
     return "".join(out)
 

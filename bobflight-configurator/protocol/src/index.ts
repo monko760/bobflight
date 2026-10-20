@@ -195,3 +195,6 @@ export type { MotorDirectionMockScenario } from "./motor-direction-mock";
 export { F405_USB_DIAGNOSTIC_PROFILE, F405_DIAGNOSTIC_MARKERS, hasF405DiagnosticMarkers, validateF405DiagnosticImage, assertF405DfuLayout } from "./flasher/f405-diagnostic";
 
 export {isBoardAlignmentCommand,STORAGE_SCOPE_V13,STORAGE_PAYLOAD_BYTES_V13} from "./storage";
+
+export { BOARD_ID_KEYS, BOARD_ID_TOKEN, BOARD_ID_MOCK_SCENARIOS, parseBoardIdentity, boardIdFieldText, boardIdMockVersion } from "./board-id";
+export type { BoardIdKey, BoardIdField, BoardIdentity, BoardIdMockScenario } from "./board-id";
