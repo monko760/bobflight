@@ -196,5 +196,5 @@ export { F405_USB_DIAGNOSTIC_PROFILE, F405_DIAGNOSTIC_MARKERS, hasF405Diagnostic
 
 export {isBoardAlignmentCommand,STORAGE_SCOPE_V13,STORAGE_PAYLOAD_BYTES_V13} from "./storage";
 
-export { BOARD_ID_KEYS, BOARD_ID_TOKEN, BOARD_ID_MOCK_SCENARIOS, parseBoardIdentity, boardIdFieldText, boardIdMockVersion } from "./board-id";
+export { BOARD_ID_KEYS, BOARD_ID_TOKEN, BOARD_ID_MOCK_SCENARIOS, parseBoardIdentity, boardIdentityComplete, BOARD_ID_MAX, boardIdFieldText, boardIdMockVersion } from "./board-id";
 export type { BoardIdKey, BoardIdField, BoardIdentity, BoardIdMockScenario } from "./board-id";

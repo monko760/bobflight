@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { cdcStatusChanged } from "../flasher/identitySession";
 import {
   createHost,
   type BobFlightHost,
@@ -54,6 +55,7 @@ export function HostProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const offStatus = host.onStatus((s) => {
       connectionGenRef.current++;
+      cdcStatusChanged(s);
       setConnectionStatus(s);
       if (s !== "connected") {
         setVersion(null);

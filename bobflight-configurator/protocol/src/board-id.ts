@@ -17,19 +17,35 @@ export type BoardIdField =
   | { kind: "missing" }
   | { kind: "malformed"; raw: string };
 export type BoardIdentity = Record<BoardIdKey, BoardIdField>;
+export const BOARD_ID_MAX = 48;
 
+/**
+ * `version` has no end marker and the client ends a reply after an idle pause, so a reply
+ * can be cut anywhere. Rules (Config Lead, #97 review):
+ * - A key counts ONLY on a CRLF-terminated line; the unterminated tail is ignored, so a cut
+ *   inside a value never yields a shorter valid-looking token.
+ * - A key that appears more than once is malformed (shows `unknown (a | b)`).
+ * - All three keys must be valid tokens. Otherwise none is trusted: valid ones are reported as
+ *   malformed (shown `unknown (<verbatim>)`), missing ones stay missing.
+ */
 export function parseBoardIdentity(versionReply: string): BoardIdentity {
+  const lines = versionReply.split("\r\n").slice(0, -1); // complete CRLF lines only
   const out = {} as BoardIdentity;
-  const lines = versionReply.split(/\r?\n/);
   for (const key of BOARD_ID_KEYS) {
-    const hits = lines.filter((l) => l.startsWith(key + ":"));
-    if (hits.length === 0) { out[key] = { kind: "missing" }; continue; }
-    const raw = hits[0].slice(key.length + 1).replace(/^ /, "");
-    out[key] = hits.length === 1 && raw.length <= 48 && BOARD_ID_TOKEN.test(raw)
-      ? { kind: "value", token: raw }
-      : { kind: "malformed", raw: hits.length === 1 ? raw : hits.map((h) => h.slice(key.length + 1).trim()).join(" | ") };
+    const hits = lines.filter((l) => l.startsWith(key + ":")).map((l) => l.slice(key.length + 1).replace(/^ /, ""));
+    if (hits.length === 0) out[key] = { kind: "missing" };
+    else if (hits.length > 1) out[key] = { kind: "malformed", raw: hits.join(" | ") };
+    else out[key] = hits[0].length <= BOARD_ID_MAX && BOARD_ID_TOKEN.test(hits[0])
+      ? { kind: "value", token: hits[0] } : { kind: "malformed", raw: hits[0] };
   }
+  if (!BOARD_ID_KEYS.every((k) => out[k].kind === "value"))
+    for (const k of BOARD_ID_KEYS) { const f = out[k]; if (f.kind === "value") out[k] = { kind: "malformed", raw: f.token }; }
   return out;
+}
+
+/** True only when all three keys were read as valid tokens. */
+export function boardIdentityComplete(id: BoardIdentity): boolean {
+  return BOARD_ID_KEYS.every((k) => id[k].kind === "value");
 }
 
 /** Text shown for one field: the token verbatim, `unknown` when missing, `unknown (<raw>)` when malformed. */

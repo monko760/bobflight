@@ -381,7 +381,7 @@ export class MockBobFlightHost implements BobFlightHost {
         ].join("\r\n");
       case "version":
         // Board auto-detect mocks (PR B). Without a scenario: the original pre-board-id reply.
-        return this.boardIdScenario ? boardIdMockVersion(this.boardIdScenario).replace(/\r\n$/, "") : "BobFlight 0.1.0-skeleton";
+        return this.boardIdScenario ? boardIdMockVersion(this.boardIdScenario) : "BobFlight 0.1.0-skeleton";
       case "status": {
         const gyroOk = this.gyroOk() ? "yes" : "no";
         const arm = this.armed ? "armed" : "disarmed";

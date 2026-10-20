@@ -26,6 +26,7 @@ import {
 } from "../flasher";
 import { useHost } from "../hooks/useHost";
 import { identityGate, identityView, readBoardIdentity, type IdentityRead, type VersionHost } from "../flasher/boardIdentity";
+import { currentCdcSession, dfuDeviceLost, identityForDfuDevice, recordSessionIdentity, sessionIdentity } from "../flasher/identitySession";
 import { TargetCatalog } from "../targets/TargetCatalog";
 import { HexBuilder } from "../flasher/HexBuilder";
 import { DiagnosticConsole } from "../flasher/DiagnosticConsole";
@@ -135,7 +136,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   const [propsOff, setPropsOff] = useState(false);
   const [backupTaken, setBackupTaken] = useState(false);
   const [boardMatchConfirmed, setBoardMatchConfirmed] = useState(false);
-  const [identityRead, setIdentityRead] = useState<IdentityRead>({ kind: "idle" });
+  const [identityRead, setIdentityRead] = useState<IdentityRead>(() => sessionIdentity());
   const [manualBoardConfirmed, setManualBoardConfirmed] = useState(false);
   const [fullChipErase, setFullChipErase] = useState(false);
   const [fullEraseConfirmed, setFullEraseConfirmed] = useState(false);
@@ -176,19 +177,24 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     [boardId],
   );
 
-  // Board auto-detect: read `version` once per CDC connection (gated, bounded retry).
-  // The result is kept after CDC disconnects, because DFU flashing requires CDC closed.
+  // Board auto-detect: read `version` per CDC connection (gated, bounded retry), and on 'Read again'.
+  // The result is kept after CDC disconnects only for a DFU device reached by `bl` from the
+  // same CDC session (identitySession.ts); any other DFU device makes it unknown.
+  const [identityReadSeq, setIdentityReadSeq] = useState(0);
   useEffect(() => {
     if (connectionStatus !== "connected" || !host || typeof host.sendCommand !== "function") return;
     const ac = new AbortController();
+    const session = currentCdcSession();
     void readBoardIdentity(host as VersionHost, ac.signal).then((r) => {
       if (ac.signal.aborted) return;
+      recordSessionIdentity(session, r);
       setIdentityRead(r);
       const v = identityView(r);
+      // Auto-detect never overrides a selection the user already made (X9).
       if (v.preselect) setBoardId((cur) => (cur === "" ? (v.preselect as BoardId) : cur));
     }).catch(() => {});
     return () => ac.abort();
-  }, [connectionStatus, host]);
+  }, [connectionStatus, host, identityReadSeq]);
   const idView = useMemo(() => identityView(identityRead), [identityRead]);
 
   const onBuildBusy = useCallback((active: boolean) => {
@@ -284,7 +290,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   useEffect(() => {
     const usb = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & {usb?: EventTarget}).usb;
     if (!usb?.addEventListener) return;
-    const disconnected = () => { setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); setBoardMatchConfirmed(false); setFullEraseConfirmed(false); };
+    const disconnected = () => { setIdentityRead(dfuDeviceLost()); setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); setBoardMatchConfirmed(false); setFullEraseConfirmed(false); };
     usb.addEventListener('disconnect', disconnected);
     return () => usb.removeEventListener('disconnect', disconnected);
   }, []);
@@ -373,6 +379,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
       const name =
         info.productName ??
         `VID ${info.vendorId.toString(16)} PID ${info.productId.toString(16)}`;
+      setIdentityRead(identityForDfuDevice());
       setClaimedVid(info.vendorId);
       setClaimedPid(info.productId);
       setDeviceLabel(
@@ -735,6 +742,9 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
             {" · "}firmware file board marker <code id="hex-board-marker">{idGate.hexMarker}</code>
           </p>
           {idView.note && <p className="muted" id="board-identity-note">{idView.note}</p>}
+          {idView.canRetry && connectionStatus === "connected" && (
+            <button type="button" id="board-identity-reread" onClick={() => setIdentityReadSeq((n) => n + 1)}>Read again</button>
+          )}
           {idGate.reasons.filter((r) => !r.startsWith("Manual")).map((r) => (
             <p key={r} role="alert" className="board-identity-block" style={{ color: "#fca5a5" }}>{r}</p>
           ))}

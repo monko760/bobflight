@@ -25,7 +25,7 @@ await build({
         return { path: path.join(here,'fixtures','flasherBackendStub.ts') };
       });
       b.onResolve({ filter: /(^|\/)hooks\/useHost$/ }, (args) => {
-        if (!args.importer.endsWith(path.join("src", "pages", "FlasherPage.tsx"))) return undefined;
+        if (!["FlasherPage.tsx", "CliPage.tsx"].some((f) => args.importer.endsWith(path.join("src", "pages", f)))) return undefined;
         swapped++;
         return { path: path.join(here, "fixtures", "useHostStub.ts") };
       });
@@ -33,5 +33,5 @@ await build({
   }],
 });
 
-if (swapped !== 1) throw new Error(`expected FlasherPage's useHost import to be swapped once, got ${swapped}`);
+if (swapped !== 2) throw new Error(`expected the useHost imports of FlasherPage and CliPage to be swapped, got ${swapped}`);
 await import(pathToFileURL(outfile).href);

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { noteBootloaderReboot } from "../flasher/identitySession";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
 import {
@@ -48,6 +49,7 @@ export function CliPage() {
     try {
       const reply = await host.sendCommand(cmd);
       if (isBootloaderCommand(cmd) && /bl: resetting to ST ROM bootloader/.test(reply)) {
+        noteBootloaderReboot();
         appendCli("[bootloader] Reset acknowledged; verify STM32 DFU 0483:DF11 separately. Serial disconnect alone does not prove DFU.");
       }
       if (cmd === "status" || cmd === "arm" || cmd === "disarm") {

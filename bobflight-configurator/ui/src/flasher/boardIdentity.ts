@@ -7,7 +7,7 @@
  *   `unknown (<verbatim>)` and is never trusted for selection or matching.
  * - No arithmetic on FC-derived values. Nothing here feeds the StoragePanel.
  */
-import { parseBoardIdentity, boardIdFieldText, type BoardIdentity } from "@bobflight/protocol";
+import { parseBoardIdentity, boardIdentityComplete, boardIdFieldText, type BoardIdentity } from "@bobflight/protocol";
 import { gated, RpmCancelled } from "../filters/rpmFilter";
 import { isGateBusy } from "../protocol/commandGate";
 import { BOARD_OPTIONS, normalizeMcu, type BoardOption } from "./types";
@@ -16,7 +16,8 @@ export type IdentityRead =
   | { kind: "idle" }
   | { kind: "read"; identity: BoardIdentity }
   | { kind: "busy"; message: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  | { kind: "stale"; message: string };
 
 export interface VersionHost { sendCommand(cmd: "version"): Promise<string>; }
 
@@ -33,33 +34,41 @@ export async function readBoardIdentity(host: VersionHost, signal?: AbortSignal)
 
 export interface IdentityView {
   boardId: string; target: string; mcu: string;
-  /** Valid tokens only; null when unknown, missing, malformed, busy or not read. */
-  fcBoardId: string | null; fcMcu: string | null;
-  /** Catalog board to pre-select, only for a valid board_id that is in the catalog. */
+  /** Trusted tokens only: all three keys valid and board_target == board_mcu. Else null. */
+  fcBoardId: string | null; fcTarget: string | null; fcMcu: string | null;
+  /** Catalog board to pre-select: trusted id that is in the catalog and whose catalog MCU equals board_mcu. */
   preselect: string | null;
+  /** True when a re-read can help (connected and identity unknown, busy, error or incomplete). */
+  canRetry: boolean;
   note: string | null;
 }
 
 export function identityView(read: IdentityRead, options: readonly BoardOption[] = BOARD_OPTIONS): IdentityView {
-  const blank = { boardId: "unknown", target: "unknown", mcu: "unknown", fcBoardId: null, fcMcu: null, preselect: null };
-  if (read.kind === "idle") return { ...blank, note: "Connect the flight controller to read its board identity, or select the board manually." };
-  if (read.kind === "busy") return { ...blank, note: `Board identity not read (${read.message}). Select the board manually.` };
-  if (read.kind === "error") return { ...blank, note: `Board identity not read (${read.message}). Select the board manually.` };
-  const { board_id, board_target, board_mcu } = read.identity;
-  const fcBoardId = board_id.kind === "value" ? board_id.token : null;
-  const fcMcu = board_mcu.kind === "value" ? board_mcu.token : null;
-  const inCatalog = fcBoardId !== null && options.some((b) => b.boardId === fcBoardId);
-  const note = board_id.kind === "missing"
-    ? "Firmware does not report board_id (older firmware). Select the board manually."
-    : board_id.kind === "malformed"
-      ? "Firmware board_id is not a valid token and is not trusted. Select the board manually."
-      : !inCatalog
-        ? `Board ${fcBoardId} is not in this Configurator's catalog. Nothing pre-selected.`
-        : null;
-  return {
-    boardId: boardIdFieldText(board_id), target: boardIdFieldText(board_target), mcu: boardIdFieldText(board_mcu),
-    fcBoardId, fcMcu, preselect: inCatalog ? fcBoardId : null, note,
-  };
+  const blank = { boardId: "unknown", target: "unknown", mcu: "unknown", fcBoardId: null, fcTarget: null, fcMcu: null, preselect: null };
+  if (read.kind === "idle") return { ...blank, canRetry: false, note: "Connect the flight controller to read its board identity, or select the board manually." };
+  if (read.kind === "busy") return { ...blank, canRetry: true, note: `Board identity not read: CLI busy (${read.message}). Read again or select the board manually.` };
+  if (read.kind === "error") return { ...blank, canRetry: true, note: `Board identity not read: error (${read.message}). Read again or select the board manually.` };
+  if (read.kind === "stale") return { ...blank, canRetry: false, note: `Board identity unknown: ${read.message}. Select the board manually and confirm it.` };
+  const id = read.identity;
+  const shown = { boardId: boardIdFieldText(id.board_id), target: boardIdFieldText(id.board_target), mcu: boardIdFieldText(id.board_mcu) };
+  if (BOARD_ID_KEYS_ALL_MISSING(id))
+    return { ...blank, ...shown, canRetry: true, note: "Firmware does not report board identity (older firmware). Select the board manually." };
+  if (!boardIdentityComplete(id))
+    return { ...blank, ...shown, canRetry: true, note: "Board identity incomplete or not valid (board_id, board_target and board_mcu are all required as plain tokens) and is not trusted. Read again or select the board manually." };
+  const t = { id: (id.board_id as { token: string }).token, target: (id.board_target as { token: string }).token, mcu: (id.board_mcu as { token: string }).token };
+  if (t.target !== t.mcu)
+    return { ...blank, ...shown, canRetry: true, note: `Board identity inconsistent: board_target ${t.target} differs from board_mcu ${t.mcu}; not trusted. Select the board manually.` };
+  const entry = options.find((b) => b.boardId === t.id);
+  const note = !entry
+    ? `Board ${t.id} is not known to this Configurator. Flashing is blocked; update the Configurator. DFU recovery is unaffected.`
+    : catalogMcuToken(entry.mcu) !== t.mcu
+      ? `Board ${t.id} reports board_mcu ${t.mcu}, but this Configurator's catalog lists ${entry.mcuDisplay}. Nothing pre-selected.`
+      : null;
+  return { ...shown, fcBoardId: t.id, fcTarget: t.target, fcMcu: t.mcu, preselect: entry && note === null ? t.id : null, canRetry: false, note };
+}
+
+function BOARD_ID_KEYS_ALL_MISSING(id: BoardIdentity): boolean {
+  return id.board_id.kind === "missing" && id.board_target.kind === "missing" && id.board_mcu.kind === "missing";
 }
 
 /** Catalog MCU family (e.g. F745) in the FC token form (stm32f745). Catalog data only. */
@@ -76,12 +85,16 @@ export interface IdentityGate { blocked: boolean; needsConfirm: boolean; reasons
  * - Otherwise a selection that the FC did not confirm (unknown/missing/malformed/busy id) is a
  *   manual selection and needs the explicit confirm. HEX board markers arrive in PR C: `unknown`.
  */
-export function identityGate(view: IdentityView, selected: BoardOption | undefined, hexMcu: string | null | undefined, manualConfirmed: boolean): IdentityGate {
+export function identityGate(view: IdentityView, selected: BoardOption | undefined, hexMcu: string | null | undefined, manualConfirmed: boolean, options: readonly BoardOption[] = BOARD_OPTIONS): IdentityGate {
   const reasons: string[] = [];
   let hard = false;
-  if (selected && view.fcMcu !== null) {
+  if (view.fcBoardId !== null && !options.some((b) => b.boardId === view.fcBoardId)) {
+    hard = true; reasons.push(`Unknown board: flight controller reports board_id ${view.fcBoardId}, which this Configurator does not know. No override.`);
+  }
+  if (selected) {
     const want = catalogMcuToken(selected.mcu);
-    if (want !== view.fcMcu) { hard = true; reasons.push(`MCU mismatch: flight controller reports board_mcu ${view.fcMcu}; selected board ${selected.boardId} is ${selected.mcuDisplay}.`); }
+    for (const [key, v] of [["board_mcu", view.fcMcu], ["board_target", view.fcTarget]] as const)
+      if (v !== null && want !== v) { hard = true; reasons.push(`MCU mismatch: flight controller reports ${key} ${v}; selected board ${selected.boardId} is ${selected.mcuDisplay}.`); }
   }
   if (view.fcMcu !== null && hexMcu) {
     const hex = catalogMcuToken(hexMcu);
@@ -90,7 +103,9 @@ export function identityGate(view: IdentityView, selected: BoardOption | undefin
   if (selected && view.fcBoardId !== null && view.fcBoardId !== selected.boardId) {
     hard = true; reasons.push(`Board mismatch: flight controller reports board_id ${view.fcBoardId}; selected ${selected.boardId}.`);
   }
-  const autoMatched = !!selected && view.fcBoardId !== null && view.fcBoardId === selected.boardId;
+  // Auto-match (B2): trusted id+target+mcu, all equal to the selected catalog entry.
+  const autoMatched = !!selected && view.fcBoardId === selected.boardId
+    && view.fcMcu !== null && view.fcMcu === catalogMcuToken(selected.mcu) && view.fcTarget === view.fcMcu;
   const needsConfirm = !hard && !!selected && !autoMatched;
   if (needsConfirm && !manualConfirmed) reasons.push("Manual board selection: confirm the board is correct.");
   return { blocked: hard || (needsConfirm && !manualConfirmed), needsConfirm, reasons, hexMarker: "unknown" };
