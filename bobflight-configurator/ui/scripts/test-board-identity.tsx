@@ -368,6 +368,18 @@ const replug = async () => { flushSync(() => (navigator as any).usb.dispatchEven
   await liveReady("kakute_f7_hdv"); await confirmRequired("after re-plug");
   flushSync(() => root.unmount());
 }
+{ // QA mutant: a confirm given in DFU never survives a re-plug (disconnect + reconnect, same board + HEX)
+  const root = await page("match"); assert(await waitFor(() => idText() === "kakute_f7_hdv"));
+  await cdcOff(root); await liveReady("kakute_f7_hdv"); await confirmRequired("before re-plug");
+  assert.equal(byId("INPUT", "manual-board-confirm").checked, true, "confirm ticked before re-plug");
+  await replug(); await pickDfu();
+  assert.equal(props(select()).value, "kakute_f7_hdv", "board selection unchanged across re-plug");
+  assert.equal(byId("INPUT", "manual-board-confirm").checked, false, "re-plug clears the manual confirm");
+  await check(byId("INPUT", "props-off"), true); await check(byId("INPUT", "backup-taken"), true);
+  await check(byId("INPUT", "board-match-confirmed"), true);
+  await confirmRequired("after confirm then re-plug");
+  flushSync(() => root.unmount());
+}
 { // same-MCU board swap: FC reported matek (F722), a T-Motor (F722) is in DFU. Pre-select is matek.
   const root = await page("board-mismatch"); assert(await waitFor(() => props(select()).value === "matek_f722_px"));
   await cdcOff(root); await liveReady("matek_f722_px");
@@ -403,4 +415,4 @@ const replug = async () => { flushSync(() => (navigator as any).usb.dispatchEven
   for (const v of [{ ...ok, fcBoardId: null }, { ...ok, fcMcu: null }, { ...ok, fcTarget: null }, { ...ok, fcMcu: null, fcTarget: null }])
     assert.equal(identityGate(v, kakute, "F745", false).needsConfirm, true, JSON.stringify(v));
 }
-console.log("PASS FlasherPage: X8 confirm reset, X9 selection kept, Read again, DFU confirm always required (match, bl ack, re-plug, same-MCU swap), mismatch blocks, stale mismatch cleared by re-plug");
+console.log("PASS FlasherPage: X8 confirm reset, X9 selection kept, Read again, DFU confirm always required (match, bl ack, re-plug, confirm cleared by re-plug, same-MCU swap), mismatch blocks, stale mismatch cleared by re-plug");
