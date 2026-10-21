@@ -46,7 +46,7 @@ int main(void){
 
 
 def strip(text: str) -> str:
-    """Drop the Source IR path comment and the UART block (plus its one separating blank line)."""
+    """Drop the Source IR path comment, the UART block and the board identity block (each plus its one separating blank line)."""
     out, skip, eat_blank = [], False, False
     for line in text.splitlines(keepends=True):
         if line.startswith("#define BOARD_GENERATED_FLASH_KIB "):
@@ -57,11 +57,11 @@ def strip(text: str) -> str:
                 continue
         if line.startswith(" * Source IR:"):
             continue
-        if line.startswith(ir_codegen.UART_BEGIN):
+        if line.startswith(ir_codegen.UART_BEGIN) or line.startswith(ir_codegen.IDENT_BEGIN):
             skip = True
         if not skip:
             out.append(line)
-        if skip and line.startswith(ir_codegen.UART_END):
+        if skip and (line.startswith(ir_codegen.UART_END) or line.startswith(ir_codegen.IDENT_END)):
             skip, eat_blank = False, True
     return "".join(out)
 
@@ -132,6 +132,15 @@ class Equivalence(unittest.TestCase):
             r = subprocess.run(cmd[:4] + [str(stale), "--check"], cwd=ROOT, capture_output=True, text=True)
             self.assertEqual(r.returncode, 3)
             self.assertIn("is stale", r.stderr)
+
+    def test_identity_tokens_restricted(self):
+        ir = ir_codegen.load_board(ROOT / "boards/kakute_f7_hdv.yaml")
+        self.assertEqual(ir_codegen.identity(ir), ("kakute_f7_hdv", "stm32f745", "stm32f745"))
+        for key, bad in (("board_id", "Kakute"), ("board_id", "k k"), ("mcu_target", "stm32.f745"),
+                         ("mcu", "STM32F745!"), ("board_id", 'k"x'), ("board_id", "")):
+            with self.subTest(key=key, bad=bad):
+                with self.assertRaisesRegex(ir_codegen.board_def.BoardDefError, "outside \\[a-z0-9_-\\]"):
+                    ir_codegen.identity(dict(ir, **{key: bad}))
 
     def test_linker_scripts_match_build(self):
         """The build takes mcu.linker_script from the YAML; main's choice per board is frozen here."""

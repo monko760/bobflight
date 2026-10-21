@@ -13,6 +13,7 @@
 #include "flight/failsafe.h"
 #include "flight/config.h"
 #include "board/board.h"
+#include "board/pins_generated.h"
 #include "sched/scheduler.h"
 #include "sched/loop_rate.h"
 #include "sched/loop_rate_setting.h"
@@ -112,8 +113,16 @@ static void cmd_help(void)
 static void cmd_version(void)
 {
     char buf[96];
-    snprintf(buf, sizeof(buf), "%s %s\r\n", BOBFLIGHT_PRODUCT_NAME, BOBFLIGHT_VERSION_STRING);
+    /* Existing line: byte-identical to main, including the pre-existing 96-byte
+     * truncation on long version strings (tests/host_board_id_cli.py). */
+    int n = snprintf(buf, sizeof(buf), "%s %s\r\n", BOBFLIGHT_PRODUCT_NAME, BOBFLIGHT_VERSION_STRING);
     cli_write_str(buf);
+    /* Additive board identity, generated from boards/<board_id>.yaml. A truncated
+     * line above lost its CRLF, so terminate it first to keep these keys on their own lines. */
+    if (n < 0 || (size_t)n >= sizeof(buf)) cli_write_str("\r\n");
+    cli_write_str("board_id: " BOARD_GENERATED_IDENT_ID "\r\n"
+                  "board_target: " BOARD_GENERATED_IDENT_TARGET "\r\n"
+                  "board_mcu: " BOARD_GENERATED_IDENT_MCU "\r\n");
 }
 
 static void cmd_status(void)

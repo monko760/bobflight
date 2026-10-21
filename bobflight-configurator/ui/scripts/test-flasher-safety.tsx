@@ -58,6 +58,17 @@ async function selectOption(el: FakeElement, value: string) {
   flushSync(() => reactProps(el).onChange({ target: { value }, currentTarget: { value } }));
   await sleep(10);
 }
+/** Both explicit acknowledgements: the physical board/image match and (no FC board identity
+ * in this harness, so the selection is manual) the manual-board confirm. */
+async function confirmBoard() {
+  await check(inputById('board-match-confirmed'),true);
+  const manual=container.findAll((e)=>e.tagName==='INPUT'&&e.getAttribute('id')==='manual-board-confirm')[0];
+  if(manual) await check(manual,true);
+}
+async function confirmManual() {
+  const manual=container.findAll((e)=>e.tagName==='INPUT'&&e.getAttribute('id')==='manual-board-confirm')[0];
+  if(manual) await check(manual,true);
+}
 async function click(el: FakeElement) {
   flushSync(() => reactProps(el).onClick({}));
   await sleep(10);
@@ -104,9 +115,9 @@ async function prepare() {
   flushSync(()=>{clickPicker({});clickPicker({})});assert.equal(scenario.picks,1);
   assert(isDisabled(inputById('use-mock-flash')));
   picker.resolve({vendorId:0x0483,productId:0xdf11});await sleep(30);
-  await check(inputById('board-match-confirmed'),true);assert(!isDisabled(buttonByText('Flash')));
+  await confirmBoard();assert(!isDisabled(buttonByText('Flash')));
   await load('bobflight.hex'); assert(!inputById('board-match-confirmed').checked, 'same filename replacement must invalidate acknowledgement');
-  await check(inputById('board-match-confirmed'),true);
+  await confirmBoard();
   flushSync(()=>usbEvents.dispatchEvent(new Event('disconnect')));await sleep(20);
   assert(isDisabled(buttonByText('Flash')),'USB detach must invalidate selection');
   // Changing the target invalidates the physical board/image acknowledgement.
@@ -116,7 +127,7 @@ async function prepare() {
 }
 {
   gate=false;const root=mount();await prepare();scenario.pick=async()=>({vendorId:0x0483,productId:0xdf11});
-  await click(buttonByText('Select DFU device'));await check(inputById('board-match-confirmed'),true);
+  await click(buttonByText('Select DFU device'));await confirmBoard();
   assert(!isDisabled(buttonByText('Flash')));const operation=deferred<void>();scenario.flash=()=>operation.promise;scenario.flashes=0;
   const start=reactProps(buttonByText('Flash')).onClick;flushSync(()=>{start({});start({})});
   assert.equal(scenario.flashes,1);assert(gate);assert(busy);
@@ -133,7 +144,7 @@ async function prepare() {
   scenario.pick=async()=>({vendorId:0x0483,productId:0xdf11,productName:'same device'});
   const root=mount();await prepare();
   assert(!inputById('full-chip-erase').checked,'full erase starts OFF');
-  await click(buttonByText('Select DFU device'));await check(inputById('board-match-confirmed'),true);
+  await click(buttonByText('Select DFU device'));await confirmBoard();
   await check(inputById('full-chip-erase'),true);
   assert(visibleText(container).includes('All firmware and saved settings will be erased'));
   assert(visibleText(container).includes('OTP memory, option bytes, or external memory'));
@@ -141,9 +152,9 @@ async function prepare() {
   await click(buttonByText('Flash'));assert.equal(scenario.flashes,0,'imperative handler rejects missing erase consent');
   await check(inputById('full-erase-confirmed'),true);assert(!isDisabled(buttonByText('Flash')));
   await load('bobflight.hex');assert(!inputById('full-erase-confirmed').checked,'same-name replacement resets erase consent');
-  await check(inputById('board-match-confirmed'),true);await check(inputById('full-erase-confirmed'),true);
+  await confirmBoard();await check(inputById('full-erase-confirmed'),true);
   await click(buttonByText('Select DFU device'));assert(!inputById('full-erase-confirmed').checked,'even same device selection resets consent');
-  await check(inputById('board-match-confirmed'),true);await check(inputById('full-erase-confirmed'),true);
+  await confirmBoard();await check(inputById('full-erase-confirmed'),true);
   await check(inputById('full-chip-erase'),false);await check(inputById('full-chip-erase'),true);
   assert(!inputById('full-erase-confirmed').checked,'toggling full erase does not reuse acknowledgement');
   await check(inputById('full-erase-confirmed'),true);
@@ -153,7 +164,7 @@ async function prepare() {
   assert(isDisabled(inputById('full-chip-erase')) && isDisabled(inputById('full-erase-confirmed')),'choice frozen during erase/flash');
   operation.resolve();assert(await waitFor(()=>!busy));
   assert(!inputById('full-erase-confirmed').checked,'success consumes erase consent');assert(gate,'post-flash recovery checks still required');
-  await click(buttonByText('Select DFU device'));await check(inputById('board-match-confirmed'),true);await check(inputById('full-erase-confirmed'),true);
+  await click(buttonByText('Select DFU device'));await confirmBoard();await check(inputById('full-erase-confirmed'),true);
   scenario.flash=async()=>{throw new Error('test erase failure');};await click(buttonByText('Flash'));assert(await waitFor(()=>!busy));
   {
     // The refusal shown is exactly the thrown reason: never generic text (K8k), never swallowed (S6).
@@ -174,7 +185,7 @@ async function prepare() {
   await check(inputById('full-chip-erase'),true);await check(inputById('full-erase-confirmed'),true);
   await check(inputById('use-mock-flash'),true);await sleep(20);
   assert(!inputById('full-erase-confirmed').checked,'switch to demo resets destructive acknowledgement');
-  await check(inputById('mock-understood'),true);
+  await check(inputById('mock-understood'),true);await confirmManual();
   assert(isDisabled(buttonByText('Flash')));await click(buttonByText('Flash'));assert.equal(scenario.flashes,0);
   await check(inputById('full-erase-confirmed'),true);await click(buttonByText('Flash'));assert(await waitFor(()=>!busy));
   assert.equal(scenario.lastOptions.eraseMode,'full-chip');assert.equal(scenario.kinds.at(-1),'mock');assert(!gate,'demo never sets physical recovery gate');
@@ -203,7 +214,7 @@ function f405Hex() {
   assert(isDisabled(buttonByText('Flash')),'diagnostic assumptions require explicit acknowledgement');
   await check(inputById('diagnostic-assumptions'),true);
   await click(buttonByText('Select DFU device'));
-  await check(inputById('board-match-confirmed'),true);
+  await confirmBoard();
   assert(!isDisabled(buttonByText('Flash')),'explicit diagnostic profile must accept matching test image');
   await click(buttonByText('Flash'));await sleep(30);
   assert.deepEqual(scenario.lastOptions,{expectedMcu:'F405',verify:true,leave:false,imageProfile:'f405-usb-diagnostic'});

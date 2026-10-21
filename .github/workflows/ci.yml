@@ -166,6 +166,13 @@ jobs:
           cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract-tmotor -DBOBFLIGHT_BOARD=tmotor_f7_v2
           cmake --build ../bobflight-firmware/build-contract-tmotor --target bobflight_host -j 4
           node ../.github/scripts/loop-status-contract.cjs
+      - name: Firmware version board_id/board_target/board_mcu to Configurator board auto-detect contract
+        run: |
+          cmake -S ../bobflight-firmware -B ../bobflight-firmware/build-contract-matek -DBOBFLIGHT_BOARD=matek_f722_px
+          cmake --build ../bobflight-firmware/build-contract-matek --target bobflight_host -j 4
+          node ../.github/scripts/board-id-contract.cjs
+      - name: Board auto-detect (real gate, six mocks, busy retry, FlasherPage render)
+        run: npm --prefix ui run test:board-identity
       - name: Firmware gyro notch CLI (schema 8) to Filters tab notch contract
         run: node ../.github/scripts/gyro-notch-contract.cjs
       - name: Firmware status gyro_health / gyro_sat_count to Setup gyro sanity cards contract

@@ -443,6 +443,7 @@ def to_ir(d: dict) -> dict:
         "status": d["status"],
         "board_id": d["board_id"],
         "mcu": d["mcu"]["part"],
+        "mcu_target": d["mcu"]["target"],
         "hse": d["mcu"].get("hse_mhz") or 0,
         "chip": g.get("chip", "none"),
         "spi": g.get("spi_bus", 0),

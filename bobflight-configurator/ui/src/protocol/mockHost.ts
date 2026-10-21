@@ -1,4 +1,5 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
+import { boardIdMockVersion, type BoardIdMockScenario } from "@bobflight/protocol";
 import { MockPortsModes, isModeRangeCommand, isControlSourceCommand, mockGyroHealthLines, mockGyroHealthForcesUnhealthy, type GyroHealthMockScenario } from "@bobflight/protocol";
 /**
  * Browser-safe mock host matching BobFlightCliClient surface.
@@ -98,7 +99,7 @@ export class MockBobFlightHost implements BobFlightHost {
   /** motor_direction + `mixer` (schema 10; same wire as protocol MockSerial). A running bench test refuses sets. */
   private readonly motorDirection: MockMotorDirection;
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario; gyroHealthScenario?: GyroHealthMockScenario }) {
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario; gyroHealthScenario?: GyroHealthMockScenario; boardIdScenario?: BoardIdMockScenario }) {
     /* An explicit receiver link scenario also sets the status failsafe line it implies (FW: every loss reason runs the failsafe). */
     if (opts?.receiverLinkScenario) { this.receiver.setScenario(opts.receiverLinkScenario); this.failsafeActive = this.receiver.failsafeActive(); }
     this.motorDirection = new MockMotorDirection(opts?.motorDirectionScenario ?? "props-out");
@@ -109,7 +110,9 @@ export class MockBobFlightHost implements BobFlightHost {
     this.gyroHealthy = opts?.gyroHealthy ?? false;
     this.loopRateScenario = opts?.loopRateScenario ?? "missing";
     this.gyroHealthScenario = opts?.gyroHealthScenario ?? "missing";
+    this.boardIdScenario = opts?.boardIdScenario;
   }
+  private boardIdScenario?: BoardIdMockScenario;
 
   getLastError(): string | null {
     return this.lastError;
@@ -377,7 +380,8 @@ export class MockBobFlightHost implements BobFlightHost {
           "  reboot   - soft reset (host: exit loop flag)",
         ].join("\r\n");
       case "version":
-        return "BobFlight 0.1.0-skeleton";
+        // Board auto-detect mocks (PR B). Without a scenario: the original pre-board-id reply.
+        return this.boardIdScenario ? boardIdMockVersion(this.boardIdScenario) : "BobFlight 0.1.0-skeleton";
       case "status": {
         const gyroOk = this.gyroOk() ? "yes" : "no";
         const arm = this.armed ? "armed" : "disarmed";

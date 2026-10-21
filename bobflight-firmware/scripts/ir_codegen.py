@@ -48,6 +48,18 @@ def load_board(path: Path) -> dict:
 
 UART_BEGIN = "/* BEGIN runtime-selectable serial RX UARTs {uart, tx, rx} */"
 UART_END = "/* END runtime-selectable serial RX UARTs */"
+IDENT_BEGIN = "/* BEGIN board identity reported by `version` (from boards/<board_id>.yaml) */"
+IDENT_END = "/* END board identity */"
+IDENT_RE = re.compile(r"[a-z0-9_-]+")
+
+
+def identity(ir: dict) -> tuple[str, str, str]:
+    """board_id, board_target (mcu.target backend id), board_mcu (mcu.part, lower case)."""
+    vals = (ir["board_id"], ir["mcu_target"], ir["mcu"].lower())
+    for v in vals:
+        if not IDENT_RE.fullmatch(v):
+            raise board_def.BoardDefError(f"identity value {v!r} outside [a-z0-9_-]")
+    return vals
 
 
 def render(src: Path, ir: dict) -> str:
@@ -66,6 +78,7 @@ def render(src: Path, ir: dict) -> str:
         return n if pack and n else 0
 
     uarts = ir.get("uarts", []) if pack else []
+    ident = identity(ir)
     bf = 1 if ir["status"] == "bf-derived" else 0
     verified = 1 if ir["status"] in {"verified", "golden", "ready"} else 0
     dummy = 0 if pack else 1
@@ -149,6 +162,12 @@ def render(src: Path, ir: dict) -> str:
             f" \\\n    {{{u['uart']}u, {_pin_pack(u['tx'])}, {_pin_pack(u['rx'])}}}," for u in uarts),
         UART_END,
         f"#define BOARD_GENERATED_FLASH_KIB {int(ir.get('flash_kib') or 0)}u /* boards/<id>.yaml mcu.flash_kib; 0 = not checked */",
+        "",
+        IDENT_BEGIN,
+        f'#define BOARD_GENERATED_IDENT_ID     "{ident[0]}"',
+        f'#define BOARD_GENERATED_IDENT_TARGET "{ident[1]}"',
+        f'#define BOARD_GENERATED_IDENT_MCU    "{ident[2]}"',
+        IDENT_END,
         "",
         "#endif /* BOBFLIGHT_PINS_GENERATED_H */",
         "",

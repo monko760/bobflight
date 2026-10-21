@@ -621,6 +621,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/tests/host_control_mode_cli.py $<TARGET_FILE:bobflight_host>)
   add_test(NAME loop_status_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_loop_status_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
+  add_test(NAME board_id_version_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_board_id_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   add_test(NAME loop_rate_setting_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_loop_rate_setting_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   add_test(NAME gyro_notch_cli COMMAND ${Python3_EXECUTABLE}

@@ -25,6 +25,7 @@ import {
   type ParsedHex,
 } from "../flasher";
 import { useHost } from "../hooks/useHost";
+import { identityGate, identityView, readBoardIdentity, type IdentityRead, type VersionHost } from "../flasher/boardIdentity";
 import { TargetCatalog } from "../targets/TargetCatalog";
 import { HexBuilder } from "../flasher/HexBuilder";
 import { DiagnosticConsole } from "../flasher/DiagnosticConsole";
@@ -115,6 +116,7 @@ const MOCK_ONLY_DONE =
 
 export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) => void } = {}) {
   const {
+    host,
     connectionStatus,
     postFlashGate,
     setPostFlashGate,
@@ -133,6 +135,8 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   const [propsOff, setPropsOff] = useState(false);
   const [backupTaken, setBackupTaken] = useState(false);
   const [boardMatchConfirmed, setBoardMatchConfirmed] = useState(false);
+  const [identityRead, setIdentityRead] = useState<IdentityRead>({ kind: "idle" });
+  const [manualBoardConfirmed, setManualBoardConfirmed] = useState(false);
   const [fullChipErase, setFullChipErase] = useState(false);
   const [fullEraseConfirmed, setFullEraseConfirmed] = useState(false);
 
@@ -171,6 +175,25 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     () => BOARD_OPTIONS.find((b) => b.boardId === boardId),
     [boardId],
   );
+
+  // Board auto-detect: read `version` per CDC connection (gated, bounded retry), and on 'Read again'.
+  // The result is kept after CDC disconnects (DFU needs CDC closed) only to pre-select and to
+  // hard-block a mismatch. In DFU the manual confirm is ALWAYS required (Config Lead ruling (c)).
+  // A DFU re-plug makes it stale, so an earlier mismatch never blocks a different device.
+  const [identityReadSeq, setIdentityReadSeq] = useState(0);
+  useEffect(() => {
+    if (connectionStatus !== "connected" || !host || typeof host.sendCommand !== "function") return;
+    const ac = new AbortController();
+    void readBoardIdentity(host as VersionHost, ac.signal).then((r) => {
+      if (ac.signal.aborted) return;
+      setIdentityRead(r);
+      const v = identityView(r);
+      // Auto-detect never overrides a selection the user already made (X9).
+      if (v.preselect) setBoardId((cur) => (cur === "" ? (v.preselect as BoardId) : cur));
+    }).catch(() => {});
+    return () => ac.abort();
+  }, [connectionStatus, host, identityReadSeq]);
+  const idView = useMemo(() => identityView(identityRead), [identityRead]);
 
   const onBuildBusy = useCallback((active: boolean) => {
     builderRef.current = active; setBuildBusy(active);
@@ -252,6 +275,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   );
 
   const flashing = busy || IN_PROGRESS.has(progress.phase);
+  useEffect(() => { setManualBoardConfirmed(false); }, [boardId, fileName, identityRead]);
   useEffect(() => { setBoardMatchConfirmed(false); setFullEraseConfirmed(false); }, [boardId, parsed, fileName, deviceLabel, useMock, customMcu, customFlash, customHse, diagnosticAssumptions]);
   useEffect(() => {
     setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null);
@@ -264,7 +288,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   useEffect(() => {
     const usb = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & {usb?: EventTarget}).usb;
     if (!usb?.addEventListener) return;
-    const disconnected = () => { setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); setBoardMatchConfirmed(false); setFullEraseConfirmed(false); };
+    const disconnected = () => { setIdentityRead((cur) => cur.kind === "idle" ? cur : { kind: "stale", message: "DFU device was disconnected; a re-plugged device may be a different board" }); setClaimedVid(null); setClaimedPid(null); setDeviceLabel(null); setBoardMatchConfirmed(false); setFullEraseConfirmed(false); };
     usb.addEventListener('disconnect', disconnected);
     return () => usb.removeEventListener('disconnect', disconnected);
   }, []);
@@ -369,6 +393,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   async function onFlash() {
     if (builderRef.current || flashing || diagnosticConsoleActive || pickerRef.current || operationRef.current || loadingRef.current) return;
     if (!board || !flasher || !parsed || !propsOff || !backupTaken) return;
+    if (identityGate(idView, board, parsed.mcu, manualBoardConfirmed, isLive).blocked) return;
     if (fullChipErase && !fullEraseConfirmed) {
       setError("Confirm full chip erase risk and recovery preparation before flashing.");
       return;
@@ -464,8 +489,11 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
     } finally { setVerifyingReconnect(false); }
   }
 
+  const idGate = identityGate(idView, board, parsed?.mcu, manualBoardConfirmed, isLive);
+
   const canFlashLive =
     !!board &&
+    !idGate.blocked &&
     !diagnosticConsoleActive &&
     !buildBusy &&
     (!diagnostic || diagnosticAssumptions) &&
@@ -486,6 +514,7 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
 
   const canFlashMock =
     !!board &&
+    !idGate.blocked &&
     !diagnosticConsoleActive &&
     !buildBusy &&
     (!diagnostic || diagnosticAssumptions) &&
@@ -521,6 +550,8 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
                 ? "Select a valid .hex file"
                 : validationError
                   ? validationError
+                  : idGate.blocked
+                    ? idGate.reasons[0]
                   : isLive && liveDisabledReason
                     ? liveDisabledReason
                     : isLive && cdcConnectedLive
@@ -699,6 +730,33 @@ export function FlasherPage({ onBusyChange }: { onBusyChange?: (busy: boolean) =
               Expected MCU gate: {board && !customProblem ? mcuDisplayName(board.mcu) : "no supported profile selected"}: firmware HEX must match this MCU family.
             </p>
           </div>
+        </div>
+        <div aria-label="Board identity" id="board-identity" style={{ marginTop: "0.5rem" }}>
+          <p className="muted">
+            Flight controller reports: board_id <code id="fc-board-id">{idView.boardId}</code>
+            {" · "}board_target <code id="fc-board-target">{idView.target}</code>
+            {" · "}board_mcu <code id="fc-board-mcu">{idView.mcu}</code>
+            {" · "}firmware file board marker <code id="hex-board-marker">{idGate.hexMarker}</code>
+          </p>
+          {idView.note && <p className="muted" id="board-identity-note">{idView.note}</p>}
+          {idView.canRetry && connectionStatus === "connected" && (
+            <button type="button" id="board-identity-reread" onClick={() => setIdentityReadSeq((n) => n + 1)}>Read again</button>
+          )}
+          {idGate.reasons.filter((r) => !r.startsWith("Manual")).map((r) => (
+            <p key={r} role="alert" className="board-identity-block" style={{ color: "#fca5a5" }}>{r}</p>
+          ))}
+          {idGate.needsConfirm && (
+            <label htmlFor="manual-board-confirm" style={{ display: "flex", gap: "0.5rem", color: "#fde68a" }}>
+              <input
+                id="manual-board-confirm"
+                type="checkbox"
+                checked={manualBoardConfirmed}
+                disabled={flashing || buildBusy || diagnosticConsoleActive}
+                onChange={(e) => setManualBoardConfirmed(e.target.checked)}
+              />
+              The flight controller did not confirm this board. I selected it manually and confirm it is correct: required
+            </label>
+          )}
         </div>
         {diagnostic && <DiagnosticProfileControls custom={customBoard} mcu={customMcu} flash={customFlash} hse={customHse} confirmed={diagnosticAssumptions} disabled={flashing||buildBusy||pickerBusy||diagnosticConsoleActive} onMcu={setCustomMcu} onFlash={setCustomFlash} onHse={setCustomHse} onConfirm={setDiagnosticAssumptions}/>}
       </section>

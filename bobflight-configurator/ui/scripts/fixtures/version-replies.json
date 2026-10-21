@@ -1,0 +1,6 @@
+{
+ "_comment": "Real `version` replies from host builds (bobflight_host, stdin 'version'); board-id-contract.cjs checks them against the live binaries.",
+ "kakute_f7_hdv": "BobFlight 0.2.0-prototype-flightdev1-bl1-calstore2-piddiag2-sdprobe2-bbl2-sdread1\r\nboard_id: kakute_f7_hdv\r\nboard_target: stm32f745\r\nboard_mcu: stm32f745\r\n",
+ "matek_f722_px": "BobFlight 0.2.0-prototype-matekf722px-bench1-crsf1-bl1-store13-cal2-mount1-actual1-dshot1-flash\r\nboard_id: matek_f722_px\r\nboard_target: stm32f722\r\nboard_mcu: stm32f722\r\n",
+ "tmotor_f7_v2": "BobFlight 0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore2-flightdev1\r\nboard_id: tmotor_f7_v2\r\nboard_target: stm32f722\r\nboard_mcu: stm32f722\r\n"
+}
