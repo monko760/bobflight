@@ -482,6 +482,16 @@ async function main() {
     await r.done();
   });
 
+  await test("PID: a short busy gate on the re-read after `defaults pid` is waited out: values re-read, no error, no demo memory", async () => {
+    const r = await rig(); await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, "pid");
+    await openDialog();
+    r.onWire = (l) => { if (l === "defaults pid") { r.busyUntil = Date.now() + 400; r.onWire = undefined; } };
+    click("Restore PID defaults");
+    assert.ok(await waitFor(() => input("pid_roll_p").value === "0.002" && !!findButton("Defaults…") && !isDisabled(findButton("Defaults…")!), 8000), `re-read after the short busy: ${pageText().slice(-400)}`);
+    assert.equal(shown("pid-read-error"), null); assert.ok(noMock());
+    await r.done();
+  });
+
   await test("Filters: tab load with the gate held 5 s (beyond its retry) -> settings busy shown, Read again, no demo memory, Save/Defaults disabled (U22)", async () => {
     const r = await rig(); const held = r.holdGate(5000); render(r, "filters");
     await sleep(4300);
@@ -508,7 +518,7 @@ async function main() {
     await test(`${LABEL[g]} tab: accel_cal_saved shown next to Save (verbatim no + note; exact yes after a Save; repeated -> repeated line)`, async () => {
       let r = await rig(); await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, g);
       assert.ok(await waitFor(() => shown("accel-cal-saved-line") === "accel_cal_saved: no"), `${g}: ${shown("accel-cal-saved-line")}`);
-      assert.equal(shown("accel-cal-not-saved"), ACCEL_CAL_NOT_SAVED_NOTE);
+      assert.equal(shown("accel-cal-not-saved"), "Accel calibration is not saved on the board. If you calibrated after the last alignment change, press Save; otherwise recalibrate on the Setup tab.", "exact QA copy");
       await r.done();
       r = await rig(); r.accel.line = "accel_cal_saved: yes"; await openTab(r, g);
       assert.ok(await waitFor(() => shown("accel-cal-saved-line") === "accel_cal_saved: yes"));
