@@ -498,7 +498,10 @@ async function main() {
   async function gatedHost(scenario: RpmFilterMockScenario, o: RigOpts & { latencyMs?: number; grabAfterSet?: number; grabAfterGet?: number;
     grabAfter?: { op: string; ms?: number }; getAllError?: string } = {}) {
     const h = await mockHost(scenario, o);
-    const gate = new CommandGate(() => 1);
+    // P1: queue bound 0 = every command that meets a busy gate gets the gate's overflow busy error
+    // (GATE_BUSY_MESSAGE). These QA #60 rigs exercise the busy/retry path, still reachable on overflow;
+    // the default bounded FIFO is covered by test-gate-fifo.tsx.
+    const gate = new CommandGate(() => 1, 0);
     const refused: string[] = [];
     /** Labels in the order they took the gate (what actually held it). */
     const started: string[] = [];

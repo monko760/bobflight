@@ -10,8 +10,9 @@
  * and then `rpm_filter` (no optimistic update); a refused set shows the FC's
  * line verbatim and the inputs return to what the FC holds.
  *
- * Busy gate (QA #60): the shared CommandGate refuses, never queues, a command
- * while another is in flight (e.g. the Motors-tab eRPM poll). That refusal
+ * Busy gate (QA #60): since P1 the shared CommandGate queues a command while
+ * another is in flight (e.g. the Motors-tab eRPM poll) and refuses only when
+ * its bounded queue is full. That refusal
  * happens before anything is sent, so it is the ONLY outcome retried, up to
  * RPM_GATE_ATTEMPTS tries RPM_GATE_DELAY_MS apart. An FC reply (a `set failed`
  * line, a malformed value, "unknown key") or any other error is never retried,

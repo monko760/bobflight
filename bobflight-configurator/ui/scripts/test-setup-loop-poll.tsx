@@ -69,7 +69,9 @@ async function main() {
     const root: Root = createRoot(container as never);
     openSetup(root);
     await sleep(300);
-    assert.ok(refused.includes("get loop_rate_hz"), `the automatic setting read was refused by the busy gate: ${JSON.stringify(refused)}`);
+    // P1 FIFO: the automatic reads wait in the gate queue instead of being refused.
+    assert.deepEqual(refused, [], `nothing refused by the busy gate (queued instead): ${JSON.stringify(refused)}`);
+    assert.ok(gate.queued > 0, "the automatic setting read is waiting in the gate queue");
     assert.equal(sent.length, 0, `nothing reached the FC while the other command held the gate: ${JSON.stringify(sent)}`);
     other.resolve(); await inFlight;
     const started = await waitFor(() => sent.includes("status"), 2500);
