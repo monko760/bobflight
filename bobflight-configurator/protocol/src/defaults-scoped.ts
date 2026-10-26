@@ -15,7 +15,10 @@
  *
  *   defaults_error: armed|bench_active|calibration_active|unknown_group|group_required ...
  *
- * Bare `defaults` is answered with `defaults_error: group_required ...`.
+ * Bare `defaults` is answered with `defaults_error: group_required pid|rates|filters`.
+ * While Blackbox records (or an SD read runs) the FW refuses every
+ * configuration command earlier, with one `command refused: ...` line; it
+ * changes nothing and is also shown verbatim.
  * Nothing is saved: the FC's storage goes dirty until the user presses Save.
  *
  * The parser never assumes success. A missing `defaults_group`/`defaults_end`
@@ -71,6 +74,8 @@ export const DEFAULTS_ERROR_CODES = ["armed", "bench_active", "calibration_activ
 export type DefaultsErrorCode = (typeof DEFAULTS_ERROR_CODES)[number];
 
 export const DEFAULTS_ERROR_PREFIX = "defaults_error:";
+/** FW blackbox_cli_filter refusal (whole reply is this one line while Blackbox records). */
+export const FC_COMMAND_REFUSED_PREFIX = "command refused:";
 /** Shown (never replaced) whenever the result cannot be proven. */
 export const DEFAULTS_RESULT_UNKNOWN = "Defaults result unknown, re-read";
 
@@ -103,6 +108,7 @@ export function parseDefaultsGroupReply(raw: string, requested: DefaultsGroup): 
     const code = err.slice(DEFAULTS_ERROR_PREFIX.length).trim().split(/\s+/)[0] ?? "";
     return { kind: "error", line: err, code, known: (DEFAULTS_ERROR_CODES as readonly string[]).includes(code), raw };
   }
+  if (all.length === 1 && all[0].startsWith(FC_COMMAND_REFUSED_PREFIX)) return { kind: "error", line: all[0], code: "command_refused", known: true, raw };
   if (all.length === 1 && UNKNOWN_CMD_RE.test(all[0])) return { kind: "unsupported", line: all[0], raw };
   if (all.length === 0) return unknown("empty reply");
 
@@ -133,7 +139,7 @@ export function parseDefaultsGroupReply(raw: string, requested: DefaultsGroup): 
 /** True when a complete line ends the reply to `defaults <g>` (end or error line, or an unknown-command line). */
 export function isDefaultsReplyEnd(line: string): boolean {
   const l = line.trim();
-  return END_RE.test(l) || l.startsWith(DEFAULTS_ERROR_PREFIX) || UNKNOWN_CMD_RE.test(l);
+  return END_RE.test(l) || l.startsWith(DEFAULTS_ERROR_PREFIX) || l.startsWith(FC_COMMAND_REFUSED_PREFIX) || UNKNOWN_CMD_RE.test(l);
 }
 
 /**

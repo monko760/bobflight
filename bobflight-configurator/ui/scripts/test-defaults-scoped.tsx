@@ -4,12 +4,19 @@
  * Setup pages in the #57 fake DOM (useHost stubbed by run-defaults-scoped.mjs)
  * over the REAL host adapter from createHost (its CommandGate and storage
  * tracking), the real BobFlightCliClient and the protocol MockSerial, which
- * answers `defaults pid|rates|filters` in the frozen FW shape (fixture replies
- * until the FW branch lands). `storage` is answered with the FW storage
- * report shape (schema 13). Asserts what a user sees (visible text only) and
- * what went out on the wire.
+ * resets the group's keys. A successful `defaults pid|rates|filters` reply is
+ * the REAL host firmware's bytes (bobflight-firmware/build-contract/bobflight_host,
+ * built by the CI contract step), checked byte-for-byte against MockSerial's
+ * frame on every run; the malformed and refusal scenarios the host sim cannot
+ * produce use the exact FW strings. `storage` is answered in the FW storage
+ * report shape (schema 13, `accel_cal_saved:` just before `storage_end: 1`)
+ * with the FW's dirty rule: RAM differs from what was last saved.
+ * Asserts what a user sees (visible text only) and what went out on the wire.
  */
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
@@ -19,7 +26,7 @@ import { FiltersPage } from "../src/pages/FiltersPage";
 import { SetupPage } from "../src/pages/SetupPage";
 import { createHost } from "../src/protocol/createHost";
 import type { BobFlightHost } from "../src/protocol/types";
-import { DEFAULTS_BUSY_TEXT, DEFAULTS_UNSAVED_TEXT, DEFAULTS_MAYBE_UNSAVED_TEXT, DEFAULTS_UNSUPPORTED_TEXT, DEFAULTS_GATE_WAIT_MS } from "../src/tuning/scopedDefaults";
+import { DEFAULTS_BUSY_TEXT, DEFAULTS_UNSAVED_TEXT, DEFAULTS_CLEAN_TEXT, DEFAULTS_MAYBE_UNSAVED_TEXT, DEFAULTS_UNSUPPORTED_TEXT, DEFAULTS_GATE_WAIT_MS } from "../src/tuning/scopedDefaults";
 import {
   DEFAULTS_GROUP_KEYS,
   DEFAULTS_RESULT_UNKNOWN,
@@ -100,13 +107,31 @@ interface Rig {
   ctx: Record<string, unknown>;
   mark(): number; since(m: number): string[];
   holdGate(ms: number): Promise<unknown>;
-  storageState: { dirty: boolean }; swallow: Set<string>;
+  swallow: Set<string>;
   done(): Promise<void>;
 }
 const LABEL: Record<DefaultsGroup, string> = { pid: "PID", rates: "Rates", filters: "Filters" };
+
+// ---- REAL host firmware replies --------------------------------------------------
+const HOST_BIN = process.env.BOBFLIGHT_HOST_BIN ? process.env.BOBFLIGHT_HOST_BIN : fileURLToPath(new URL("../../../bobflight-firmware/build-contract/bobflight_host", import.meta.url));
+const REAL_FRAME: Partial<Record<DefaultsGroup, string>> = {};
+let realFramesServed = 0;
+function loadRealFrames() {
+  if (!existsSync(HOST_BIN)) {
+    if (process.env.DEFAULTS_ALLOW_NO_HOST === "1") { console.log(`skip real host frames (no ${HOST_BIN}); MockSerial frames used`); return; }
+    throw new Error(`real host firmware binary missing: ${HOST_BIN} (CI builds it in the contract step; DEFAULTS_ALLOW_NO_HOST=1 to skip locally)`);
+  }
+  for (const g of ["pid", "rates", "filters"] as const) {
+    const r = spawnSync(HOST_BIN, [], { input: `set pid_roll_p 0.009\nset rate_max_roll 1200\nset gyro_lpf_hz 200\ndefaults ${g}\n`, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const m = new RegExp(`defaults_group: ${g}\\r\\n(?:defaults_key: [^\\r\\n]+\\r\\n)*defaults_end: ${g} \\d+\\r\\n`).exec(r.stdout);
+    assert.ok(m, `real FW frame for ${g}`);
+    REAL_FRAME[g] = m![0];
+  }
+}
 function storageReply(dirty: boolean): string {
   return ["storage_api: 1", "backend: flash", "schema: 13", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty ? 1 : 0}`, "generation: 2",
-    "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"]
+    "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "accel_cal_saved: no", "storage_end: 1"]
     .map((l) => `${l}\r\n`).join("");
 }
 async function rig(): Promise<Rig> {
@@ -115,17 +140,28 @@ async function rig(): Promise<Rig> {
   await sleep(10);
   const client = (host as unknown as { getClient(): BobFlightCliClient }).getClient();
   const port = (client as unknown as { port: MockSerial }).port;
-  const storageState = { dirty: false };
+  // FW rule: dirty = RAM differs from the last save (boot = saved defaults).
+  let savedSnap = JSON.stringify(port.getSettingsSnapshot());
+  const fcDirty = () => JSON.stringify(port.getSettingsSnapshot()) !== savedSnap;
   const swallow = new Set<string>();
-  // FW `storage` report (MockSerial has none): dirty after an applied set/defaults, clean after save.
+  // FW `storage` report (MockSerial has none); a successful scoped defaults reply is the real FW's bytes.
   const write = port.write.bind(port);
   (port as unknown as { write: (d: string | Buffer) => boolean }).write = (data) => {
     const line = String(data).trim();
     if (swallow.has(line)) return true; // an FC that never answers this line
-    if (line === "storage") { setTimeout(() => port.emit("data", Buffer.from(storageReply(storageState.dirty))), 1); return true; }
-    if (line.startsWith("set ") || (/^defaults (pid|rates|filters)$/.test(line) && !(port.defaultsScenario in DEFAULTS_MOCK_ERROR_LINES) && port.defaultsScenario !== "unsupported")) storageState.dirty = true;
+    if (line === "storage") { const d = fcDirty(); setTimeout(() => port.emit("data", Buffer.from(storageReply(d))), 1); return true; }
+    const g = /^defaults (pid|rates|filters)$/.exec(line)?.[1] as DefaultsGroup | undefined;
+    if (g && port.defaultsScenario === "ok" && REAL_FRAME[g]) {
+      const emit = port.emit.bind(port); let mock = "";
+      (port as unknown as { emit: (ev: string, b: Buffer) => boolean }).emit = (ev, b) => { if (ev === "data") { mock += b.toString(); return true; } return emit(ev, b); };
+      try { write(data); } finally { (port as unknown as { emit: typeof emit }).emit = emit; }
+      assert.equal(mock, REAL_FRAME[g], `MockSerial frame for ${g} == real FW bytes`);
+      realFramesServed++;
+      setTimeout(() => port.emit("data", Buffer.from(REAL_FRAME[g]!)), 1);
+      return true;
+    }
     // FW flash-save reply shape (MockSerial only acks "saved", which is not a verified flash save).
-    if (line === "save") { storageState.dirty = false; setTimeout(() => port.emit("data", Buffer.from("saved: flash verified\r\n")), 1); return true; }
+    if (line === "save") { savedSnap = JSON.stringify(port.getSettingsSnapshot()); setTimeout(() => port.emit("data", Buffer.from("saved: flash verified\r\n")), 1); return true; }
     return write(data);
   };
   client.clearSentCommands();
@@ -137,7 +173,7 @@ async function rig(): Promise<Rig> {
   const root = createRoot(container as never);
   const gate = (host as unknown as { commands: { run<T>(w: () => Promise<T>): Promise<T> } }).commands;
   return {
-    host, client, port, root, ctx, storageState, swallow,
+    host, client, port, root, ctx, swallow,
     mark: () => client.getSentCommands().length,
     since: (m) => client.getSentCommands().slice(m),
     holdGate: (ms) => gate.run(() => sleep(ms)),
@@ -199,6 +235,7 @@ async function test(name: string, fn: () => Promise<void>) { await fn(); passed+
 const isSave = (c: string) => c === "save";
 
 async function main() {
+  loadRealFrames();
   for (const g of ["pid", "rates", "filters"] as const) {
     await test(`${LABEL[g]} tab: confirm dialog lists the ${DEFAULTS_GROUP_KEYS[g].length} ${g} keys with current FC values, the not-touched note and nothing-saved note`, async () => {
       const r = await rig(); await dirtyFc(r); await openTab(r, g);
@@ -219,7 +256,7 @@ async function main() {
       await r.done();
     });
 
-    await test(`${LABEL[g]} tab: Restore sends exactly "defaults ${g}", shows the defaults_key lines verbatim, re-reads the tab, marks unsaved, never sends save`, async () => {
+    await test(`${LABEL[g]} tab: Restore sends exactly "defaults ${g}", shows the defaults_key lines verbatim, re-reads the tab and the FC storage dirty flag, never sends save`, async () => {
       const r = await rig(); await dirtyFc(r); await openTab(r, g);
       if (g === "pid") assert.equal(checked("airmode"), true, "AirMode on before the reset (FC airmode=1)");
       await openDialog();
@@ -234,6 +271,8 @@ async function main() {
       assert.ok(pendingSeen, "tracked host-wide as a settings storage action");
       const after = sent.slice(sent.indexOf(`defaults ${g}`) + 1);
       for (const k of DEFAULTS_GROUP_KEYS[g]) assert.ok(after.includes(`get ${k}`), `re-read ${k} after the reset: ${JSON.stringify(after)}`);
+      assert.ok(after.includes("storage"), `the FC storage report read after the reset: ${JSON.stringify(after)}`);
+      if (REAL_FRAME[g]) assert.equal(shown("defaults-key-lines"), REAL_FRAME[g]!.split("\r\n").filter((l) => l.startsWith("defaults_key: ")).join("\n"), "the real FW defaults_key lines, verbatim");
       // Verbatim FW lines, in FW order.
       assert.equal(shown("defaults-key-lines"), defaultsKeyLines(g).join("\n"));
       assert.match(pageText(), new RegExp(`${LABEL[g]} defaults restored on the controller \\(${DEFAULTS_GROUP_KEYS[g].length} settings\\)`));
@@ -257,7 +296,7 @@ async function main() {
   }
 
   await test("every defaults_error line is shown verbatim (prefix match, unknown future code too); nothing re-read as success, no unsaved claim", async () => {
-    for (const [g, s] of [["pid", "armed"], ["rates", "bench_active"], ["filters", "calibration_active"], ["pid", "unknown_group"], ["rates", "group_required"], ["filters", "future_error"], ["pid", "future_error"]] as [DefaultsGroup, DefaultsMockScenario][]) {
+    for (const [g, s] of [["pid", "armed"], ["rates", "bench_active"], ["filters", "calibration_active"], ["pid", "unknown_group"], ["rates", "group_required"], ["filters", "future_error"], ["pid", "future_error"], ["rates", "blackbox_refused"], ["filters", "blackbox_refused"]] as [DefaultsGroup, DefaultsMockScenario][]) {
       const r = await rig(); r.port.defaultsScenario = s; await openTab(r, g);
       await openDialog(); const m = r.mark(); await confirm(g);
       const line = DEFAULTS_MOCK_ERROR_LINES[s];
@@ -329,7 +368,7 @@ async function main() {
   });
 
   await test("Rates tab: local edits are warned about in the dialog and replaced by the re-read FC values; a verified Save clears the unsaved note", async () => {
-    const r = await rig(); await openTab(r, "rates");
+    const r = await rig(); await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, "rates");
     typeInto("rate_max_pitch", "1500");
     await openDialog();
     assert.match(visibleText(dialog()!), /Your unsaved edits on this tab will be replaced/);
@@ -344,6 +383,19 @@ async function main() {
     assert.ok(await waitFor(() => pageText().includes("Saved to controller flash and read back.")), `saved: ${alerts().join(" | ")}`);
     assert.equal(r.since(m).filter(isSave).length, 1, "exactly the one Save the user pressed");
     assert.equal(shown("defaults-unsaved"), null, "unsaved note cleared after the verified Save");
+    await r.done();
+  });
+
+  await test("defaults equal to the saved values: the FC storage report is clean, so the UI says nothing to save (FW dirty = RAM differs from flash); no save sent", async () => {
+    const r = await rig(); await r.host.setSetting("rate_max_roll", "1200"); await openTab(r, "rates");
+    await openDialog(); const m = r.mark(); await confirm("rates");
+    assert.ok(shown("defaults-key-lines") !== null);
+    assert.ok(await waitFor(() => shown("defaults-unsaved") === DEFAULTS_CLEAN_TEXT), `clean: ${shown("defaults-unsaved")}`);
+    const sent = r.since(m); assert.ok(sent.includes("storage") && !sent.some(isSave), JSON.stringify(sent));
+    // Storage unreadable after a successful reset -> "may have unsaved changes", never a clean claim.
+    await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, "pid"); r.swallow.add("storage");
+    await openDialog(); await confirm("pid");
+    assert.ok(await waitFor(() => shown("defaults-unsaved") === DEFAULTS_MAYBE_UNSAVED_TEXT, 8000), `maybe: ${shown("defaults-unsaved")}`);
     await r.done();
   });
 
@@ -368,6 +420,7 @@ async function main() {
     await r.done();
   });
 
-  console.log(`defaults-scoped render tests: ${passed} passed`);
+  if (existsSync(HOST_BIN)) assert.ok(realFramesServed >= 3, `real FW frames served: ${realFramesServed}`);
+  console.log(`defaults-scoped render tests: ${passed} passed (${realFramesServed} successful defaults replies were real host FW bytes)`);
 }
 main().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });

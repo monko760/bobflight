@@ -72,6 +72,12 @@ await test('every defaults_error line verbatim by prefix, unknown future codes t
   assert.equal(parse('defaults_error:\r\n','pid').kind,'error','an empty code is still an FC error line');
   assert.equal(parse(crlf(['defaults_group: pid','defaults_error: armed']),'pid').kind,'error','an error line anywhere wins');
 });
+await test('Blackbox-recording refusal (`command refused: ...`, the whole reply) is an FC refusal shown verbatim, not unknown',()=>{
+  const line=ERR.blackbox_refused;assert.ok(line.startsWith(P.FC_COMMAND_REFUSED_PREFIX));
+  const r=parse(line+'\r\n','filters');assert.deepEqual({kind:r.kind,line:r.line},{kind:'error',line});
+  assert.ok(isDefaultsReplyEnd(line),'ends the reply at once');
+  assert.equal(parse(crlf(['defaults_group: pid',line]),'pid').kind,'unknown','only as the whole reply');
+});
 await test('older FC (unknown command) -> unsupported with the line verbatim',()=>{
   const r=parse(mockDefaultsReply('pid','unsupported'),'pid');assert.deepEqual({kind:r.kind,line:r.line},{kind:'unsupported',line:'unknown — try help'});
 });
@@ -115,7 +121,7 @@ await test('mock FC: armed / bench refusals and every scenario through the clien
   assert.equal((await client.sendCommand('arm')).trim(),'armed');
   const a=await client.restoreDefaultsGroup('pid');assert.deepEqual({kind:a.kind,line:a.line},{kind:'error',line:ERR.armed});
   await client.sendCommand('disarm');
-  for(const s of ['bench_active','calibration_active','unknown_group','group_required','future_error']){port.defaultsScenario=s;const r=await client.restoreDefaultsGroup('rates');assert.equal(r.kind,'error',s);assert.equal(r.line,ERR[s]);}
+  for(const s of ['bench_active','calibration_active','unknown_group','group_required','future_error','blackbox_refused']){port.defaultsScenario=s;const r=await client.restoreDefaultsGroup('rates');assert.equal(r.kind,'error',s);assert.equal(r.line,ERR[s]);}
   for(const s of ['missing_end','count_mismatch','group_mismatch']){port.defaultsScenario=s;const r=await client.restoreDefaultsGroup('filters');assert.equal(r.kind,'unknown',s);}
   port.defaultsScenario='unsupported';assert.equal((await client.restoreDefaultsGroup('pid')).kind,'unsupported');
   port.defaultsScenario='ok';
@@ -130,5 +136,52 @@ await test('reply ends on defaults_end without waiting for idle; missing end res
   assert.ok(fast<P.DEFAULTS_REPLY_IDLE_MS,`end line finishes early (${fast} ms)`);assert.ok(slow>=P.DEFAULTS_REPLY_IDLE_MS-20,`no end line: idle gap (${slow} ms)`);
   await client.disconnect();
 });
+// ---- REAL host firmware (the CI contract build) -----------------------------------
+const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:child_process');
+const fwRoot=path.resolve(__dirname,'../../../bobflight-firmware');
+const binary=process.env.BOBFLIGHT_HOST_BIN?path.resolve(process.env.BOBFLIGHT_HOST_BIN):path.join(fwRoot,'build-contract/bobflight_host');
+await test('FW source on this branch: exact refusal strings and group key tables match this client',()=>{
+  const dcli=fs.readFileSync(path.join(fwRoot,'src/drivers/defaults_cli.h'),'utf8');
+  for(const c of ['armed','bench_active','calibration_active','unknown_group'])assert.ok(dcli.includes(`cli_write_str("${ERR[c]}\\r\\n")`),`FW prints ${ERR[c]}`);
+  assert.ok(dcli.includes(`cli_write_str("${ERR.group_required}\\r\\n")`),'FW group_required line');
+  assert.ok(dcli.includes('"defaults_group: %s\\r\\n"')&&dcli.includes('"defaults_end: %s %u\\r\\n"')&&dcli.includes('"defaults_key: "'),'FW frame lines');
+  const bb=fs.readFileSync(path.join(fwRoot,'src/drivers/blackbox_cli.h'),'utf8');assert.ok(bb.includes(`cli_write_str("${ERR.blackbox_refused}\\r\\n")`),'FW Blackbox refusal line');
+  const cfg=fs.readFileSync(path.join(fwRoot,'src/flight/config.c'),'utf8');
+  for(const g of DEFAULTS_GROUPS){const m=new RegExp(`g_group_${g}\\[\\]=\\{([^}]*)\\}`).exec(cfg);assert.ok(m,`FW table g_group_${g}`);
+    assert.deepEqual(m[1].match(/"[a-z0-9_]+"/g).map(x=>x.slice(1,-1)),[...KEYS[g]],`${g}: FW key table == DEFAULTS_GROUP_KEYS (names and order)`);}
+});
+const host=(cmds)=>{const r=spawnSync(binary,[],{input:cmds.join('\n')+'\n',encoding:'utf8',maxBuffer:1<<20});assert.equal(r.status,0,r.stderr);return r.stdout;};
+if(!fs.existsSync(binary)&&process.env.DEFAULTS_ALLOW_NO_HOST==='1')console.log(`skip - real host firmware tests (no ${binary})`);
+else{
+  assert.ok(fs.existsSync(binary),`real host firmware binary missing: ${binary} (CI builds it in the contract step; set DEFAULTS_ALLOW_NO_HOST=1 to skip locally)`);
+  const frame=(out,g)=>{const m=new RegExp(`defaults_group: ${g}\\r\\n(?:defaults_key: [^\\r\\n]+\\r\\n)*defaults_end: ${g} \\d+\\r\\n`).exec(out);assert.ok(m,`frame for ${g} in: ${out.slice(-800)}`);return m[0];};
+  await test('real host FW replies parse as ok with this parser; the mock FC sends byte-identical frames',()=>{
+    for(const g of DEFAULTS_GROUPS){
+      const real=frame(host(['set pid_roll_p 0.004','set rate_max_yaw 700','set gyro_lpf_hz 250',`defaults ${g}`]),g);
+      const r=parse(real,g);assert.equal(r.kind,'ok',`${g}: ${r.reason}`);assert.equal(r.count,KEYS[g].length);assert.deepEqual(r.keys.map(k=>k.key),[...KEYS[g]]);
+      assert.equal(mockDefaultsReply(g,'ok'),real,`${g}: mock fixture == real FW bytes`);
+      assert.equal(parse(real,g==='pid'?'rates':'pid').kind,'unknown','real frame for another group is never success');
+    }
+  });
+  await test('real host FW refusals: bare defaults and an unknown group are the exact single lines this client shows verbatim',()=>{
+    const bare=host(['defaults']),bogus=host(['defaults bogus']);
+    assert.ok(bare.includes(`\r\n${ERR.group_required}\r\n`)||bare.startsWith(`${ERR.group_required}\r\n`),bare.slice(-300));
+    assert.ok(bogus.includes(`\r\n${ERR.unknown_group}\r\n`)||bogus.startsWith(`${ERR.unknown_group}\r\n`),bogus.slice(-300));
+    assert.equal(parse(ERR.group_required+'\r\n','pid').line,ERR.group_required);
+    assert.equal(MOCK_BARE_DEFAULTS_REPLY,ERR.group_required+'\r\n');
+    // The mock FC answers the same lines.
+  });
+  await test('real host FW: defaults reset only the group, never save; storage dirty is RAM-vs-flash (accel_cal_saved just before storage_end parses)',()=>{
+    const out=host(['set pid_roll_p 0.004','set rate_max_yaw 700','set gyro_lpf_hz 250','save','storage','defaults pid','storage','get pid_roll_p','get rate_max_yaw','get gyro_lpf_hz','get motor_poles']);
+    const st=[...out.matchAll(/storage_api: 1\r\n[\s\S]*?storage_end: 1\r\n/g)].map(m=>m[0]);assert.equal(st.length,2);
+    for(const x of st)assert.match(x,/\r\naccel_cal_saved: (yes|no)\r\nstorage_end: 1\r\n$/,'accel_cal_saved just before storage_end');
+    const [a,b]=st.map(P.parseStorage);assert.equal(a.dirty,false,'clean after save');assert.equal(b.dirty,true,'defaults pid differs from the saved pid -> dirty');
+    assert.match(out,/\r\npid_roll_p=0\.002\r\n/);assert.match(out,/\r\nrate_max_yaw=700\r\n/);assert.match(out,/\r\ngyro_lpf_hz=250\r\n/);
+    assert.ok(!/\r\nsaved:/.test(out.slice(out.indexOf('defaults_group: pid'))),'no save after defaults');
+    const clean=host(['set pid_roll_p 0.004','save','set rate_max_yaw 700','defaults rates','storage']);
+    const c=P.parseStorage(/storage_api: 1\r\n[\s\S]*?storage_end: 1\r\n/.exec(clean)[0]);
+    assert.equal(c.dirty,false,'defaults equal to the saved values -> FW reports clean (the UI shows the FC flag, never a guess)');
+  });
+}
 console.log(`defaults-scoped protocol: ${tests} tests passed`);
 })().catch(e=>{console.error(e);process.exit(1);});

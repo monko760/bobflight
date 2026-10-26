@@ -17,6 +17,8 @@ import {
   DEFAULTS_RESULT_UNKNOWN,
   DEFAULTS_UNSAVED_TEXT,
   DEFAULTS_MAYBE_UNSAVED_TEXT,
+  DEFAULTS_CLEAN_TEXT,
+  readStorageDirty,
   DEFAULTS_UNSUPPORTED_TEXT,
   readGroupValues,
   runGroupDefaults,
@@ -47,8 +49,8 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
   const [current, setCurrent] = useState<CurrentValues>({});
   const [outcome, setOutcome] = useState<DefaultsOutcome | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  /** "yes": FC confirmed the reset (storage dirty); "maybe": result unknown. */
-  const [unsaved, setUnsaved] = useState<"no" | "yes" | "maybe">("no");
+  /** After a reset: "yes"/"clean" per the FC's `storage` dirty flag; "maybe": result unknown or storage unreadable. */
+  const [unsaved, setUnsaved] = useState<"no" | "yes" | "clean" | "maybe">("no");
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   useEffect(() => { setUnsaved("no"); }, [savedRevision]);
@@ -79,8 +81,10 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
     if (!alive.current) return;
     setOutcome(r);
     if (r.kind === "ok" || r.kind === "unknown") {
-      setUnsaved(r.kind === "ok" ? "yes" : "maybe");
       try { await onReread(); } catch { /* the page shows its own read error */ }
+      const dirty = alive.current ? await readStorageDirty(host) : null;
+      if (!alive.current) return;
+      setUnsaved(r.kind === "ok" && dirty !== null ? (dirty ? "yes" : "clean") : "maybe");
     }
     if (alive.current) setPhase("idle");
   }
@@ -121,7 +125,7 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
         )}
         {outcome?.kind === "no-host" && <p className="fail" role="alert">{DEFAULTS_NO_HOST_TEXT}</p>}
         {notice && <p className="muted">{notice}</p>}
-        {unsaved !== "no" && <p className="banner-warn" data-testid="defaults-unsaved">{unsaved === "yes" ? DEFAULTS_UNSAVED_TEXT : DEFAULTS_MAYBE_UNSAVED_TEXT}</p>}
+        {unsaved !== "no" && <p className={unsaved === "clean" ? "muted" : "banner-warn"} data-testid="defaults-unsaved">{unsaved === "yes" ? DEFAULTS_UNSAVED_TEXT : unsaved === "clean" ? DEFAULTS_CLEAN_TEXT : DEFAULTS_MAYBE_UNSAVED_TEXT}</p>}
       </div>
       {phase === "confirm" && (
         <ConfirmDialog
@@ -146,7 +150,7 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
           <p data-testid="defaults-not-touched">
             Not touched: {DEFAULTS_NOT_TOUCHED.join("; ")}.
           </p>
-          <p data-testid="defaults-not-saved"><strong>Nothing is saved until you press Save.</strong> Until then the defaults live in the controller's RAM only and storage shows unsaved changes.</p>
+          <p data-testid="defaults-not-saved"><strong>Nothing is saved until you press Save.</strong> Until then the defaults live in the controller's RAM only; a reboot without Save brings back the saved values.</p>
           {pageDirty && <p className="banner-warn">Your unsaved edits on this tab will be replaced by what the controller reports after the reset.</p>}
         </ConfirmDialog>
       )}

@@ -6,8 +6,10 @@
 /**
  * FW-shaped fixture replies for scoped defaults (`defaults pid|rates|filters`),
  * built from the frozen reply shape in defaults-scoped.ts. Values are printed
- * like the FW's `get` (`%.6g`). Until the FW branch lands these are fixtures,
- * not host-sim output.
+ * like the FW's `get` (`%.6g`). The error lines are the exact FW strings
+ * (bobflight-firmware/src/drivers/defaults_cli.h, blackbox_cli.h); the
+ * protocol test checks these replies byte-for-byte against the real host
+ * firmware binary where the host sim can produce them.
  */
 import { DEFAULTS_GROUP_KEYS, type DefaultsGroup } from "./defaults-scoped";
 import { DEFAULT_SETTING_VALUES, formatFwFloat, type SettingsKey } from "./settings";
@@ -18,6 +20,8 @@ export type DefaultsMockScenario =
   | "armed" | "bench_active" | "calibration_active" | "unknown_group" | "group_required"
   /** A code this client does not know yet (must still be shown verbatim). */
   | "future_error"
+  /** FW refusal while Blackbox records (blackbox_cli_filter). */
+  | "blackbox_refused"
   | "missing_end"
   | "count_mismatch"
   | "group_mismatch"
@@ -26,17 +30,19 @@ export type DefaultsMockScenario =
 
 export const DEFAULTS_MOCK_SCENARIOS: readonly DefaultsMockScenario[] = [
   "ok", "armed", "bench_active", "calibration_active", "unknown_group", "group_required",
-  "future_error", "missing_end", "count_mismatch", "group_mismatch", "unsupported",
+  "future_error", "blackbox_refused", "missing_end", "count_mismatch", "group_mismatch", "unsupported",
 ];
 
-/** Error lines used by the mocks. The FW freeze fixes the code token; any trailing text is shown verbatim, whatever it says. */
+/** Exact FW refusal lines (plus one invented future code). The UI shows whichever line arrives verbatim. */
 export const DEFAULTS_MOCK_ERROR_LINES: Readonly<Record<string, string>> = {
-  armed: "defaults_error: armed (disarm first)",
-  bench_active: "defaults_error: bench_active (stop motor tests first)",
-  calibration_active: "defaults_error: calibration_active (finish or cancel calibration)",
-  unknown_group: "defaults_error: unknown_group (use pid, rates or filters)",
-  group_required: "defaults_error: group_required (use defaults pid|rates|filters)",
+  armed: "defaults_error: armed",
+  bench_active: "defaults_error: bench_active",
+  calibration_active: "defaults_error: calibration_active",
+  unknown_group: "defaults_error: unknown_group",
+  group_required: "defaults_error: group_required pid|rates|filters",
+  /** Not a FW line: a code this client does not know yet. */
   future_error: "defaults_error: storage_locked_v2 (future FW reason, shown verbatim)",
+  blackbox_refused: "command refused: stop Blackbox recording and wait for done before configuration, calibration, motor tests, reboot or bootloader entry",
 };
 
 export function defaultsKeyLines(group: DefaultsGroup, values: Partial<Record<SettingsKey, number>> = DEFAULT_SETTING_VALUES): string[] {

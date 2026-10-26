@@ -10,11 +10,14 @@
  *  - Success needs the complete frame (group, keys, matching end + count). An
  *    incomplete/inconsistent frame or a transport failure after the command
  *    went out is "Defaults result unknown, re-read": never assumed applied.
- *  - Nothing is saved here. Storage is dirty until the user presses Save.
+ *  - Nothing is saved here. After a reset the FC's own `storage` report says
+ *    whether RAM now differs from flash (the FW compares, so defaults equal to
+ *    the saved values leave it clean); the UI shows that report, not a guess.
  */
 import {
   DEFAULTS_GROUP_KEYS,
   DEFAULTS_RESULT_UNKNOWN,
+  parseStorage,
   type BobFlightHost,
   type DefaultsGroup,
   type SettingsKey,
@@ -32,12 +35,14 @@ export const DEFAULTS_BUSY_TEXT = "Another command was using the connection; not
 export const DEFAULTS_NO_HOST_TEXT = "This connection cannot restore per-tab defaults.";
 export const DEFAULTS_VALUE_UNKNOWN = "unknown";
 export const DEFAULTS_UNSAVED_TEXT =
-  "Not saved: the controller now holds these defaults in RAM only and its storage has unsaved changes. Press Save to keep them; a reboot without Save brings back the saved values.";
+  "Not saved: the controller holds these defaults in RAM only and its storage reports unsaved changes. Press Save to keep them; a reboot without Save brings back the saved values.";
+export const DEFAULTS_CLEAN_TEXT =
+  "Nothing to save: the controller's storage reports no unsaved changes (these defaults equal the saved values).";
 export const DEFAULTS_MAYBE_UNSAVED_TEXT =
   "Storage may have unsaved changes. Check the re-read values before you press Save; a reboot without Save brings back the saved values.";
 export const DEFAULTS_UNSUPPORTED_TEXT = "This firmware has no per-tab defaults. Nothing was changed.";
 
-type DefaultsHost = Pick<BobFlightHost, "getSetting" | "getConnectionStatus"> & Partial<Pick<BobFlightHost, "restoreDefaultsGroup">>;
+type DefaultsHost = Pick<BobFlightHost, "getSetting" | "getConnectionStatus"> & Partial<Pick<BobFlightHost, "sendCommand">> & Partial<Pick<BobFlightHost, "restoreDefaultsGroup">>;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -99,5 +104,15 @@ export async function runGroupDefaults(host: DefaultsHost, group: DefaultsGroup)
     case "error": return { kind: "error", line: r.line };
     case "unsupported": return { kind: "unsupported", line: r.line };
     default: return { kind: "unknown", detail: r.reason, keyLines: r.keyLines };
+  }
+}
+
+/** The FC's own `storage` dirty flag after a reset; null when it could not be read (shown as "may have unsaved changes"). */
+export async function readStorageDirty(host: DefaultsHost): Promise<boolean | null> {
+  if (!host.sendCommand) return null;
+  try {
+    return parseStorage(await gatedOnce(() => host.sendCommand!("storage"))).dirty;
+  } catch {
+    return null;
   }
 }

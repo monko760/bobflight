@@ -230,10 +230,11 @@ export class MockSerial extends EventEmitter {
   /** `defaults <group>`: resets only that group's keys (no save), then answers in the frozen FW shape. */
   private scopedDefaults(group: string): string {
     const scenario = this.defaultsScenario;
-    if (group === "") return MOCK_BARE_DEFAULTS_REPLY;
-    if (!isDefaultsGroup(group)) return `${DEFAULTS_MOCK_ERROR_LINES.unknown_group}\r\n`;
+    // Same order as FW cmd_defaults: armed, bench, calibration, then the group checks.
     if (this.armed) return `${DEFAULTS_MOCK_ERROR_LINES.armed}\r\n`;
     if (this.bench.active) return `${DEFAULTS_MOCK_ERROR_LINES.bench_active}\r\n`;
+    if (group === "") return MOCK_BARE_DEFAULTS_REPLY;
+    if (!isDefaultsGroup(group)) return `${DEFAULTS_MOCK_ERROR_LINES.unknown_group}\r\n`;
     if (scenario === "unsupported") return "unknown — try help\r\n";
     if (DEFAULTS_MOCK_ERROR_LINES[scenario] !== undefined) return `${DEFAULTS_MOCK_ERROR_LINES[scenario]}\r\n`;
     const defaults = cloneDefaultSettingValues();
