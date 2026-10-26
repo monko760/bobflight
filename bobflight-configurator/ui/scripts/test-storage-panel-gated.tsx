@@ -21,7 +21,7 @@ import { ModesPage } from "../src/pages/ModesPage";
 import { PortsPage } from "../src/pages/PortsPage";
 import { MotorsPage } from "../src/pages/MotorsPage";
 import { createHostWithTransport } from "../src/protocol/createHost";
-import { isGateBusy, GATE_BUSY_MESSAGE } from "../src/protocol/commandGate";
+import { isGateBusy, GATE_BUSY_MESSAGE, GATE_QUEUE_LIMIT, GATE_QUEUE_TIMEOUT_MS, CommandGate } from "../src/protocol/commandGate";
 import { parseStatus, type CliCommand } from "@bobflight/protocol";
 import { MockStorageFirmware, StorageSimTransportFactory, type StorageSimOptions } from "../../protocol/src/storage-sim";
 
@@ -78,10 +78,13 @@ const loaded = () => /^Controller flash · /.test(storageStatus());
 interface Rig {
   fw: MockStorageFirmware; host: ReturnType<typeof createHostWithTransport>;
   ctx: Record<string, unknown>; render(el: ReactElement): void; unmount(): void;
-  /** runStorageSequence calls (gate attempts) and how many the gate refused. */
-  gate: { attempts: number; refused: number };
-  /** Holds the REAL CommandGate (as another page's slow command would) for `ms`. */
-  holdGate(ms: number): Promise<unknown>;
+  /** runStorageSequence calls (gate attempts), how many the gate refused (queue full) and how many found it in use and waited in its FIFO. */
+  gate: { attempts: number; refused: number; waited: number };
+  /** Holds the REAL CommandGate (as another page's slow command would) for `ms`. `full`: also fills its FIFO
+   * (GATE_QUEUE_LIMIT waiting no-op runs that send nothing), so every further command is refused as busy. */
+  holdGate(ms: number, full?: boolean): Promise<unknown>;
+  /** The adapter's real CommandGate (read-only use: busy / queued). */
+  commands: CommandGate;
   done(): Promise<void>;
 }
 async function rig(o: StorageSimOptions = {}): Promise<Rig> {
@@ -89,11 +92,14 @@ async function rig(o: StorageSimOptions = {}): Promise<Rig> {
   const host = createHostWithTransport(new StorageSimTransportFactory(fw));
   await host.connect({ path: "sim://bobflight-storage", transport: "serial" });
   assert.equal(host.getConnectionStatus(), "connected");
-  const gate = { attempts: 0, refused: 0 };
+  const gate = { attempts: 0, refused: 0, waited: 0 };
+  const commands = (host as unknown as { commands: CommandGate }).commands;
   const real = host.runStorageSequence!.bind(host);
-  host.runStorageSequence = <T,>(work: Parameters<typeof real>[0]) => {
+  host.runStorageSequence = <T,>(work: Parameters<typeof real>[0], opts?: Parameters<typeof real>[1]) => {
     gate.attempts++;
-    return (real(work) as Promise<T>).catch((e) => { if (isGateBusy(e)) gate.refused++; throw e; });
+    const inUse = commands.busy || commands.queued > 0;
+    return (real(work, opts) as Promise<T>).then((v) => { if (inUse) gate.waited++; return v; },
+      (e) => { if (isGateBusy(e)) gate.refused++; else if (inUse) gate.waited++; throw e; });
   };
   let root: Root | null = createRoot(container as never);
   let current: ReactElement | null = null;
@@ -107,21 +113,28 @@ async function rig(o: StorageSimOptions = {}): Promise<Rig> {
   host.onStatus((s) => { ctx.connectionStatus = s; setTimeout(rerender, 0); });
   (globalThis as Record<string, unknown>).__setupTestHost = ctx;
   return {
-    fw, host, ctx, gate,
+    fw, host, ctx, gate, commands,
     render(el) { current = el; if (!root) root = createRoot(container as never); rerender(); },
     unmount() { if (root) { root.unmount(); root = null; } current = null; },
-    holdGate: (ms) => host.runStorageSequence!(() => sleep(ms)).catch((e) => e),
+    holdGate: (ms, full = false) => {
+      const held = real(() => sleep(ms)).catch((e) => e);
+      const fillers = full ? Array.from({ length: GATE_QUEUE_LIMIT }, () => real(async () => undefined).catch((e) => e)) : [];
+      if (full) assert.equal(commands.queued, GATE_QUEUE_LIMIT, "the gate's FIFO is full");
+      return Promise.all([held, ...fillers]).then(([h]) => h);
+    },
     async done() { if (root) root.unmount(); root = null; await host.disconnect(); await sleep(10); },
   };
 }
 
 /** An independent poller on the real gate, as another page's telemetry loop: `status` every `periodMs`, never overlapping itself. */
 function poller(host: Rig["host"], periodMs: number) {
-  const stats = { ok: 0, busy: 0, other: [] as string[] };
+  const stats = { ok: 0, busy: 0, waited: 0, other: [] as string[] };
+  const commands = (host as unknown as { commands: CommandGate }).commands;
   let inflight = false;
   const t = setInterval(() => {
     if (inflight) return;
     inflight = true;
+    if (commands.busy || commands.queued > 0) stats.waited++;
     host.sendCommand("status").then(() => { stats.ok++; }, (e) => { if (isGateBusy(e)) stats.busy++; else stats.other.push(String(e)); }).finally(() => { inflight = false; });
   }, periodMs);
   return { stats, stop: () => clearInterval(t) };
@@ -171,24 +184,25 @@ async function cycles(periodMs: number, n = 20) {
 async function main() {
   await test("20 mount+save cycles next to a 200 ms poller on the real gate: 0 load/save failures, every save one contiguous gated run", async () => {
     const res = await cycles(200);
-    console.log(`  200 ms poller: ${res.saves}/20 saves, ${res.failures.length} failures; poller ok ${res.poller.ok} busy ${res.poller.busy}; panel gate attempts ${res.gate.attempts} refused ${res.gate.refused}`);
+    console.log(`  200 ms poller: ${res.saves}/20 saves, ${res.failures.length} failures; poller ok ${res.poller.ok} queued ${res.poller.waited} busy ${res.poller.busy}; panel gated runs ${res.gate.attempts} queued ${res.gate.waited} refused ${res.gate.refused}`);
     assert.deepEqual(res.failures, []);
     assert.equal(res.saves, 20);
     assert.deepEqual(res.poller.other, [], "the poller never saw a non-busy error (no client overlap)");
     assert.ok(res.poller.ok >= 1 && res.poller.ok + res.poller.busy > 5, "the poller really ran");
   });
 
-  await test("20 mount+save cycles next to a 50 ms poller on the real gate: 0 load/save failures, busy refusals retried, every save one contiguous gated run", async () => {
+  await test("20 mount+save cycles next to a 50 ms poller on the real (FIFO) gate: 0 load/save failures, contention really happened, every save one contiguous gated run", async () => {
     const res = await cycles(50);
-    console.log(`  50 ms poller: ${res.saves}/20 saves, ${res.failures.length} failures; poller ok ${res.poller.ok} busy ${res.poller.busy}; panel gate attempts ${res.gate.attempts} refused ${res.gate.refused}`);
+    console.log(`  50 ms poller: ${res.saves}/20 saves, ${res.failures.length} failures; poller ok ${res.poller.ok} queued ${res.poller.waited} busy ${res.poller.busy}; panel gated runs ${res.gate.attempts} queued ${res.gate.waited} refused ${res.gate.refused}`);
     assert.deepEqual(res.failures, []);
     assert.equal(res.saves, 20);
     assert.deepEqual(res.poller.other, []);
-    assert.ok(res.gate.refused > 0, "the 50 ms poller really contended for the gate (the panel retried)");
-    assert.ok(res.poller.busy > 0, "the panel's gated runs really held the gate against the poller");
+    // FIFO gate: contention shows as waiting in the queue (both ways), not as refusals.
+    assert.ok(res.gate.waited > 0, "the 50 ms poller really contended for the gate (panel runs waited behind it)");
+    assert.ok(res.poller.waited > 0, "the panel's gated runs really held the gate against the poller");
   });
 
-  await test("Save is ONE gated run: competing commands tried on every microtask after each reply of the sequence are all refused; nothing reaches the FC between storage, save, storage", async () => {
+  await test("Save is ONE gated run: competing commands tried on every microtask after each reply of the sequence wait (or are refused when the FIFO is full); nothing reaches the FC between storage, save, storage", async () => {
     const r = await rig();
     r.fw.markDirty();
     r.render(<StoragePanel requiredScope="receiver_map" />);
@@ -217,7 +231,8 @@ async function main() {
     const during = r.fw.log.slice(mark);
     const i = during.indexOf("save");
     assert.deepEqual(during.slice(Math.max(0, i - 1), i + 2), ["storage", "save", "storage"], `wire: ${during.join(", ")}`);
-    assert.ok(outcomes.filter((o) => o === "busy").length >= 400, `competing commands were really tried (${outcomes.length})`);
+    assert.ok(outcomes.length >= 400, `competing commands were really tried (${outcomes.length})`);
+    assert.ok(outcomes.every((o) => o === "busy" || o === "sent"), `competitors only waited or were refused as busy: ${[...new Set(outcomes)].join(", ")}`);
     assert.ok(!outcomes.includes("sent") || during.indexOf("status") > i + 1, `no competing command got in between: ${during.join(", ")}`);
     await r.done();
   });
@@ -263,12 +278,12 @@ async function main() {
     await t.done();
   });
 
-  await test("bounded busy retry: a gate held 5 s gives up after 1+" + STORAGE_BUSY_RETRIES + " attempts (~3 s) with plain text + the raw refusal; nothing sent", async () => {
+  await test("bounded busy retry: a gate held 5 s with its FIFO full gives up after 1+" + STORAGE_BUSY_RETRIES + " attempts (~3 s) with plain text + the raw refusal; nothing sent", async () => {
     const r = await rig();
     r.render(<StoragePanel requiredScope="receiver_map" />);
     assert.ok(await waitFor(loaded));
     r.fw.markDirty();
-    const held = r.holdGate(5000);
+    const held = r.holdGate(4500, true);
     const sentBefore = r.fw.log.length, attemptsBefore = r.gate.attempts, t0 = Date.now();
     click("Save to controller");
     assert.ok(await waitFor(() => !!storageError(), 5000), "gave up while the gate was still held");
@@ -285,12 +300,12 @@ async function main() {
     await r.done();
   });
 
-  await test("busy for a moment, then free: the Save retries and succeeds with one save line", async () => {
+  await test("busy for a moment (FIFO full), then free: the Save retries and succeeds with one save line", async () => {
     const r = await rig();
     r.render(<StoragePanel requiredScope="receiver_map" />);
     assert.ok(await waitFor(loaded));
     r.fw.markDirty();
-    const held = r.holdGate(250);
+    const held = r.holdGate(250, true);
     const attemptsBefore = r.gate.attempts;
     click("Save to controller");
     assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(shown("storage-message") ?? "") || !!storageError(), 4000));
@@ -300,14 +315,61 @@ async function main() {
     await held; await r.done();
   });
 
-  await test("busy initial load (another page holds the gate at mount) retries and loads", async () => {
+  await test("busy initial load (another page holds the gate at mount, FIFO full) retries and loads", async () => {
     const r = await rig();
-    const held = r.holdGate(200);
+    const held = r.holdGate(200, true);
     r.render(<StoragePanel requiredScope="receiver_map" />);
     assert.ok(await waitFor(loaded, 3000));
     assert.equal(storageError(), null);
     assert.ok(r.gate.refused > 0);
     await held; await r.done();
+  });
+
+  await test("FIFO gate in use (queue not full): the Save waits in the queue as ONE run, no refusal, no retry, one save line", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded));
+    r.fw.markDirty();
+    const before = { ...r.gate }, mark = r.fw.log.length;
+    const held = r.holdGate(300);
+    click("Save to controller");
+    assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(shown("storage-message") ?? "") || !!storageError(), 4000));
+    assert.equal(storageError(), null);
+    assert.equal(r.gate.attempts - before.attempts, 1, "one gated run, no retry");
+    assert.equal(r.gate.refused - before.refused, 0, "the FIFO gate queued it instead of refusing");
+    assert.equal(r.gate.waited - before.waited, 1, "it really waited behind the held gate");
+    assert.deepEqual(r.fw.log.slice(mark), ["storage", "save", "storage"]);
+    await held; await r.done();
+  });
+
+  await test("FIFO queue timeout: a Save still waiting after the gate's queue limit is reported as busy (plain text + the gate's line), not retried, nothing sent", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded));
+    r.fw.markDirty();
+    const before = r.gate.attempts, mark = r.fw.log.length;
+    const held = r.holdGate(GATE_QUEUE_TIMEOUT_MS + 400);
+    click("Save to controller");
+    assert.ok(await waitFor(() => !!storageError(), GATE_QUEUE_TIMEOUT_MS + 300));
+    assert.equal(storageError(), STORAGE_BUSY_TEXT.save);
+    assert.equal(shown("storage-error-detail"), `Connection reply: timed out after ${GATE_QUEUE_TIMEOUT_MS} ms waiting in the command queue; request not sent`);
+    assert.equal(r.gate.attempts - before, 1, "no retry after a queue timeout");
+    assert.deepEqual(r.fw.log.slice(mark), [], "nothing reached the FC");
+    assert.match(storageStatus(), /^Controller flash · saved · /, "busy keeps the last verified status");
+    await held; await r.done();
+  });
+
+  await test("FIFO cancel: unmounting while the load still waits in the queue drops it (nothing sent, no error)", async () => {
+    const r = await rig();
+    const held = r.holdGate(300);
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(() => r.commands.queued === 1, 1000), "the auto-load is waiting in the FIFO");
+    const mark = r.fw.log.length;
+    r.unmount();
+    assert.equal(r.commands.queued, 0, "abort dropped it from the queue");
+    await held; await sleep(50);
+    assert.deepEqual(r.fw.log.slice(mark), [], "the dropped load was never sent");
+    await r.done();
   });
 
   await test("bounded retry helper by behaviour: never retries a non-busy error, retries are counted and capped", async () => {
@@ -427,7 +489,7 @@ async function main() {
     if (saveStaysEnabled) assert.equal(saveDisabledSeen, false, `${name}: Save stayed available (the panel was not blocked/reset by the poll error)`);
     // And a busy gate during the page poll (another storage action) is not an error either.
     const loads2 = r.fw.count("storage");
-    const held = r.holdGate(400); await held; await sleep(30);
+    const held = r.holdGate(400, true); await held; await sleep(30);
     assert.ok(r.fw.count("storage") - loads2 <= quietReads, `${name}: busy poll did not reload storage`);
     assert.equal(storageStatus(), text, `${name}: storage status kept after a busy poll`);
     {
@@ -484,6 +546,17 @@ async function main() {
       await r.done();
     });
   }
+
+  await test("Ports page: its first read retries (bounded, busy only) while the gate's FIFO is full at mount, then loads; no busy text left on the page", async () => {
+    const r = await rig();
+    const held = r.holdGate(300, true);
+    r.render(<PortsPage />);
+    await held;
+    assert.ok(await waitFor(loaded, 6000), `panel loaded (${storageStatus()} / ${storageError()})`);
+    await sleep(300);
+    assert.ok(!pageText().includes("request not queued"), `the page's first read was retried, not failed: ${pageText().slice(0, 600)}`);
+    await r.done();
+  });
 
   console.log(`PASS StoragePanel gated load/save (real gate): ${passed} tests`);
   process.exit(0);

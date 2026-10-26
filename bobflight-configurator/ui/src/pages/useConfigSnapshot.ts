@@ -10,8 +10,8 @@ export function useConfigSnapshot<T>(query:CliCommand,parse:(s:string)=>T){
  const epoch=useRef(0),busy=useRef(false);
  /**
   * The first line of a load/apply, retried (bounded, STORAGE_BUSY_RETRIES x STORAGE_BUSY_RETRY_MS) only while
-  * the shared gate refuses it before anything is sent, e.g. a sibling receiver poll or the StoragePanel holding
-  * the gate at mount. A controller reply or any other error is never retried; the read-back is never retried.
+  * the shared gate refuses it before anything is sent (since the P1 FIFO gate: its queue is full; a gate
+  * that is merely in use queues the read instead). A controller reply or any other error is never retried; the read-back is never retried.
   */
  async function sendFirst(command:CliCommand,id:number):Promise<string>{
   for(let attempt=0;;attempt++){
