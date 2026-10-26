@@ -30,6 +30,7 @@ import {
   type SdStatusResult,
 } from '@bobflight/protocol';
 import { ONBOARD_ACTIVE_STATES, parseOnboardReply } from './onboard';
+import { isGateBusy, isGateNotSent, gateErrorCode } from '../protocol/commandGate';
 
 export type SdDownloadCommand = 'sd probe' | 'sd status' | 'sd cancel' | 'blackbox status' | 'status';
 export interface SdDownloadLink {
@@ -158,10 +159,10 @@ class TimeoutAbort extends Abort {
 }
 
 const NOTHING_SAVED = 'Nothing was saved.';
-const isGateBusy = (e: unknown) => /request not queued/.test(e instanceof Error ? e.message : String(e));
-/** The gate dropped the request because the USB session changed: it was never written. */
-const isSessionChanged = (e: unknown) => /USB session changed/.test(e instanceof Error ? e.message : String(e));
-const isTimeoutError = (e: unknown) => /terminator missing|timed out/.test(e instanceof Error ? e.message : String(e));
+/** Gate rejections are matched on their stable code (commandGate predicates), never on message text.
+ * isGateBusy: overflow / refused start (retry may help). isGateNotSent: any gate rejection (busy,
+ * queue timeout, cancel, disconnect drain, USB session changed): the request was never written. */
+const isTimeoutError = (e: unknown) => !isGateNotSent(e) && /terminator missing|timed out/.test(e instanceof Error ? e.message : String(e));
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
 export class SdDownloadController {
@@ -244,14 +245,14 @@ export class SdDownloadController {
         if (sd) this.sdOnWire = true;
         return r;
       } catch (e) {
-        const notSent = isGateBusy(e) || isSessionChanged(e);
+        const notSent = isGateNotSent(e);
         if (sd && !notSent) this.sdOnWire = true;
         if (isGateBusy(e) && this.now() < deadline && !(cancellable && this.cancelReason)) { await this.sleep(40); continue; }
         // Cancel/tab leave while waiting on a busy gate: the cancel text, not the busy text.
         if (isGateBusy(e) && cancellable) this.checkCancel(what);
         if (isTimeoutError(e)) throw new TimeoutAbort(what, `no complete reply: ${errText(e)}`);
         if (!this.connected()) throw new Abort(this.cancelText('disconnected', what), null, 'info');
-        if (isGateBusy(e)) throw new GateBusyAbort(errText(e));
+        if (isGateBusy(e) || gateErrorCode(e) === 'GATE_QUEUE_TIMEOUT') throw new GateBusyAbort(errText(e));
         throw e;
       }
     }

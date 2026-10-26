@@ -59,8 +59,8 @@ async function gateTests() {
   await test("gate: classification of exact CLI lines", () => {
     for (const c of ["motor_test 0", "bench_stop", "disarm"]) assert.equal(commandGateOptions(c).priority, "urgent", c);
     for (const c of ["save", "defaults", "set motor_poles 14", "set dshot_bidir on"]) assert.equal(commandGateOptions(c).priority, "write", c);
-    for (const c of ["status", "storage", "get erpm_m1", "dshot", "mixer", "dump all", "dshot 600"]) assert.equal(commandGateOptions(c).priority, "normal", c);
-    for (const c of ["arm", "motor_seq", "motor_test 1", "motor_test 4", "motor_pulse 2 30"]) assert.equal(commandGateOptions(c).exclusive, true, c);
+    for (const c of ["status", "storage", "get erpm_m1", "dshot", "mixer", "dump all"]) assert.equal(commandGateOptions(c).priority, "normal", c);
+    for (const c of ["arm", "motor_seq", "motor_test 1", "motor_test 4", "motor_pulse 2 30", "bench_switch"]) assert.equal(commandGateOptions(c).exclusive, true, c);
   });
   await test("gate: overflow refuses with the existing busy error (never silent); Stop still accepted when full", async () => {
     assert.equal(GATE_QUEUE_LIMIT, 16);

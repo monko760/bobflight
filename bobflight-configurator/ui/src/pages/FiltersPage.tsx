@@ -26,7 +26,7 @@ import {
   type NotchDraft,
   type NotchSnapshot,
 } from "../filters/gyroNotch";
-import { isGateBusy } from "../protocol/commandGate";
+import { isGateNotSent } from "../protocol/commandGate";
 import {
   RpmCancelled,
   applyRpmSetting,
@@ -181,8 +181,10 @@ export function FiltersPage() {
         all = await gated(() => host.getAllSettings(), signal, (m) => { if (!signal.aborted) unknownFc(m, false); });
       } catch (e) {
         if (signal.aborted || e instanceof RpmCancelled) return; // newer load, disconnect or unmount
-        if (!isGateBusy(e)) throw e;
-        unknownFc((e as Error).message, true); // still busy after the last try
+        // Still busy after the last try, or never sent (queue timeout / disconnect drain): the FC was
+        // not read, so values are unknown. Never the local fallback, never "older firmware".
+        if (!isGateNotSent(e)) throw e;
+        unknownFc((e as Error).message, true);
         return;
       }
       if (signal.aborted) return;
@@ -463,8 +465,9 @@ export function FiltersPage() {
           Centre <code>0</code> = off, else <code>20..1000</code> Hz; cutoff (lower -3 dB edge) must be
           above 0 and below the centre. The FC checks the centre against the running loop rate and
           reports the result below; its reply is shown as sent.
-          {fcRead && !supported && !usingFallback && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
+          {fcRead && !supported && !notchSnap.notRead && !usingFallback && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
         </p>
+        {notchSnap.notRead && <p className="fail" data-testid="notch-not-read">{notchSnap.notRead}</p>}
         <table style={{ width: "100%", marginTop: "0.75rem" }}>
           <thead>
             <tr><th>Notch</th><th>Enabled</th><th>Centre (Hz)</th><th>Cutoff (Hz)</th><th>Active</th><th>Reason</th></tr>

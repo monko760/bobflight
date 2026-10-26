@@ -15,6 +15,7 @@ import {
   type FiltersReportResult, type GyroNotchIndex, type NotchGetResult, type NotchPair, type NotchRowView, type SettingsKey,
 } from "../protocol";
 import type { CliCommand } from "../protocol/types";
+import { isGateNotSent } from "../protocol/commandGate";
 
 export interface NotchHost {
   getSetting(key: SettingsKey): Promise<{ key: SettingsKey; value: string }>;
@@ -30,18 +31,23 @@ export interface NotchSnapshot {
   schema: number | null;
   /** `storage` dirty flag if readable (null = unknown). */
   fcDirty: boolean | null;
+  /** The gate's message when a read never reached the FC (queue timeout, cancel, disconnect, busy):
+   * those values stay unknown and are never "malformed" or "older firmware". */
+  notRead?: string | null;
 }
 
 export function emptyNotchSnapshot(): NotchSnapshot {
   return { values: { 1: { center: null, cutoff: null }, 2: { center: null, cutoff: null } }, report: null, schema: null, fcDirty: null };
 }
 
-async function readKey(host: NotchHost, key: SettingsKey): Promise<NotchGetResult> {
+async function readKey(host: NotchHost, key: SettingsKey, snap: NotchSnapshot): Promise<NotchGetResult | null> {
   try {
     const { value } = await host.getSetting(key);
     return Number.isFinite(Number(value)) && value.trim() !== "" ? { kind: "value", value } : { kind: "malformed", raw: value };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // Nothing was sent: the FC said nothing, so the value is unknown (not malformed, not unsupported).
+    if (isGateNotSent(e)) { snap.notRead ??= msg; return null; }
     return /unknown key/.test(msg) ? { kind: "unsupported" } : { kind: "malformed", raw: msg };
   }
 }
@@ -50,9 +56,9 @@ async function readKey(host: NotchHost, key: SettingsKey): Promise<NotchGetResul
 export async function readNotches(host: NotchHost): Promise<NotchSnapshot> {
   const snap = emptyNotchSnapshot();
   for (const i of GYRO_NOTCH_INDEXES) {
-    snap.values[i] = { center: await readKey(host, notchCenterKey(i)), cutoff: await readKey(host, notchCutoffKey(i)) };
+    snap.values[i] = { center: await readKey(host, notchCenterKey(i), snap), cutoff: await readKey(host, notchCutoffKey(i), snap) };
   }
-  try { snap.report = parseFiltersReport(await host.sendCommand("filters")); } catch { snap.report = null; }
+  try { snap.report = parseFiltersReport(await host.sendCommand("filters")); } catch (e) { snap.report = null; if (isGateNotSent(e)) snap.notRead ??= e instanceof Error ? e.message : String(e); }
   try {
     const raw = await host.sendCommand("storage");
     const declared = /^schema: (\d+)\r?$/m.exec(raw);
@@ -60,7 +66,7 @@ export async function readNotches(host: NotchHost): Promise<NotchSnapshot> {
     // that would allow legacy settings through the feature-presence fallback.
     if (declared && Number(declared[1]) !== 13) snap.schema = 0;
     else { const st = parseStorage(raw); snap.schema = st.schema; snap.fcDirty = st.dirty; }
-  } catch { /* Transport/partial replies remain unknown; do not invent a version. */ }
+  } catch (e) { /* Transport/partial replies remain unknown; do not invent a version. */ if (isGateNotSent(e)) snap.notRead ??= e instanceof Error ? e.message : String(e); }
   return snap;
 }
 
