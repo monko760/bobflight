@@ -36,7 +36,7 @@ export type { ParsedGetReply, ParsedSetReply, Schema5FloatKey } from "@bobflight
 export { parsePorts, parseModes, modeRangeCommand, isModeRangeCommand, controlSourceCommand, isControlSourceCommand, controlModeCommand, isControlModeCommand, canEditModeRanges, canSelectControlSource, canSelectControlMode } from "@bobflight/protocol";
 export type { ParsedPorts, ParsedModes, ModeRow } from "@bobflight/protocol";
 
-export {parseStorage,parseConfigurationExport,canSaveStorage} from "@bobflight/protocol";
+export {parseStorage,parseConfigurationExport,canSaveStorage,isVerifiedFlashSave,StorageReplyError} from "@bobflight/protocol";
 export type {StorageSnapshot} from "@bobflight/protocol";
 
 export { parseLoopStatus, loopRateView, LOOP_LABELS, LOOP_STATUS_KEYS, LOOP_UNKNOWN, mockLoopStatusLines, LOOP_RATE_MOCK_SCENARIOS } from "@bobflight/protocol";

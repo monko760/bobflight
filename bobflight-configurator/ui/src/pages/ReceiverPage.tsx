@@ -1,6 +1,7 @@
 import {StoragePanel} from "../components/StoragePanel";
 import { useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
+import { isGateBusy } from "../protocol/commandGate";
 import { parsePorts, type CliCommand } from "../protocol";
 import { parseReceiver, type ReceiverReading, type ReceiverMap } from "../protocol/receiver";
 import { ReceiverLinkReadout } from "../components/ReceiverLinkReadout";
@@ -48,7 +49,11 @@ export function ReceiverPage() {
           }
           const next=parseReceiver(await host.sendCommand("receiver"));
           if(id===epoch.current)accept(next);
-        } catch(e) { if(id===epoch.current){setReading(null);setError(String(e));} }
+        } catch(e) {
+          // G3: a failed poll keeps the last reading (it ages out of "responding" after 750 ms) so the
+          // StoragePanel is never reset by it. A busy gate (another command, e.g. a storage save) is not an error.
+          if(id===epoch.current && !isGateBusy(e))setError(String(e));
+        }
       }).finally(()=>{if(id===epoch.current)timer=setTimeout(poll,200);});
     }
     poll();

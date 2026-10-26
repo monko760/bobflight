@@ -1,6 +1,7 @@
 import {StoragePanel} from "../components/StoragePanel";
 import { useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
+import { isGateBusy } from "../protocol/commandGate";
 import { parsePower, powerKeys, type PowerReading, type PowerKey } from "../protocol/power";
 import type { CliCommand } from "../protocol";
 const labels: Record<PowerKey, string> = {
@@ -22,12 +23,13 @@ export function PowerBatteryPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [measured, setMeasured] = useState("");
+  const [stale, setStale] = useState(false);
   const inFlight = useRef(false), generation = useRef(0);
   const connected = connectionStatus === "connected" && !postFlashGate;
   useEffect(() => {
     const epoch = ++generation.current;
     let timer: ReturnType<typeof setTimeout>;
-    setReading(null); setDraft(null); setMessage(""); setError("");
+    setReading(null); setStale(false); setDraft(null); setMessage(""); setError("");
     if (!connected) return;
     async function poll() {
       if (epoch !== generation.current) return;
@@ -36,9 +38,13 @@ export function PowerBatteryPage() {
         try {
           const next = parsePower(await host.sendCommand("power"));
           if (epoch !== generation.current) return;
-          setReading(next); setError("");
+          setReading(next); setStale(false); setError("");
           setDraft(old => old ?? Object.fromEntries(powerKeys.map(k => [k, String(next[k])])) as Record<PowerKey, string>);
-        } catch (e) { if (epoch === generation.current) { setReading(null); setError(String(e)); } }
+        } catch (e) {
+          // G3: a failed poll marks the last reading stale (shown as Unavailable) instead of clearing it,
+          // so the StoragePanel is never reset by it. A busy gate (e.g. a storage save) is not an error.
+          if (epoch === generation.current && !isGateBusy(e)) { setStale(true); setError(String(e)); }
+        }
         finally { inFlight.current = false; }
       }
       if (epoch === generation.current) timer = setTimeout(() => void poll(), 500);
@@ -63,7 +69,7 @@ export function PowerBatteryPage() {
     } catch (e) { if (epoch === generation.current) setError(String(e)); }
     finally { inFlight.current = false; setBusy(false); }
   }
-  const live = connected && reading?.valid === 1;
+  const live = connected && !stale && reading?.valid === 1;
   const current = live && reading?.current_valid === 1;
   const consumption = current && reading?.consumption_valid === 1;
   const value = (n: number | undefined, available: boolean, units: string, digits = 2) => available && n !== undefined ? `${n.toFixed(digits)} ${units}` : "Unavailable";
@@ -74,7 +80,7 @@ export function PowerBatteryPage() {
     <p className="muted">Voltage source: onboard ADC. Current source: external analog sensor, when fitted and configured.</p>
     {!connected && <p role="status">Connect your board to read battery data.</p>}
     {error && <p className="fail" role="alert">{error}</p>}
-    {reading && <p role="status">{warnings[reading.warning] ?? "Unknown battery status"}</p>}
+    {reading && (stale ? <p role="status" data-testid="power-stale">Last battery reading is out of date: the latest read failed.</p> : <p role="status">{warnings[reading.warning] ?? "Unknown battery status"}</p>)}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(170px, 1fr))",gap:"1rem"}}>
       {[
         ["Battery voltage", value(reading?.voltage, live, "V")],

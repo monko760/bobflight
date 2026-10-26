@@ -25,8 +25,9 @@ import {
   type WebSerialRequestPortOptions,
 } from "@bobflight/protocol";
 import type { BobFlightHost, HostCallOptions } from "./types";
-import { CommandGate, commandGateOptions, GATE_DISCONNECTED_MESSAGE } from "./commandGate";
+import { CommandGate, commandGateOptions, GATE_DISCONNECTED_MESSAGE, GATE_SESSION_CHANGED_MESSAGE } from "./commandGate";
 import { StorageActivity, isStorageCommand } from "./storageActivity";
+import { isStorageSequenceCommand, type StorageSequenceCommand } from "./types";
 
 export type ProtocolMode = "mock" | "serial";
 
@@ -261,6 +262,32 @@ class ProtocolHostAdapter implements BobFlightHost {
     }
   }
 
+  /**
+   * One settings storage sequence (StoragePanel load, save or export) as ONE
+   * CommandGate run: the gate is taken once and held until `work` settles, so
+   * no other UI command can reach the FC between its `storage` / `save` /
+   * `storage` lines. It waits in the P1 FIFO queue like any command (save at
+   * write priority); a full queue, queue timeout or cancel rejects before
+   * `work` runs (nothing is sent; the caller may retry a busy refusal). Tracked as a host-wide storage action once it owns
+   * the gate. Only storage lines may be sent; a USB session change mid-run
+   * stops it.
+   */
+  async runStorageSequence<T>(work: (send: (cmd: StorageSequenceCommand) => Promise<string>) => Promise<T>, opts?: HostCallOptions & { priority?: "write" | "normal" }): Promise<T> {
+    try {
+      return await this.commands.run(() => {
+        const generation = this.sessionGeneration;
+        return this.storage.track(() => work(async (cmd) => {
+          if (!isStorageSequenceCommand(cmd)) throw new Error(`not a storage sequence command: ${String(cmd)}`);
+          if (generation !== this.sessionGeneration) throw new Error(GATE_SESSION_CHANGED_MESSAGE);
+          return this.client.sendCommand(cmd);
+        }));
+      }, { priority: opts?.priority ?? "normal", signal: opts?.signal });
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      throw err;
+    }
+  }
+
   storageActionPending(): boolean {
     return this.storage.pending;
   }
@@ -347,6 +374,14 @@ class ProtocolHostAdapter implements BobFlightHost {
       throw err;
     }
   }
+}
+
+/**
+ * The real host adapter (CommandGate, storage tracking, client) over a given
+ * transport factory. For simulators and tests; the app uses createHost().
+ */
+export function createHostWithTransport(transports: TransportFactory, mode: ProtocolMode = "serial"): BobFlightHost & { getClient(): BobFlightCliClient } {
+  return new ProtocolHostAdapter(mode, transports);
 }
 
 export function createHost(mode?: ProtocolMode, testTransportFactory?: TransportFactory): BobFlightHost {

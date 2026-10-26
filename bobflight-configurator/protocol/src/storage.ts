@@ -1,6 +1,6 @@
 import {isSettingsKey,validateSettingValue,ACTUAL_RATE_KEYS} from "./settings";
 /* SPDX-License-Identifier: Apache-2.0 */
-import {snapshot,field,bit,uint,isModeRangeCommand} from './parse-modes';
+import {snapshot,bit,uint,isModeRangeCommand} from './parse-modes';
 export const STORAGE_SCOPE='pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates';
 export const STORAGE_SCOPE_V13=STORAGE_SCOPE;
 export const STORAGE_PAYLOAD_BYTES_V13=256;
@@ -17,13 +17,37 @@ export function rpmExportValueValid(key:string,n:number):boolean{
 }
 const scopeFor=(v:string|undefined)=>v==='13'?STORAGE_SCOPE_V13:undefined;
 export interface StorageSnapshot {backend:'flash'|'host_sim'|'unsupported';schema:13;state:'saved'|'dirty'|'defaults'|'error'|'unsupported';dirty:boolean;generation:number;lastError:string;scope:string;armed:boolean;benchActive:boolean;calibrationActive:boolean;flightEnabled:boolean}
+/**
+ * The controller's `storage` reply could not be read (F5): malformed, incomplete,
+ * contradictory, an unknown backend/state, a scope that does not match schema 13,
+ * or a newer schema. This is NOT "fresh install required" (that is the
+ * controller's own last_error token, or an older schema below). `raw` is the reply as received.
+ */
+export class StorageReplyError extends Error {
+ constructor(readonly reason:string,readonly raw:string){super(`Storage reply could not be read: ${reason}`);this.name='StorageReplyError';}
+}
+/** Storage schema this Configurator reads. */
+export const STORAGE_SCHEMA=13;
 export function parseStorage(raw:string):StorageSnapshot {
- const {fields:f,rows}=snapshot(raw,'storage','unused');if(rows.length)throw Error('Unexpected storage rows');
- const backend=field(f,'backend'),state=field(f,'state'),dirty=bit(field(f,'dirty'));
- if(!['flash','host_sim','unsupported'].includes(backend)||!['saved','dirty','defaults','error','unsupported'].includes(state)||!(['13'].includes(field(f,'schema')))||field(f,'scope')!==scopeFor(field(f,'schema')))throw Error('Fresh install required: expected storage schema 13');
- if(state==='saved'&&dirty||state==='dirty'&&!dirty||backend==='unsupported'&&state!=='unsupported')throw Error('Contradictory storage state');
- const lastError=field(f,'last_error');if(!/^[a-z_]+$/.test(lastError)||state==='saved'&&lastError!=='none')throw Error('Invalid storage status');
- return {backend:backend as StorageSnapshot['backend'],schema:Number(field(f,'schema')) as 13,state:state as StorageSnapshot['state'],dirty,generation:uint(field(f,'generation'),0,4294967295),lastError,scope:field(f,'scope'),armed:bit(field(f,'armed')),benchActive:bit(field(f,'bench_active')),calibrationActive:bit(field(f,'calibration_active')),flightEnabled:bit(field(f,'flight_enabled'))};
+ const bad=(reason:string):never=>{throw new StorageReplyError(reason,raw);};
+ let f:Map<string,string>,rows:string[];
+ try{({fields:f,rows}=snapshot(raw,'storage','unused'));}catch(e){return bad(e instanceof Error?e.message:String(e));}
+ if(rows.length)bad('unexpected storage rows');
+ const get=(k:string)=>{const v=f.get(k);if(v===undefined)bad(`missing ${k}`);return v as string;};
+ const schema=get('schema');
+ // An older, well-formed schema really does need a fresh install of current firmware.
+ if(/^(?:0|[1-9]\d{0,3})$/.test(schema)&&Number(schema)<STORAGE_SCHEMA)throw Error(`Fresh install required: the controller reports storage schema ${schema}; this Configurator needs storage schema ${STORAGE_SCHEMA}`);
+ if(schema!==String(STORAGE_SCHEMA))bad(`storage schema "${schema}" is not schema ${STORAGE_SCHEMA}`);
+ const backend=get('backend'),state=get('state');
+ if(!['flash','host_sim','unsupported'].includes(backend))bad(`unknown backend "${backend}"`);
+ if(!['saved','dirty','defaults','error','unsupported'].includes(state))bad(`unknown state "${state}"`);
+ if(get('scope')!==scopeFor(schema))bad(`scope does not match storage schema ${STORAGE_SCHEMA}`);
+ let dirty=false;try{dirty=bit(get('dirty'));}catch(e){if(e instanceof StorageReplyError)throw e;bad('invalid dirty flag');}
+ if(state==='saved'&&dirty||state==='dirty'&&!dirty||backend==='unsupported'&&state!=='unsupported')bad('contradictory storage state');
+ const lastError=get('last_error');if(!/^[a-z_]+$/.test(lastError)||state==='saved'&&lastError!=='none')bad('invalid storage status');
+ const num=(k:string,max:number)=>{try{return uint(get(k),0,max);}catch(e){if(e instanceof StorageReplyError)throw e;return bad(`invalid ${k}`);}};
+ const flag=(k:string)=>{try{return bit(get(k));}catch(e){if(e instanceof StorageReplyError)throw e;return bad(`invalid ${k}`);}};
+ return {backend:backend as StorageSnapshot['backend'],schema:13,state:state as StorageSnapshot['state'],dirty,generation:num('generation',4294967295),lastError,scope:get('scope'),armed:flag('armed'),benchActive:flag('bench_active'),calibrationActive:flag('calibration_active'),flightEnabled:flag('flight_enabled')};
 }
 export function isVerifiedFlashSave(raw:string):boolean{return raw.trim()==='saved: flash verified';}
 export function canSaveStorage(s:StorageSnapshot|null,connected:boolean,pending:boolean):boolean{return connected&&!pending&&!!s&&s.backend==='flash'&&s.lastError!=='fresh_install_required'&&s.lastError!=='invalid_record'&&!s.armed&&!s.benchActive&&!s.calibrationActive;}
