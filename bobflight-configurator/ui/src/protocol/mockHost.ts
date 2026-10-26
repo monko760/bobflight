@@ -32,6 +32,12 @@ import {
   type LoopRateMockScenario,
   type ReceiverLinkMockScenario,
   type SettingsKey,
+  DEFAULTS_GROUP_KEYS,
+  DEFAULTS_MOCK_ERROR_LINES,
+  mockDefaultsReply,
+  parseDefaultsGroupReply,
+  type DefaultsGroup,
+  type DefaultsGroupResult,
 } from "@bobflight/protocol";
 import type {
   BobFlightHost,
@@ -296,14 +302,20 @@ export class MockBobFlightHost implements BobFlightHost {
    */
   simulateVerifiedSave(): void { this.loopRateSetting.save(); }
 
+  /** Bare `defaults`: FW with scoped defaults (D1) refuses it. */
   async restoreDefaults(): Promise<Record<SettingsKey, string>> {
     this.requireConnected();
-    this.settings = cloneDefaultSettings();
-    this.loopRateSetting.defaults();
-    this.gyroNotch.defaults();
-    this.rpmFilter.defaults();
-    this.motorDirection.defaults();
-    return this.getAllSettings();
+    throw new Error(DEFAULTS_MOCK_ERROR_LINES.group_required);
+  }
+
+  /** `defaults pid|rates|filters` (D1): resets only that group's keys, nothing saved; FW reply shape. */
+  async restoreDefaultsGroup(group: DefaultsGroup): Promise<DefaultsGroupResult> {
+    this.requireConnected();
+    if (this.armed) return parseDefaultsGroupReply(`${DEFAULTS_MOCK_ERROR_LINES.armed}\r\n`, group);
+    const defaults = cloneDefaultSettings();
+    for (const k of DEFAULTS_GROUP_KEYS[group]) this.settings[k] = defaults[k];
+    if (group === "filters") { this.gyroNotch.defaults(); this.rpmFilter.defaultsFilterKeys(); }
+    return parseDefaultsGroupReply(mockDefaultsReply(group, "ok"), group);
   }
 
   async getAllSettings(): Promise<Record<SettingsKey, string>> {

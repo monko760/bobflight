@@ -10,6 +10,7 @@ import {
 } from "../tuning/mockSettingsApi";
 import type { FiltersConfig } from "../tuning/mockTuningStore";
 import { browserConfirm, requestRefresh } from "../components/storageRefresh";
+import { ScopedDefaults } from "../components/ScopedDefaults";
 import type { GyroNotchIndex } from "../protocol";
 import {
   applyNotch,
@@ -104,6 +105,7 @@ export function FiltersPage() {
   const [err, setErr] = useState<string | null>(null);
   const [usingFallback, setUsingFallback] = useState(false);
   const [ready, setReady] = useState(false);
+  const [savedRev, setSavedRev] = useState(0);
   const [loadedValues, setLoadedValues] = useState<FiltersConfig>(emptyFilters);
   const [notchSnap, setNotchSnap] = useState<NotchSnapshot>(emptyNotchSnapshot);
   const [drafts, setDrafts] = useState<Record<GyroNotchIndex, NotchDraft>>({
@@ -307,6 +309,7 @@ export function FiltersPage() {
         return;
       }
       setMsg("saved");
+      setSavedRev((r) => r + 1);
       await load();
       return;
     }
@@ -351,33 +354,10 @@ export function FiltersPage() {
       await reloadNotches();
       await host.saveSettings();
       setMsg("saved");
+      setSavedRev((r) => r + 1);
       await load();
     } catch (e) {
       if (e instanceof RpmCancelled) return; // unmounted mid-Save: nothing more is sent
-      setErr(settingsErrorMessage(e));
-    }
-  }
-
-  async function onDefaults() {
-    setErr(null);
-    setMsg(null);
-    if (usingFallback) {
-      const reply = mockSettingsApi.defaults("filters");
-      if (reply !== "defaults restored") {
-        setErr(reply);
-        return;
-      }
-      setMsg("defaults restored");
-      await load();
-      return;
-    }
-
-    try {
-      await ensureMockConnected(host);
-      await host.restoreDefaults();
-      setMsg("defaults restored");
-      await load();
-    } catch (e) {
       setErr(settingsErrorMessage(e));
     }
   }
@@ -423,7 +403,7 @@ export function FiltersPage() {
       <h2>Filters</h2>
       <p className="muted">
         Gyro and D-term low-pass, two manual gyro notches (FW schema 8) and the RPM filter (FW schema 9). Protocol{" "}
-        <code>get/set/save/defaults</code>. Keys: {protocolKeys.join(", ") || FILTER_KEYS.join(", ")}.
+        <code>get/set/save</code> and <code>defaults filters</code> (this tab only). Keys: {protocolKeys.join(", ") || FILTER_KEYS.join(", ")}.
         Range: <code>0</code> = off; else <code>10..1000</code> Hz. Defaults{" "}
         <code>320</code> / <code>53</code>.
       </p>
@@ -596,13 +576,15 @@ export function FiltersPage() {
         <button type="button" className="ghost" onClick={onReload}>
           Reload{pageDirty ? " (discard edits)" : ""}
         </button>
-        <button
-          type="button"
-          className="ghost"
-          onClick={() => void onDefaults()}
-        >
-          Defaults
-        </button>
+        <ScopedDefaults
+          host={host}
+          group="filters"
+          onReread={load}
+          savedRevision={savedRev}
+          pageDirty={pageDirty}
+          disabled={!!settingsBusy}
+          localFallback={usingFallback ? async () => { mockSettingsApi.defaults("filters"); await load(); } : undefined}
+        />
       </div>
       {msg && <p className="muted">Last reply: {msg}</p>}
       {err && <p className="fail">{err}</p>}

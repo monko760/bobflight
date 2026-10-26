@@ -198,3 +198,21 @@ export {isBoardAlignmentCommand,STORAGE_SCOPE_V13,STORAGE_PAYLOAD_BYTES_V13} fro
 
 export { BOARD_ID_KEYS, BOARD_ID_TOKEN, BOARD_ID_MOCK_SCENARIOS, parseBoardIdentity, boardIdentityComplete, BOARD_ID_MAX, boardIdFieldText, boardIdMockVersion } from "./board-id";
 export type { BoardIdKey, BoardIdField, BoardIdentity, BoardIdMockScenario } from "./board-id";
+
+export {
+  DEFAULTS_GROUPS,
+  DEFAULTS_GROUP_KEYS,
+  DEFAULTS_CLI_COMMANDS,
+  DEFAULTS_ERROR_CODES,
+  DEFAULTS_ERROR_PREFIX,
+  DEFAULTS_RESULT_UNKNOWN,
+  DEFAULTS_NOT_TOUCHED,
+  isDefaultsGroup,
+  isDefaultsCliCommand,
+  isDefaultsReplyEnd,
+  parseDefaultsGroupReply,
+} from "./defaults-scoped";
+export type { DefaultsGroup, DefaultsCliCommand, DefaultsErrorCode, DefaultsKeyLine, DefaultsGroupResult } from "./defaults-scoped";
+export { DEFAULTS_MOCK_SCENARIOS, DEFAULTS_MOCK_ERROR_LINES, MOCK_BARE_DEFAULTS_REPLY, defaultsKeyLines, mockDefaultsReply } from "./defaults-scoped-mock";
+export type { DefaultsMockScenario } from "./defaults-scoped-mock";
+export { DEFAULTS_REPLY_IDLE_MS } from "./client";

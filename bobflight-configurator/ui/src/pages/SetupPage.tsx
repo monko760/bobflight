@@ -1,6 +1,5 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
 import {
   LOOP_RATE_OPTIONS,
@@ -49,9 +48,7 @@ export function SetupPage() {
     postFlashGate,
   } = useHost();
   const [busy, setBusy] = useState(false);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
-  const [confirmDefaults, setConfirmDefaults] = useState(false);
 
   const connected = connectionStatus === "connected";
   // Loop-rate readout: read-only `status` every 1 s, local to this section only
@@ -122,17 +119,6 @@ export function SetupPage() {
     if (busy || postFlashGate) return;
     if (loopTargetWatcher.changed(loopTarget)) setLoopSettingRead(false);
   }, [loopTargetWatcher, connected, loopTarget, busy, postFlashGate]);
-  // restoreDefaults exists on BobFlightHost and is safe when connected (mock + serial).
-  const canRestoreDefaults =
-    connected && !busy && typeof host.restoreDefaults === "function";
-  const defaultsDisabledReason = !connected
-    ? "Disabled: connect first"
-    : busy
-      ? "Disabled: busy"
-      : typeof host.restoreDefaults !== "function"
-        ? "Disabled: restoreDefaults not available on this host"
-        : null;
-
   async function onRefresh() {
     if (!connected || busy) return;
     setBusy(true);
@@ -143,31 +129,6 @@ export function SetupPage() {
       // Re-fetch version + status via existing host APIs (no new commands).
       await pollAfterConnect();
       await refreshStatus();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setLastError(msg);
-      setActionErr(msg);
-    } finally {
-      setBusy(false);
-      setLoopPollKick((k) => k + 1);
-    }
-  }
-
-  async function onRestoreDefaults() {
-    if (!canRestoreDefaults) return;
-    setBusy(true);
-    setActionMsg(null);
-    setActionErr(null);
-    setLastError(null);
-    setConfirmDefaults(false);
-    try {
-      await pauseLoopPoll();
-      await host.restoreDefaults();
-      setActionMsg("defaults restored");
-      setLoopSettingRead(false); // FW `defaults` also resets loop_rate_hz: re-read it
-      if (host.getConnectionStatus() === "connected") {
-        await refreshStatus();
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setLastError(msg);
@@ -204,8 +165,8 @@ export function SetupPage() {
     <div className="panel">
       <h2>Setup</h2>
       <p className="muted">
-        Phase A setup: CLI version, board status, honest calibrate gate, restore
-        defaults, and fail-closed arming blockers.
+        Phase A setup: CLI version, board status, honest calibrate gate and
+        fail-closed arming blockers. Defaults are per tab (PID, Rates, Filters).
       </p>
 
       {connected ? (
@@ -371,27 +332,16 @@ export function SetupPage() {
         </p>
       </section>
 
-      {/* Reset / defaults */}
-      <section style={{ marginTop: "1.25rem" }}>
-        <h3>Reset / defaults</h3>
+      {/* Defaults: per tab only (D1). There is no full reset on this page. */}
+      <section style={{ marginTop: "1.25rem" }} data-testid="setup-defaults-note">
+        <h3>Defaults</h3>
         <p className="muted">
-          Uses host <code>restoreDefaults()</code> when connected (all 12 FW
-          settings keys; no auto-save).
+          Defaults are restored per tab: use <strong>Defaults…</strong> on the PID, Rates or
+          Filters tab. Each resets only that tab's settings (<code>defaults pid</code>,{" "}
+          <code>defaults rates</code>, <code>defaults filters</code>) and nothing is saved
+          until you press Save. Board alignment, motor direction, loop rate and accelerometer
+          calibration are never reset by them. There is no full reset on this page.
         </p>
-        <div className="row">
-          <button
-            type="button"
-            className="danger"
-            disabled={!canRestoreDefaults}
-            title={defaultsDisabledReason ?? undefined}
-            onClick={() => setConfirmDefaults(true)}
-          >
-            Restore defaults…
-          </button>
-        </div>
-        {defaultsDisabledReason && (
-          <p className="muted">{defaultsDisabledReason}</p>
-        )}
       </section>
 
       {/* Arming blockers — gyro_ok:no and/or failsafe:ACTIVE only */}
@@ -431,20 +381,8 @@ export function SetupPage() {
         )}
       </section>
 
-      {actionMsg && <p className="muted">Last reply: {actionMsg}</p>}
       {actionErr && <p className="fail">{actionErr}</p>}
 
-      {confirmDefaults && (
-        <ConfirmDialog
-          open
-          title="Restore defaults?"
-          message="Restore all firmware settings defaults via host.restoreDefaults()? This resets all 12 settings keys. Changes are not auto-saved."
-          confirmLabel="Restore defaults"
-          danger
-          onCancel={() => setConfirmDefaults(false)}
-          onConfirm={() => void onRestoreDefaults()}
-        />
-      )}
     </div>
   );
 }

@@ -24,6 +24,8 @@ import type {
   PortInfo,
   SettingsKey,
   WebSerialRequestPortOptions,
+  DefaultsGroup,
+  DefaultsGroupResult,
 } from "@bobflight/protocol";
 
 export const ALLOWED_CLI_COMMANDS: readonly CliCommand[] = [
@@ -131,6 +133,15 @@ export interface BobFlightHost {
     value: string,
   ): Promise<{ key: SettingsKey; value: string }>;
   saveSettings(): Promise<void>;
+  /** Bare `defaults`: FW with scoped defaults refuses it (`defaults_error: group_required ...`). The UI does not call it. */
   restoreDefaults(): Promise<Record<SettingsKey, string>>;
+  /**
+   * Scoped defaults `defaults pid|rates|filters` through the shared
+   * CommandGate (tracked as a storage action). Nothing is saved. Resolves
+   * with the parsed FW reply; throws only when the gate refused (nothing
+   * sent) or the transport failed (outcome unknown). Optional: hosts
+   * without it cannot restore per-tab defaults.
+   */
+  restoreDefaultsGroup?(group: DefaultsGroup): Promise<DefaultsGroupResult>;
   getAllSettings(): Promise<Record<SettingsKey, string>>;
 }

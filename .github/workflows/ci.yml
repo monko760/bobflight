@@ -142,6 +142,10 @@ jobs:
           npm --prefix ui run test:transport-identity
       - name: Settings smoke
         run: npm --prefix protocol run smoke:settings
+      - name: Scoped defaults (D1) parser, defaults pid|rates|filters allowlist, frozen FW reply shape and mock FC scenarios
+        run: npm --prefix protocol run test:defaults-scoped
+      - name: Per-tab Defaults render test (PID/Rates/Filters on the real gate, confirm dialog, verbatim FW lines, unknown on missing end/count/group, no Save, Setup Reset gone)
+        run: npm --prefix ui run test:defaults-scoped
       - name: Actual-only rates and fresh configuration UI
         run: npm --prefix protocol run test:actual-rates
       - name: Motor protocol tests

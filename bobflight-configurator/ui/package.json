@@ -35,7 +35,8 @@
     "test:transport-identity": "node scripts/run-transport-classification.mjs",
     "test:diagnostic-console": "esbuild scripts/test-diagnostic-console.tsx --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-diagnostic-console.bundle.mjs && node scripts/test-diagnostic-console.bundle.mjs",
     "test:hex-builder": "esbuild scripts/test-hex-builder.tsx --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-hex-builder.bundle.mjs --jsx=automatic && node scripts/test-hex-builder.bundle.mjs",
-    "test:board-identity": "node scripts/run-board-identity.mjs"
+    "test:board-identity": "node scripts/run-board-identity.mjs",
+    "test:defaults-scoped": "node scripts/run-defaults-scoped.mjs"
   },
   "dependencies": {
     "@bobflight/protocol": "file:../protocol",

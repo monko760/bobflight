@@ -4,6 +4,7 @@ import {parseStorage,canSaveStorage,type StorageSnapshot} from '../protocol';
 import {RATES_DEFAULTS,getRates,type RatesConfig} from '../tuning/mockTuningStore';
 import {mockSettingsApi,type RateKey} from '../tuning/mockSettingsApi';
 import {AXES,rateAtStick,rateDraftValid,rateSaveEntries,readRateSettings} from '../tuning/actualRates';
+import {ScopedDefaults} from '../components/ScopedDefaults';
 const errorText=(e:unknown)=>e instanceof Error?e.message:String(e);
 export function RatesPage(){
  const {host,connectionStatus,postFlashGate}=useHost();
@@ -12,6 +13,8 @@ export function RatesPage(){
  const [supported,setSupported]=useState(false),[storage,setStorage]=useState<StorageSnapshot|null>(null);
  const [error,setError]=useState(''),[message,setMessage]=useState('');
  const epoch=useRef(0);
+ const [savedRev,setSavedRev]=useState(0);
+ const loadedRef=useRef<RatesConfig|null>(null);
  const load=useCallback(async()=>{
   const token=++epoch.current;setReady(false);setPreview(false);setStorage(null);setError('');setMessage('');setBusy(false);
   if(connectionStatus!=='connected'){setError('Connect a controller, or choose Local preview.');return;}
@@ -24,7 +27,7 @@ export function RatesPage(){
    if(token!==epoch.current)return;
    const actual=!!capability&&capability.schema===13&&capability.lastError!=='fresh_install_required'&&capability.lastError!=='invalid_record';
    if(!actual)throw Error('Fresh install required: Actual rates need schema13 with initialized configuration storage.');
-   setValues(read.values);setStorage(capability);setSupported(actual);setReady(true);
+   setValues(read.values);loadedRef.current=read.values;setStorage(capability);setSupported(actual);setReady(true);
   }catch(e){if(token===epoch.current){setError(errorText(e));setReady(false);}}
   finally{if(token===epoch.current)setBusy(false);}
  },[host,connectionStatus,postFlashGate]);
@@ -45,7 +48,7 @@ export function RatesPage(){
    for(const [k,v]of entries)if(Math.abs(after.values[k]-Number(v))>Math.max(1e-6,Math.abs(Number(v))*2e-6))throw Error(`Readback mismatch: ${k}`);
    const verified=parseStorage(await host.sendCommand('storage'));if(token!==epoch.current)return;
    if(verified.backend!=='flash'||verified.state!=='saved'||verified.dirty)throw Error('Final flash-save verification failed');
-   setValues(after.values);setStorage(verified);setMessage('Saved to controller flash and read back.');
+   setValues(after.values);loadedRef.current=after.values;setStorage(verified);setSavedRev(r=>r+1);setMessage('Saved to controller flash and read back.');
   }catch(e){if(token===epoch.current){setError(`${errorText(e)}. Some values may already be applied in RAM or saved. Reload before retrying.`);setReady(false);}}
   finally{if(token===epoch.current)setBusy(false);}
  }
@@ -72,7 +75,8 @@ export function RatesPage(){
    {AXES.map((a,i)=><path key={a} data-axis={a} fill="none" stroke={colors[i]} strokeWidth={2} d={Array.from({length:101},(_,k)=>{const x=k/50-1,y=rateAtStick(values,a,x);return `${k?'L':'M'}${(55+k*4.4).toFixed(2)},${(135-y/ceiling*105).toFixed(2)}`;}).join(' ')}/>)}
    <text x={55} y={260} fill="currentColor" fontSize={12}>-100%</text><text x={268} y={260} fill="currentColor" fontSize={12}>0</text><text x={460} y={260} fill="currentColor" fontSize={12}>100%</text><text x={125} y={285} fill="currentColor" fontSize={12}>Stick input (existing 2% deadband applied once)</text>
   </svg><p>{AXES.map((a,i)=><span key={a} style={{color:colors[i],marginRight:20}}>{a}: {rateAtStick(values,a,1).toFixed(0)} deg/s endpoint</span>)}</p></>}
-  <div className="row"><button className="primary" disabled={!canSave} onClick={()=>void save()}>{preview?'Save preview':'Save to controller'}</button><button disabled={!ready||busy} onClick={()=>{setValues({...RATES_DEFAULTS});setMessage('Only the rate draft was reset. Nothing was sent or saved.');}}>Reset rate draft</button></div>
+  <div className="row"><button className="primary" disabled={!canSave} onClick={()=>void save()}>{preview?'Save preview':'Save to controller'}</button><button disabled={!ready||busy} onClick={()=>{setValues({...RATES_DEFAULTS});setMessage('Only the rate draft was reset. Nothing was sent or saved.');}}>Reset rate draft</button>
+   {!preview&&<ScopedDefaults host={host} group="rates" onReread={load} savedRevision={savedRev} disabled={busy||connectionStatus!=='connected'||!!postFlashGate} pageDirty={ready&&!!loadedRef.current&&AXES.some(a=>(['rate_center_','rate_max_','rate_expo_'] as const).some(p=>values[`${p}${a}`]!==loadedRef.current![`${p}${a}`]))}/>}</div>
   {message&&<p className="muted">{message}</p>}{error&&<p className="fail" role="alert">{error}</p>}
  </div>;
 }

@@ -74,17 +74,20 @@ export class ResponseCollector {
   private readonly reject: (err: Error) => void;
   private readonly idleMs: number;
   private readonly endMarker?: string;
+  /** Optional early end: finish as soon as a complete line satisfies it (otherwise the idle rule applies). */
+  private readonly endLine?: (line: string) => boolean;
   private readonly maxChars: number;
 
   constructor(
     resolve: (text: string) => void,
     reject: (err: Error) => void,
-    opts: { idleMs?: number; timeoutMs?: number; endMarker?: string; maxChars?: number } = {}
+    opts: { idleMs?: number; timeoutMs?: number; endMarker?: string; endLine?: (line: string) => boolean; maxChars?: number } = {}
   ) {
     this.resolve = resolve;
     this.reject = reject;
     this.idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
     this.endMarker = opts.endMarker;
+    this.endLine = opts.endLine;
     this.maxChars = opts.maxChars ?? 65536;
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.hardTimer = setTimeout(() => {
@@ -109,6 +112,10 @@ export class ResponseCollector {
       const lines = this.chunks.join("").split(/\r\n|\n|\r/).slice(0, -1);
       if (lines.includes(this.endMarker) || (this.endMarker === "modes_end: 1" && lines.some(line => (line.startsWith("mode_range refused:") || line.startsWith("control_source refused:")))) || lines.some(line => /^unknown(?: — try help| command)?$/.test(line.trim()))) this.finish(false);
       return;
+    }
+    if (this.endLine) {
+      const done = this.chunks.join("").split(/\r\n|\n|\r/).slice(0, -1);
+      if (done.some((l) => this.endLine!(l))) { this.finish(false); return; }
     }
     this.idleTimer = setTimeout(() => this.finish(false), this.idleMs);
   }

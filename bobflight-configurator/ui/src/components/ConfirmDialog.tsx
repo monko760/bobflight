@@ -1,7 +1,11 @@
+import type { ReactNode } from "react";
+
 interface ConfirmDialogProps {
   open: boolean;
   title: string;
   message: string;
+  /** Extra dialog content below the message (e.g. a list of affected settings). */
+  children?: ReactNode;
   confirmLabel?: string;
   danger?: boolean;
   onConfirm: () => void;
@@ -14,6 +18,7 @@ export function ConfirmDialog({
   message,
   confirmLabel = "Confirm",
   danger,
+  children,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -29,6 +34,7 @@ export function ConfirmDialog({
       >
         <h2 id="confirm-title">{title}</h2>
         <p>{message}</p>
+        {children}
         <div className="modal-actions">
           <button type="button" className="ghost" onClick={onCancel}>
             Cancel

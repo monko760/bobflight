@@ -124,7 +124,8 @@ async function main() {
     assert.match(setup, /loopRateView\(loopPoll\.raw === null \? null : parseLoopStatus\(loopPoll\.raw\)\)/);
     assert.match(setup, /new LoopRatePoller\(\(\) => host\.sendCommand\("status"\), setLoopPoll\)/);
     assert.match(setup, /loopPoller\.setEnabled\(connected && !busy && !postFlashGate\)/);
-    assert.equal((setup.match(/await pauseLoopPoll\(\);/g) ?? []).length, 3, "Refresh, Restore defaults and every loop-rate selector action pause the poll first");
+    // D1: Setup no longer has a full Restore defaults action (per-tab defaults only).
+    assert.equal((setup.match(/await pauseLoopPoll\(\);/g) ?? []).length, 2, "Refresh and every loop-rate selector action pause the poll first");
   });
   await test("status poll never feeds shared status or StoragePanel blocked; PR #54 Motors lock intact", () => {
     const setup = source("../src/pages/SetupPage.tsx");
@@ -175,8 +176,10 @@ async function main() {
     const booted = await readLoopRateSetting(host);
     assert.equal(booted.report?.bootSettingHz, "8000"); assert.equal(booted.report?.pendingReboot, false);
     assert.equal(parseLoopStatus(await host.sendCommand("status")).targetHz, "8000", "rate applied after reboot");
-    await host.restoreDefaults();
-    assert.deepEqual((await readLoopRateSetting(host)).get, { kind: "value", value: "4000" }, "FW defaults reset the setting");
+    // D1: bare `defaults` is refused (group_required) and no per-tab group touches loop_rate_hz.
+    await assert.rejects(host.restoreDefaults(), { message: /^defaults_error: group_required/ });
+    for (const g of ["pid", "rates", "filters"] as const) assert.equal((await host.restoreDefaultsGroup(g)).kind, "ok");
+    assert.deepEqual((await readLoopRateSetting(host)).get, { kind: "value", value: "8000" }, "scoped defaults leave loop_rate_hz alone");
     await host.disconnect();
   });
   await test("older FC shows unknown and is never written; guard fallback is reported with the applied target", async () => {
@@ -266,7 +269,8 @@ async function main() {
     assert.match(ctl, /await host\.saveSettings\(\)/, "persists through the existing verified save flow");
     assert.doesNotMatch(ctl, /sendCommand\("save"\)|sendRaw/, "no ad-hoc save");
     assert.doesNotMatch(ctl, /\b(1000|2000|4000|8000)\b/, "controller has no hardcoded rates");
-    assert.match(setup, /setLoopSettingRead\(false\); \/\/ FW `defaults` also resets loop_rate_hz/);
+    // D1: Setup has no full defaults action any more, so nothing there can reset loop_rate_hz.
+    assert.doesNotMatch(setup, /restoreDefaults|sendCommand\("defaults/, "Setup sends no defaults command");
     for (const cmd of ["get loop_rate_hz", "loop_rate", ...LOOP_RATE_OPTIONS.map(v => `set loop_rate_hz ${v}`)]) assert.equal(parseCliInput(cmd), cmd, cmd);
     for (const bad of ["set loop_rate_hz 2000", "set loop_rate_hz 4000.0", "set loop_rate_hz"]) assert.equal(parseCliInput(bad), null, bad);
   });

@@ -37,6 +37,17 @@ import {
 } from "./settings";
 import { isGyroNotchCliCommand } from "./gyro-notch";
 import { isRpmFilterCliCommand } from "./rpm-filter";
+import {
+  DEFAULTS_ERROR_PREFIX,
+  isDefaultsGroup,
+  isDefaultsReplyEnd,
+  parseDefaultsGroupReply,
+  type DefaultsGroup,
+  type DefaultsGroupResult,
+} from "./defaults-scoped";
+
+/** Idle gap tolerated inside a scoped defaults reply before it counts as complete (the end line usually ends it first). */
+export const DEFAULTS_REPLY_IDLE_MS = 300;
 
 /** R0b patterned CLI: get erpm_m1..4 / dshot_telem_m1..4 / get|set dshot_bidir on|off. */
 export function isR0bDshotCliCommand(cmd: string): boolean {
@@ -73,6 +84,8 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "dshot 600",
   "get loop_rate_hz", "set loop_rate_hz 1000", "set loop_rate_hz 4000", "set loop_rate_hz 8000", "loop_rate",
   "get motor_direction", "set motor_direction props-out", "set motor_direction props-in", "mixer",
+  // Scoped defaults (D1). Bare `defaults` stays reachable only through restoreDefaults() (FW: group_required).
+  "defaults pid", "defaults rates", "defaults filters",
 ] as const;
 
 /**
@@ -302,7 +315,8 @@ export class BobFlightCliClient {
       throw new Error("another command is in flight");
     }
 
-    const idleMs = opts?.idleMs ?? DEFAULT_IDLE_MS;
+    const scopedDefaults = /^defaults (?:pid|rates|filters)$/.test(line.trim());
+    const idleMs = opts?.idleMs ?? (scopedDefaults ? DEFAULTS_REPLY_IDLE_MS : DEFAULT_IDLE_MS);
     const timeoutMs = opts?.timeoutMs ?? (line === "save" ? 15000 : DEFAULT_TIMEOUT_MS);
 
     const responsePromise = new Promise<string>((resolve, reject) => {
@@ -318,7 +332,7 @@ export class BobFlightCliClient {
           if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "barometer" || line === "storage" || line === "flash_info" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
           reject(err);
         },
-        { idleMs, timeoutMs, maxChars: opts?.maxResponseChars,
+        { idleMs, timeoutMs, maxChars: opts?.maxResponseChars, endLine: scopedDefaults ? isDefaultsReplyEnd : undefined,
           endMarker: line === "barometer" ? "barometer_end: 1" : line === "flash_info" ? "flash_info_end: 1" : line.startsWith("sd read") ? "sd_data_end: 1" : line.startsWith("blackbox ") ? "blackbox_end: 1" : line.startsWith("sd ") ? "sd_end: 1" : (line === "pid_diag" || line.startsWith("pid_diag ")) ? "pid_diag_end: 1" : line === "storage" ? "storage_end: 1" : (line === "diff all" || line === "dump all") ? "# config_end: 1" : line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "loop_rate" ? "loop_rate_end: 1" : line === "mixer" ? "mixer_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
@@ -404,12 +418,28 @@ export class BobFlightCliClient {
   }
 
   /**
-   * Restore FW defaults (does not auto-save). Returns all 12 keys after reset.
+   * Scoped defaults (D1): `defaults pid|rates|filters`. Nothing is saved (FC
+   * storage goes dirty). Returns the parsed reply; an FC error line, an older
+   * FC or an incomplete frame are results, not exceptions. Transport errors
+   * (timeout, disconnect, size cap) throw: the outcome is then unknown.
+   */
+  async restoreDefaultsGroup(group: DefaultsGroup, opts?: SendCommandOptions): Promise<DefaultsGroupResult> {
+    if (!isDefaultsGroup(group)) throw new Error(`unsupported defaults group: ${String(group)}`);
+    const raw = await this.sendCommand(`defaults ${group}`, opts);
+    return parseDefaultsGroupReply(raw, group);
+  }
+
+  /**
+   * Bare `defaults`. FW with scoped defaults answers `defaults_error:
+   * group_required ...` (thrown verbatim); only older FW answers
+   * `defaults restored`. Does not auto-save. The UI no longer sends it.
    */
   async restoreDefaults(
     opts?: SendCommandOptions
   ): Promise<Record<SettingsKey, string>> {
     const raw = await this.sendRaw("defaults", opts);
+    const err = raw.split(/\r?\n/).map((l) => l.trim()).find((l) => l.startsWith(DEFAULTS_ERROR_PREFIX));
+    if (err) throw new Error(err);
     const parsed = parseDefaultsReply(raw);
     if (!parsed.ok) {
       throw new Error(

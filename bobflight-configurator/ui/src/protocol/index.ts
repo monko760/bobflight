@@ -54,3 +54,5 @@ export {
   isMotorDirectionOption, motorDirectionSetCommand, parseMotorDirectionGetReply, parseMotorDirectionSetReply, parseMixerReport, motorDirectionView,
 } from "@bobflight/protocol";
 export type { MotorDirectionOption, MotorDirectionGetResult, MixerReport, MotorDirectionView, MotorDirectionMockScenario } from "@bobflight/protocol";
+export { DEFAULTS_GROUPS, DEFAULTS_GROUP_KEYS, DEFAULTS_ERROR_CODES, DEFAULTS_ERROR_PREFIX, DEFAULTS_RESULT_UNKNOWN, DEFAULTS_NOT_TOUCHED, isDefaultsGroup, parseDefaultsGroupReply } from "@bobflight/protocol";
+export type { DefaultsGroup, DefaultsGroupResult, DefaultsKeyLine } from "@bobflight/protocol";
