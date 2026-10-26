@@ -1002,6 +1002,10 @@ async function main() {
     const t = await realPage("mock://bobflight", (h) => {
       const orig = h.sendCommand as (c: string) => Promise<string>;
       h.sendCommand = async (c: string) => { if (c === "storage") await gate; return orig(c); };
+      // StoragePanel (PR 2) sends its lines inside one gated storage run: hold that run before it reaches the
+      // CommandGate (as the plain `storage` above), so the panel stays pending without starving the page's commands.
+      const seq = (h.runStorageSequence as ((...a: unknown[]) => Promise<unknown>) | undefined)?.bind(h);
+      if (seq) h.runStorageSequence = async (...a: unknown[]) => { await gate; return seq(...a); };
     });
     await t.connect();
     assert.ok(await waitFor(() => held() === "props-out" && lockLine() === "Locked while a controller storage action (save, refresh or export) is pending.", 4000), String(lockLine()));
