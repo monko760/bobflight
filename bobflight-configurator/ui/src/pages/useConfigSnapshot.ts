@@ -2,8 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
 import type {CliCommand} from '../protocol';
-import {isGateBusy} from '../protocol/commandGate';
-import {STORAGE_BUSY_RETRIES,STORAGE_BUSY_RETRY_MS} from '../components/storageSequence';
+import {STORAGE_BUSY_RETRIES,STORAGE_BUSY_RETRY_MS,isBusyRefusal} from '../components/storageSequence';
 export function useConfigSnapshot<T>(query:CliCommand,parse:(s:string)=>T){
  const {host,connectionStatus,postFlashGate}=useHost();const connected=connectionStatus==='connected'&&!postFlashGate;
  const [snapshot,setSnapshot]=useState<T|null>(null),[error,setError]=useState(''),[pending,setPending]=useState(false),[loadedAt,setLoadedAt]=useState(0);
@@ -16,7 +15,7 @@ export function useConfigSnapshot<T>(query:CliCommand,parse:(s:string)=>T){
  async function sendFirst(command:CliCommand,id:number):Promise<string>{
   for(let attempt=0;;attempt++){
    try{return await host.sendCommand(command);}
-   catch(e){if(!isGateBusy(e)||attempt>=STORAGE_BUSY_RETRIES||id!==epoch.current)throw e;await new Promise(r=>setTimeout(r,STORAGE_BUSY_RETRY_MS));}
+   catch(e){if(!isBusyRefusal(e)||attempt>=STORAGE_BUSY_RETRIES||id!==epoch.current)throw e;await new Promise(r=>setTimeout(r,STORAGE_BUSY_RETRY_MS));}
   }
  }
  async function execute(command:CliCommand=query,verify?:(v:T)=>void):Promise<T|null>{

@@ -13,7 +13,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { ReactElement } from "react";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { StoragePanel } from "../src/components/StoragePanel";
-import { STORAGE_BUSY_TEXT, STORAGE_BUSY_RETRIES, STORAGE_BUSY_RETRY_MS, runStorageGated, StorageBusyError } from "../src/components/storageSequence";
+import { STORAGE_BUSY_TEXT, STORAGE_BUSY_RETRIES, STORAGE_BUSY_RETRY_MS, runStorageGated, StorageBusyError, isBusyRefusal } from "../src/components/storageSequence";
 import { ReceiverPage } from "../src/pages/ReceiverPage";
 import { PowerBatteryPage } from "../src/pages/PowerBatteryPage";
 import { SensorsPage } from "../src/pages/SensorsPage";
@@ -21,7 +21,7 @@ import { ModesPage } from "../src/pages/ModesPage";
 import { PortsPage } from "../src/pages/PortsPage";
 import { MotorsPage } from "../src/pages/MotorsPage";
 import { createHostWithTransport } from "../src/protocol/createHost";
-import { isGateBusy, GATE_BUSY_MESSAGE, GATE_QUEUE_LIMIT, GATE_QUEUE_TIMEOUT_MS, CommandGate } from "../src/protocol/commandGate";
+import { isGateBusy, GATE_BUSY_MESSAGE, GATE_START_BUSY_MESSAGE, GATE_QUEUE_LIMIT, GATE_QUEUE_TIMEOUT_MS, CommandGate, GateBusyError } from "../src/protocol/commandGate";
 import { parseStatus, type CliCommand } from "@bobflight/protocol";
 import { MockStorageFirmware, StorageSimTransportFactory, type StorageSimOptions } from "../../protocol/src/storage-sim";
 
@@ -370,6 +370,49 @@ async function main() {
     await held; await sleep(50);
     assert.deepEqual(r.fw.log.slice(mark), [], "the dropped load was never sent");
     await r.done();
+  });
+
+  await test("both busy forms are retried on a real FIFO CommandGate (queue full, refused motor start); 'busy' text from the FC or client is not", async () => {
+    // Queue full: a real gate with a bound of 1, held, with one command waiting.
+    const full = new CommandGate(() => 1, 1);
+    let release = () => {};
+    const holding = full.run(() => new Promise<void>((r) => { release = r; }));
+    const waiting = full.run(async () => undefined);
+    let tries = 0, sentLines: string[] = [];
+    const errs: unknown[] = [];
+    const fullHost = { sendCommand: async () => "", runStorageSequence: <T,>(work: (s: (c: string) => Promise<string>) => Promise<T>) => {
+      tries++; if (tries === 3) release();
+      return full.run(() => work(async (c) => { sentLines.push(c); return "ok"; })).catch((e) => { errs.push(e); throw e; });
+    } };
+    const v1 = await runStorageGated(fullHost as never, "refresh", async (send) => { await send("storage"); return 1; }, { sleep: () => sleep(5) });
+    await holding; await waiting;
+    assert.equal(v1, 1);
+    assert.ok(errs.length >= 2 && errs.every((e) => e instanceof GateBusyError && (e as Error).message === GATE_BUSY_MESSAGE), "refused with the queue-full GateBusyError, then retried");
+    assert.match(GATE_BUSY_MESSAGE, /^busy, queue full/);
+    assert.deepEqual(sentLines, ["storage"], "one line once the queue had room");
+    // Refused motor start: an exclusive run on a busy real gate (starts are never queued).
+    const start = new CommandGate(() => 1);
+    let release2 = () => {};
+    const holding2 = start.run(() => new Promise<void>((r) => { release2 = r; }));
+    tries = 0; sentLines = []; errs.length = 0;
+    const startHost = { sendCommand: async () => "", runStorageSequence: <T,>(work: (s: (c: string) => Promise<string>) => Promise<T>) => {
+      tries++; if (tries === 3) release2();
+      return start.run(() => work(async (c) => { sentLines.push(c); return "ok"; }), { exclusive: true }).catch((e) => { errs.push(e); throw e; });
+    } };
+    const v2 = await runStorageGated(startHost as never, "refresh", async (send) => { await send("storage"); return 2; }, { sleep: () => sleep(5) });
+    await holding2;
+    assert.equal(v2, 2);
+    assert.ok(errs.length >= 2 && errs.every((e) => (e as Error).message === GATE_START_BUSY_MESSAGE), "refused with the motor-start busy error, then retried");
+    assert.deepEqual(sentLines, ["storage"]);
+    // Anything else that merely says busy is a real error: never retried.
+    for (const msg of ["busy: motor test running", "save failed: flash busy", "another UI command is in flight; request not queued (from the FC)"]) {
+      let calls = 0;
+      const h = { sendCommand: async () => "", runStorageSequence: async () => { calls++; throw new Error(msg); } };
+      await assert.rejects(runStorageGated(h as never, "save", async () => 1, { sleep: async () => {} }), (e) => (e as Error).message === msg);
+      assert.equal(calls, 1, `not retried: ${msg}`);
+    }
+    assert.equal(isBusyRefusal(new GateBusyError()), true);
+    assert.equal(isBusyRefusal(new GateBusyError(GATE_START_BUSY_MESSAGE)), true);
   });
 
   await test("bounded retry helper by behaviour: never retries a non-busy error, retries are counted and capped", async () => {

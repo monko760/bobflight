@@ -8,7 +8,7 @@
  *   (host.runStorageSequence holds the CommandGate for the whole sequence).
  * - Since the P1 FIFO gate a sequence that finds the gate in use WAITS in the
  *   gate's queue (save at write priority). "Busy" now means only the gate's own
- *   refusal before anything was sent (`isGateBusy`: queue full, "... request
+ *   refusal before anything was sent (`isBusyRefusal`: queue full, "... request
  *   not queued"); that, and only that, gets the bounded retry. A queue wait
  *   timeout is reported as busy without a retry (it already waited). A
  *   controller reply, a client error (timeout, disconnect) or a parse failure
@@ -17,8 +17,21 @@
  *   wording plus the raw refusal as a visible detail.
  */
 import { parseStorage, parseConfigurationExport, canSaveStorage, isVerifiedFlashSave, StorageReplyError, type StorageSnapshot } from "../protocol";
-import { isGateBusy, GateQueueTimeoutError, GateCancelledError, type GatePriority } from "../protocol/commandGate";
+import { GateBusyError, GATE_BUSY_MESSAGE, GATE_START_BUSY_MESSAGE, GateQueueTimeoutError, GateCancelledError, type GatePriority } from "../protocol/commandGate";
 import type { CliCommand, HostCallOptions, StorageSequenceCommand } from "../protocol/types";
+
+/**
+ * The shared gate's own busy refusal, raised before anything was sent. Two forms since the P1 FIFO gate:
+ * - queue full: GateBusyError "busy, queue full: …; request not queued" (GATE_BUSY_MESSAGE);
+ * - a refused motor start (starts are never queued): "busy: …; motor start request not queued".
+ * Only these are retried. A controller reply, a client error or any other text that merely says "busy" is not.
+ */
+export function isBusyRefusal(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const queueFull = e.message === GATE_BUSY_MESSAGE || (e instanceof GateBusyError && e.message !== GATE_START_BUSY_MESSAGE);
+  const startRefused = e.message === GATE_START_BUSY_MESSAGE;
+  return queueFull || startRefused;
+}
 
 /** Gate attempts after the first refusal, and the wait between them: ~3 s in total, then give up. */
 export const STORAGE_BUSY_RETRIES = 100;
@@ -110,7 +123,7 @@ export async function runStorageGated<T>(host: StorageSequenceHost, action: Stor
     let sent = 0;
     // A line counts as sent unless the gate itself refused it.
     const counted = (send: StorageSend): StorageSend => async (cmd) => {
-      try { const r = await send(cmd); sent++; return r; } catch (err) { if (!isGateBusy(err)) sent++; throw err; }
+      try { const r = await send(cmd); sent++; return r; } catch (err) { if (!isBusyRefusal(err)) sent++; throw err; }
     };
     try {
       // Hosts without a gated sequence (demo host) send line by line; a refusal after a line went out is not retried.
@@ -121,7 +134,7 @@ export async function runStorageGated<T>(host: StorageSequenceHost, action: Stor
       if (e instanceof GateCancelledError) throw new StorageCancelledError();
       // It waited the gate's whole queue limit and never ran: busy wording, no retry (nothing was sent).
       if (e instanceof GateQueueTimeoutError && sent === 0) throw new StorageBusyError(action, e.message, attempt + 1);
-      if (!isGateBusy(e)) throw e;
+      if (!isBusyRefusal(e)) throw e;
       if (sent > 0) throw new StorageBusyError(action, (e as Error).message, attempt + 1);
       if (attempt >= retries) throw new StorageBusyError(action, (e as Error).message, attempt + 1);
       await sleep(retryMs);
