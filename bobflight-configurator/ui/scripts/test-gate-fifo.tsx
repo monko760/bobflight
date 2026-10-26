@@ -29,6 +29,17 @@ import {
 } from "../src/protocol/commandGate";
 import type { BobFlightHost, CliCommand } from "../src/protocol/types";
 import { STORAGE_ACTIVITY_HOLD_MS } from "../src/protocol/storageActivity";
+import {
+  GateError, GateDisconnectedError, GateSessionChangedError, gateErrorCode, GATE_ERROR_CODES, isReadOnlyCliCommand,
+  type GateErrorCode,
+} from "../src/protocol/commandGate";
+import * as uiProtocol from "../src/protocol";
+import { ALLOWED_CLI_COMMANDS } from "../src/protocol/types";
+import { SdGateBusyError } from "@bobflight/protocol";
+import { BenchController } from "../src/motors/benchController";
+import { StoragePanel } from "../src/components/StoragePanel";
+import { readRpmKey, readRpmReport, readRpm, rpmView } from "../src/filters/rpmFilter";
+import { readNotches, notchesSupported } from "../src/filters/gyroNotch";
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 function deferred<T = void>() { let resolve!: (t: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
@@ -259,6 +270,246 @@ const dis = (e?: FakeElement) => !e ? null : (e.disabled || e.hasAttribute("disa
 const props = (e: FakeElement): any => (e as any)[Object.keys(e).find(k => k.startsWith("__reactProps$"))!];
 const checkboxes = () => find(e => e.tagName === "INPUT" && e.getAttribute("type") === "checkbox");
 
+
+// ---- 4. #99 review round 1 ---------------------------------------------------------
+const URGENT = new Set(["motor_test 0", "bench_stop", "disarm"]);
+/** Lines that reached the FC after `t` (request time) and before `cmd` did. */
+function sentBetween(fc: FakeFc, t: number, cmd = "motor_test 0") {
+  const w = fc.wire.find(x => x.cmd === cmd && x.at >= t);
+  return { stop: w, delay: w ? w.at - t : Infinity, between: fc.wire.filter(x => x.at >= t && w && x.at <= w.at && x !== w).map(x => x.cmd) };
+}
+async function waitWire(fc: FakeFc, cmd: string, after: number, ms = 8000) {
+  for (let i = 0; i < ms / 5 && !fc.wire.some(x => x.cmd === cmd && x.at >= after); i++) await sleep(5);
+}
+async function round1GateTests() {
+  await test("gate r1: every error kind has a stable code + predicates; text changes never affect them", async () => {
+    const kinds: Array<[Error, GateErrorCode, boolean]> = [
+      [new GateBusyError(), "GATE_QUEUE_FULL", true],
+      [new GateBusyError(GATE_START_BUSY_MESSAGE, "GATE_BUSY_START"), "GATE_BUSY_START", true],
+      [new GateQueueTimeoutError(5000), "GATE_QUEUE_TIMEOUT", false],
+      [new GateCancelledError(), "GATE_CANCELLED", false],
+      [new GateDisconnectedError(), "GATE_DISCONNECTED", false],
+      [new GateSessionChangedError(), "GATE_SESSION_CHANGED", false],
+    ];
+    assert.deepEqual(kinds.map(k => k[1]).sort(), [...GATE_ERROR_CODES].sort(), "every code covered");
+    for (const [e, code, busy] of kinds) {
+      assert.ok(e instanceof GateError && e instanceof Error, code);
+      assert.equal((e as GateError).code, code); assert.equal(gateErrorCode(e), code);
+      assert.equal(isGateBusy(e), busy, `${code} isGateBusy`); assert.equal(isGateNotSent(e), true, `${code} isGateNotSent`);
+      // Same code, different (future) UI text: predicates unchanged.
+      const reworded = Object.assign(new Error("some reworded copy"), { gate: true, code });
+      assert.equal(isGateBusy(reworded), busy); assert.equal(isGateNotSent(reworded), true); assert.equal(gateErrorCode(reworded), code);
+      // Same text without the code (an FC reply / client error that happens to read the same): never a gate error.
+      const lookalike = new Error(e.message);
+      assert.equal(isGateBusy(lookalike), false, `text alone is not ${code}`); assert.equal(isGateNotSent(lookalike), false);
+    }
+    assert.equal(new GateBusyError(GATE_START_BUSY_MESSAGE).code, "GATE_BUSY_START", "start text defaults to the start code");
+    assert.match(GATE_START_BUSY_MESSAGE, /^busy, try again/); assert.doesNotMatch(GATE_START_BUSY_MESSAGE, /queue full/);
+    assert.match(GATE_BUSY_MESSAGE, /^busy, queue full/);
+    for (const e of [new Error("CLI command timed out with empty response"), new Error("disconnected"), new Error("not connected"), "x", null, undefined])
+      assert.ok(!isGateNotSent(e) && !isGateBusy(e) && gateErrorCode(e) === null, String(e));
+    // The protocol sd-read wrapper keeps the code, so the UI predicate still sees a busy refusal.
+    const sd = new SdGateBusyError(GATE_START_BUSY_MESSAGE, "GATE_BUSY_START");
+    assert.ok(isGateBusy(sd) && gateErrorCode(sd) === "GATE_BUSY_START");
+    // Public surface: exported from the ui protocol index.
+    for (const name of ["GateError", "GateBusyError", "GateQueueTimeoutError", "GateCancelledError", "GateDisconnectedError", "GateSessionChangedError", "isGateBusy", "isGateNotSent", "gateErrorCode", "GATE_ERROR_CODES"])
+      assert.ok(name in uiProtocol, `ui protocol index exports ${name}`);
+  });
+  await test("gate r1: motor starts AND bench_switch refused 'busy, try again' (GATE_BUSY_START, isGateBusy) on a busy gate", async () => {
+    const gate = new CommandGate(() => 1); const hold = deferred<string>(); const first = gate.run(() => hold.promise); await ticks();
+    let ran = 0;
+    for (const c of ["arm", "motor_seq", "motor_test 1", "motor_pulse 3 40", "bench_switch"]) {
+      const r = await settle(gate.run(async () => { ran++; return c; }, commandGateOptions(c)));
+      assert.ok(!r.ok && isGateBusy(r.e) && isGateNotSent(r.e) && gateErrorCode(r.e) === "GATE_BUSY_START" && r.e instanceof GateBusyError, c);
+      assert.equal((r.e as Error).message, GATE_START_BUSY_MESSAGE);
+    }
+    hold.resolve("x"); await first; await sleep(5);
+    assert.equal(ran, 0, "never fired later");
+    assert.equal(await gate.run(async () => "sw", commandGateOptions("bench_switch")), "sw", "idle gate runs bench_switch");
+  });
+  await test("gate r1: urgent never gets a queue timeout (G7), normal does", async () => {
+    const gate = new CommandGate(() => 1, 16, 40);
+    const first = gate.run(() => sleep(150).then(() => "held")); await ticks();
+    const read = settle(gate.run(async () => "read"));
+    const stop = settle(gate.run(async () => "stop", commandGateOptions("motor_test 0")));
+    const stop2 = settle(gate.run(async () => "stop2", true));
+    const rr = await read; assert.ok(!rr.ok && gateErrorCode(rr.e) === "GATE_QUEUE_TIMEOUT", "normal timed out at 40 ms");
+    await first;
+    const rs = await stop, rs2 = await stop2;
+    assert.ok(rs.ok && rs.v === "stop", `urgent waited past the 40 ms queue timeout: ${!rs.ok && String(rs.e)}`);
+    assert.ok(rs2.ok && rs2.v === "stop2");
+  });
+  await test("gate r1: urgent goes out between the lines of a compound entry (yieldToUrgent); nothing else interleaves", async () => {
+    const gate = new CommandGate(() => 1); const wire: string[] = []; let on = 0, maxOn = 0;
+    const line = async (name: string) => { on++; maxOn = Math.max(maxOn, on); wire.push(name); await sleep(10); on--; };
+    const compound = gate.run(async (y) => { for (let i = 1; i <= 5; i++) { await y(); await line(`get ${i}`); } return "all"; });
+    await sleep(15); // `get 1` / `get 2` on the wire
+    const read = gate.run(() => line("read"));
+    const save = gate.run(() => line("save"), { priority: "write" });
+    const stop = gate.run(() => line("stop"), true);
+    const stop2 = gate.run(() => line("stop2"), commandGateOptions("disarm"));
+    await Promise.all([compound, read, save, stop, stop2]);
+    const i = wire.indexOf("stop");
+    assert.ok(i > 0 && i < 4, `Stop right after the line on the wire: ${wire.join(",")}`);
+    assert.equal(wire[i + 1], "stop2", "urgent FIFO");
+    assert.deepEqual(wire.filter(w => w.startsWith("get")), ["get 1", "get 2", "get 3", "get 4", "get 5"], "compound order kept");
+    assert.deepEqual(wire.slice(-2), ["save", "read"], "write/normal still wait for the whole compound entry");
+    assert.equal(maxOn, 1, "one line on the wire at a time");
+    // A finished entry's hook is inert (cannot run urgent outside its own turn).
+    let late: (() => Promise<void>) | null = null;
+    await gate.run(async (y) => { late = y; });
+    const h = deferred<string>(); const f = gate.run(() => h.promise); await ticks();
+    const u = gate.run(async () => { wire.push("u"); }, true);
+    await late!(); assert.ok(!wire.includes("u"), "stale hook did not dispatch");
+    h.resolve("x"); await f; await u; assert.equal(wire.at(-1), "u");
+  });
+  await test("gate r1: every state-changing CLI line is write class; reads normal; ordering vs a later save (item 2)", async () => {
+    const writes = ["save", "defaults", "set motor_poles 14", "dshot 300", "dshot 600", "receiver_uart 3", "receiver_map AETR", "receiver_map TAER",
+      "power_config 1 2 3 4 5 6 7", "calibrate_gyro", "calibrate_accel level", "calibrate_accel start", "calibrate_accel apply", "calibrate_accel cancel",
+      "calibrate_accel +x", "calibrate_accel -z", "calibration_cancel", "mode_range ARM 1 5 1700 2100", "control_source manual", "control_source aux",
+      "control_mode angle", "control_mode acro", "control_mode horizon", "blackbox start", "blackbox stop", "pid_diag start", "pid_diag start rx", "pid_diag stop",
+      "sd cancel", "reboot", "bl", "bl discard", "set loop_rate_hz 4000", "set motor_direction props-in", "set dshot_bidir off", "set align_board_yaw 90",
+      "set gyro_notch1_hz 200", "set rpm_filter_harmonics 2"];
+    for (const c of writes) assert.equal(commandGateOptions(c).priority, "write", c);
+    const reads = ["help", "ports", "modes", "storage", "diff all", "dump all", "version", "sd probe", "sd status", "sd read 12", "blackbox status", "status",
+      "receiver", "pid_diag", "pid_diag status", "timing", "power", "bench_status", "barometer", "flash_info", "sensors", "calibration", "dshot",
+      "get loop_rate_hz", "loop_rate", "get motor_direction", "mixer", "filters", "rpm_filter", "get erpm_m3", "get dshot_telem_m2", "get dshot_bidir", "get align_board_roll"];
+    for (const c of reads) { assert.equal(commandGateOptions(c).priority, "normal", c); assert.ok(isReadOnlyCliCommand(c), c); }
+    // Every fixed allowlisted line has a class, and only the known reads are normal.
+    for (const c of ALLOWED_CLI_COMMANDS) {
+      const o = commandGateOptions(c);
+      const cls = o.exclusive ? "start" : o.priority;
+      assert.ok(cls === "urgent" || cls === "start" || cls === "write" || (cls === "normal" && (reads.includes(c) || c.startsWith("get "))), `${c} -> ${cls}`);
+    }
+    assert.equal(commandGateOptions("some future line").priority, "write", "unknown lines default to write (fail-safe ordering)");
+    // Ordering: queued state changes are never overtaken by a later save; reads wait behind both.
+    const gate = new CommandGate(() => 1); const order: string[] = [];
+    const hold = deferred<string>(); const first = gate.run(() => hold.promise); await ticks();
+    const job = (c: string) => gate.run(async () => { order.push(c); }, commandGateOptions(c));
+    const all = ["status", "dshot 600", "storage", "receiver_uart 3", "power_config 1 2 3 4 5 6 7", "calibrate_gyro", "mixer", "save"].map(job);
+    hold.resolve("x"); await first; await Promise.all(all);
+    assert.deepEqual(order, ["dshot 600", "receiver_uart 3", "power_config 1 2 3 4 5 6 7", "calibrate_gyro", "save", "status", "storage", "mixer"]);
+  });
+}
+
+async function round1AdapterTests() {
+  for (const [name, call] of [
+    ["getAllSettings (30 gets, one entry)", (h: BobFlightHost) => h.getAllSettings()],
+    ["restoreDefaults (defaults + 30 gets)", (h: BobFlightHost) => h.restoreDefaults()],
+    ["saveSettings (storage, save, storage)", (h: BobFlightHost) => h.saveSettings()],
+  ] as const) {
+    await test(`adapter r1: Stop during ${name} at RTT 50 goes out after the reply on the wire (< 300 ms), nothing non-urgent first`, async () => {
+      const { fc, host } = await adapterRig(50);
+      const t0 = Date.now(); fc.t0 = t0; fc.wire = [];
+      const compound = settle(call(host as BobFlightHost) as Promise<unknown>);
+      const reads = ["storage", "get motor_poles", "mixer"].map(c => settle(host.sendCommand(c as CliCommand)));
+      await sleep(130);
+      const t = Date.now() - t0;
+      const stop = settle(host.sendCommand("motor_test 0"));
+      await waitWire(fc, "motor_test 0", t);
+      const r = sentBetween(fc, t);
+      console.log(`  stop during ${name}: ${JSON.stringify({ delayMs: r.delay, sentBetween: r.between })}`);
+      assert.ok(r.delay < 300, `stop delay ${r.delay} ms`);
+      assert.deepEqual(r.between.filter(c => !URGENT.has(c)), [], "nothing non-urgent between the Stop request and its send");
+      assert.ok((await stop).ok);
+      assert.ok((await compound).ok, `the compound call still completes: ${JSON.stringify(await compound)}`);
+      for (const x of await Promise.all(reads)) assert.ok(x.ok);
+      assert.equal(fc.overlaps, 0, "one line on the wire at a time");
+      await host.disconnect();
+    });
+  }
+  await test("adapter r1: setSetting is write class (H2) and restoreDefaults is write class (H6): ahead of queued reads", async () => {
+    for (const which of ["setSetting", "restoreDefaults"] as const) {
+      const { fc, host, mark } = await adapterRig(2);
+      const release = fc.hold("status"); const m = mark();
+      const status = host.getStatus(); await sleep(5);
+      const reads = [host.sendCommand("get motor_direction"), host.sendCommand("dshot")];
+      const w = which === "setSetting" ? host.setSetting("pid_roll_p" as never, "0.005") : host.restoreDefaults();
+      release(); await Promise.all([status, ...reads, w]);
+      const log = fc.log.slice(m);
+      const first = which === "setSetting" ? "set pid_roll_p 0.005" : "defaults";
+      assert.equal(log[1], first, `${which} goes ahead of the queued reads: ${log.slice(0, 4).join(",")}`);
+      assert.deepEqual(log.slice(-2), ["get motor_direction", "dshot"]);
+      await host.disconnect();
+    }
+  });
+  await test("BLOCKER r1: leaving Motors during motor_seq at RTT 50: Stop < 300 ms after the request, nothing non-urgent first", async () => {
+    const fc = new FakeFc({ rttMs: 50 });
+    const host = createHost("serial", new FakeFcTransportFactory(fc)) as BobFlightHost;
+    await host.connect({ path: "sim://fake-fc", transport: "serial" } as never);
+    const c = new BenchController(host); c.connection(true);
+    await c.poll(); c.confirmProps(true); c.confirmStationary(true);
+    await c.start("sequence");
+    assert.ok(fc.log.includes("motor_seq"), "the sequence started");
+    fc.t0 = Date.now(); fc.wire = [];
+    // The 500 ms bench poll is mid-flight and other Motors panels have reads queued.
+    const poll = c.poll(); await sleep(20);
+    const panel = ["storage", "get motor_poles", "get motor_direction", "mixer", "rpm_filter"].map(x => settle(host.sendCommand(x as CliCommand)));
+    await sleep(5);
+    // Tab switch: Motors leave() and the PID page mounts (getAllSettings, 30 gets) in the same tick.
+    const t = Date.now() - fc.t0;
+    const left = c.leave(); const pid = settle(host.getAllSettings());
+    await waitWire(fc, "motor_test 0", t);
+    const r = sentBetween(fc, t);
+    console.log(`  leave during motor_seq: ${JSON.stringify({ delayMs: r.delay, sentBetween: r.between, inFlightAtRequest: fc.wire.filter(x => x.at < t).map(x => x.cmd) })}`);
+    assert.ok(r.stop, "Stop was sent");
+    assert.ok(r.delay < 300, `stop delay ${r.delay} ms (was 2.7-4.0 s)`);
+    assert.deepEqual(r.between.filter(x => !URGENT.has(x)), [], "nothing non-urgent was sent between the Stop request and its send");
+    await left; await poll;
+    assert.match(c.state.reply, /Stop acknowledged/);
+    assert.ok((await pid).ok, "the PID page read still completes after the Stop");
+    for (const x of await Promise.all(panel)) assert.ok(x.ok || isGateNotSent(x.e));
+    assert.equal(fc.overlaps, 0);
+    await host.disconnect();
+  });
+}
+
+async function round1NotSentTests() {
+  await test("item 3: not-sent errors (queue timeout / cancel / disconnect drain) are never 'malformed' or 'older firmware'", async () => {
+    for (const err of [new GateQueueTimeoutError(5000), new GateCancelledError(), new GateDisconnectedError(), new GateBusyError()]) {
+      const host = { getSetting: async () => { throw err; }, setSetting: async () => { throw err; }, sendCommand: async () => { throw err; } } as never;
+      const v = await readRpmKey(host, "rpm_filter_harmonics");
+      assert.equal(v.kind, "busy", `${err.name}: rpm key not read (not malformed/unsupported)`);
+      const rep = await readRpmReport(host);
+      assert.ok(rep && (rep as { kind: string }).kind === "busy", `${err.name}: rpm report not read (not 'older FC' null)`);
+      const view = rpmView(await readRpm(host), 13);
+      assert.equal(view.busy, err.message, "the Filters tab carries it as busy, so the older-firmware line is hidden");
+      const n = await readNotches(host);
+      assert.equal(n.notRead, err.message, `${err.name}: notch reads marked not read`);
+      assert.ok([1, 2].every(i => n.values[i as 1 | 2].center === null && n.values[i as 1 | 2].cutoff === null), "notch values unknown, never malformed");
+      assert.equal(notchesSupported(n), false);
+    }
+    // A real FC "unknown key" still means an older FC.
+    const old = { getSetting: async () => { throw new Error("get rpm_filter_harmonics failed: \"unknown key\""); }, sendCommand: async () => "unknown" } as never;
+    assert.equal((await readRpmKey(old, "rpm_filter_harmonics")).kind, "unsupported");
+  });
+}
+
+async function round1StoragePanelTests() {
+  for (const how of ["unmount", "revision re-key"] as const) {
+    await test(`S1/S2: StoragePanel ${how} aborts its queued storage read (signal passed); it never reaches the FC`, async () => {
+      const fc = new FakeFc({ rttMs: 2 });
+      const host = createHost("serial", new FakeFcTransportFactory(fc)) as BobFlightHost & { commands: CommandGate };
+      await host.connect({ path: "sim://fake-fc", transport: "serial" } as never);
+      g.__setupTestHost = { host, connectionStatus: "connected", version: "BobFlight 0.1.0-fakefc", status: null, postFlashGate: false,
+        refreshStatus: async () => {}, pollAfterConnect: async () => {}, setLastError: () => {} };
+      const release = fc.hold("status"); const m = fc.log.length;
+      const status = host.getStatus(); await sleep(5);
+      const root = createRoot(container as never);
+      flushSync(() => root.render(<StoragePanel revision={1} />)); await sleep(5);
+      assert.equal(host.commands.queued, 1, "the panel's storage refresh waits behind the held status");
+      if (how === "unmount") flushSync(() => root.unmount());
+      else { flushSync(() => root.render(<StoragePanel revision={2} />)); await sleep(5); }
+      assert.equal(host.commands.queued, how === "unmount" ? 0 : 1, "the old read was dropped from the queue at once");
+      release(); await status; await sleep(40);
+      const storageReads = fc.log.slice(m).filter(x => x === "storage").length;
+      assert.equal(storageReads, how === "unmount" ? 0 : 1, `only the current panel's read reached the FC (${fc.log.slice(m).join(",")})`);
+      if (how !== "unmount") flushSync(() => root.unmount());
+      await host.disconnect(); delete g.__setupTestHost;
+    });
+  }
+}
+
 export async function motorsRace(rttMs: number, durationMs = 5000) {
   const fc = new FakeFc({ rttMs, saveMs: 100 });
   const host = createHost("serial", new FakeFcTransportFactory(fc)) as BobFlightHost;
@@ -338,9 +589,13 @@ async function motorsTests() {
 async function main() {
   await gateTests();
   await adapterTests();
+  await round1GateTests();
+  await round1AdapterTests();
+  await round1NotSentTests();
+  await round1StoragePanelTests();
   await motorsTests();
   console.log(`PASS CommandGate bounded priority FIFO (P1): ${passed} tests`);
   process.exit(0);
 }
-const guard = setTimeout(() => { console.error("timeout"); process.exit(1); }, 90000);
+const guard = setTimeout(() => { console.error("timeout"); process.exit(1); }, 150000);
 main().then(() => clearTimeout(guard)).catch((e) => { clearTimeout(guard); console.error(e); process.exit(1); });
