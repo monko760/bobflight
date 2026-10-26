@@ -22,10 +22,13 @@ static void cmd_storage(void)
         "storage_api: 1\r\nbackend: %s\r\nschema: 13\r\nstate: %s\r\n"
         "dirty: %u\r\ngeneration: %lu\r\nlast_error: %s\r\n"
         "scope: pid_rates,receiver_uart,receiver_map,mode_ranges,control_selection,accel_calibration,power,dshot,min_throttle,airmode,gyro_lpf_hz,dterm_lpf_hz,pid_yaw_d,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates\r\n"
-        "armed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nflight_enabled: %u\r\nstorage_end: 1\r\n",
+        "armed: %u\r\nbench_active: %u\r\ncalibration_active: %u\r\nflight_enabled: %u\r\n"
+        /* Additive (D1): after every field existing parsers read, before the end marker. */
+        "accel_cal_saved: %s\r\nstorage_end: 1\r\n",
         persist_backend(), persist_state(), persist_dirty() ? 1u : 0u,
         (unsigned long)persist_generation(), persist_last_error(),
-        arming_state() == ARM_ARMED ? 1u : 0u, bench_motor_active() ? 1u : 0u, gyro_manual_calibration_active()?1u:0u,flight_enabled);
+        arming_state() == ARM_ARMED ? 1u : 0u, bench_motor_active() ? 1u : 0u, gyro_manual_calibration_active()?1u:0u,flight_enabled,
+        persist_accel_calibration_saved() ? "yes" : "no");
     if (n < 0 || (size_t)n >= sizeof(buf)) cli_write_str("storage failed: overflow\r\n");
     else cli_write_str(buf);
 }

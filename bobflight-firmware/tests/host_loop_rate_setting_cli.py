@@ -1,7 +1,7 @@
 # Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
 """Actual host firmware CLI: persisted `loop_rate_hz` setting per board.
 get/set conventions, exact 1000|4000|8000 validation, board refusal of the
-8 kHz gyro path, save+reboot note, pending-reboot flag, diff/dump/defaults,
+8 kHz gyro path, save+reboot note, pending-reboot flag, diff/dump, untouched by defaults <group>,
 storage schema 11 (7 before the schema 8 notches, 8 before the schema 9 RPM filter, 9 before schema 10 motor_direction), and save + (host warm) reboot applying the new rate while
 status loop_target_hz reports the rate actually applied."""
 import os,re,subprocess,sys
@@ -55,19 +55,20 @@ if CHANGED!=DEFAULT: assert values(lines,'dirty')==['1'],lines
 # Bytes behind `reboot` in the same read are dropped (as on hardware), so pad.
 PAD=' '*64
 lines=run([f'set loop_rate_hz {CHANGED}','save','reboot',PAD,'status','loop_rate','get loop_rate_hz',
-           'defaults','get loop_rate_hz','diff','loop_rate'],reinit=True)
+           'defaults pid','defaults rates','defaults filters','get loop_rate_hz','diff','loop_rate'],reinit=True)
 assert any(l.startswith('saved: ') for l in lines),lines
 want_target={'8000':'8000','1000':'1000'}[CHANGED]
 assert values(lines,'loop_target_hz')==[want_target],(values(lines,'loop_target_hz'),lines)
 assert values(lines,'loop_rate_boot_setting_hz')==[CHANGED,CHANGED],lines
-assert values(lines,'loop_rate_pending_reboot')==['0','1' if CHANGED!=DEFAULT else '0'],lines
+assert values(lines,'loop_rate_pending_reboot')==['0','0'],lines  # D1: defaults <group> keeps the setting, nothing pending
 prof=values(lines,'loop_rate_profile')[0]
 assert prof==('8000/1' if FAST else '1000/1'),prof
 assert values(lines,'loop_rate_reason')[0]=='setting',lines
 got=[l for l in lines if l.startswith('loop_rate_hz=')]
-assert got==[f'loop_rate_hz={CHANGED}',f'loop_rate_hz={DEFAULT}'],got
-assert 'defaults restored' in lines
-assert not [l for l in lines if l.startswith('set loop_rate_hz ')],lines  # diff after defaults
+# D1: no `defaults <group>` touches the loop rate; diff still lists a non-default one.
+assert got==[f'loop_rate_hz={CHANGED}',f'loop_rate_hz={CHANGED}'],got
+assert [l for l in lines if l.startswith('defaults_end: ')]==['defaults_end: pid 11','defaults_end: rates 9','defaults_end: filters 9'],lines
+assert [l for l in lines if l.startswith('set loop_rate_hz ')]==([f'set loop_rate_hz {CHANGED}'] if CHANGED!=DEFAULT else []),lines
 print(f'PASS loop_rate_hz CLI ({board}): default {DEFAULT}, invalid rejected, '
       f'{"8000 accepted" if FAST else "4000/8000 refused"}, pending until save+reboot, '
-      f'diff/dump/defaults, schema 11, reboot applies target {want_target}')
+      f'diff/dump, kept by defaults <group>, schema 13, reboot applies target {want_target}')

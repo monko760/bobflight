@@ -19,11 +19,9 @@ Mounting is compiled board configuration, not a live aircraft setting. Resolve i
 
 ## Persisted calibration compatibility
 
-Existing CW0/CW270 calibrations retain their exact binding and correction model. Newly implemented CW90/CW180 use correction-model revision 2 inside the existing binding hash. The loader recognizes old model-1 calibration only when the detected sensor ID, range, configured SPI resources and coefficient validation still match. It discards those obsolete coefficients in the RAM copy and restores the other validated aircraft settings. It does not reinterpret the old coefficients or write flash during loading.
+Existing CW0/CW270 calibrations keep their exact binding and correction model. CW90/CW180 use correction-model revision 2 inside the binding hash. Storage is schema 13 only, with no migration ([SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md)): `persist_load` accepts a saved calibration only when its binding equals the current one (`gyro_accel_restore_valid`). A record carrying an old model-1 binding on a CW90/CW180 board is rejected as a whole (`invalid_settings`); it is not reinterpreted, partially restored or erased. The former `migrated_accel_orientation` / `migrated_control_source_manual_accel_orientation` reports were removed together with the schema 1..12 loaders. Recalibrate after a fresh install.
 
-Status reports `migrated_accel_orientation` and dirty settings until explicit `save`; combined legacy control-source migration is reported as `migrated_control_source_manual_accel_orientation`. The warning repeats after reboot until saved. Affected accelerometer calibration is marked invalid and must be redone before relying on corrected attitude data. Save writes the normal existing record format without obsolete calibration. No NVM layout change, automatic erase, gyro-calibrated flag, flight-ready flag or fabricated calibration session is introduced.
-
-Unknown sensor/binding mismatches, malformed calibration flags, non-finite/invalid coefficients, and invalid unrelated settings still reject the record. This is a narrowly identified migration, not a blanket bypass of record validation.
+Sensor/binding mismatches, malformed calibration flags, non-finite/invalid coefficients, and invalid unrelated settings reject the record.
 
 ## Bounded validation
 

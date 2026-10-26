@@ -3,7 +3,7 @@
  * motor-direction parsers/view and mock/FW reply parity. Proves the wire
  * contract, the `mixer` report shape and signs (== mock), the refusal lines
  * kept verbatim with the value unchanged, diff/dump parsed by the export
- * parser under 3072 B, defaults -> props-out, and save + reboot keeping
+ * parser under 3072 B, kept by defaults <group>, and save + reboot keeping
  * props-in. The host cannot arm (no gyro) or run a motor test (no DShot), so
  * those two lines are checked against the FW header source (and the C test
  * motor_direction_cli_unit exercises them on the real code).
@@ -54,13 +54,13 @@ const norm=s=>s.replace(/\r/g,'');
  assert.deepEqual(gets(o).map(g=>parseMotorDirectionGetReply(g).token),['props-in','props-in','props-out'],'refused set leaves props-in');
  assert.deepEqual(reports(o).map(r=>parseMixerReport(r).yaw.join(' ')),['+1 -1 -1 +1','-1 +1 +1 -1']);
 }
-// 3. diff/dump through the export parser (< 2560 B); defaults -> props-out.
+// 3. diff/dump through the export parser (< 2560 B); no `defaults <group>` touches it (D1).
 {
- const o=run(['set motor_direction props-in','diff all','dump all','defaults','get motor_direction','diff all']);
+ const o=run(['set motor_direction props-in','diff all','dump all','defaults pid','defaults rates','defaults filters','get motor_direction','diff all']);
  const ex=[...o.matchAll(/# bobflight_config: 1\r?\n[\s\S]*?# config_end: 1\r?\n/g)].map(m=>m[0]);assert.equal(ex.length,3);
  for(const [i,kind] of [[0,'diff'],[1,'dump'],[2,'diff']]){const e=parseConfigurationExport(ex[i],kind);assert(Buffer.byteLength(e.raw)<CONFIG_EXPORT_MAX_BYTES);}
- assert.match(ex[0],/\r\nset motor_direction props-in\r\n/);assert.match(ex[1],/\r\nset motor_poles 14\r\nset align_board_roll 0\r\nset align_board_pitch 0\r\nset align_board_yaw 0\r\n(?:set rate_(?:center|expo)_(?:roll|pitch|yaw) [^\r\n]+\r\n){6}set motor_direction props-in\r\n/);assert(!/motor_direction props/.test(ex[2]),'diff after defaults omits it');
- assert.equal(gets(o).at(-1),'motor_direction=props-out\r\n');
+ assert.match(ex[0],/\r\nset motor_direction props-in\r\n/);assert.match(ex[1],/\r\nset motor_poles 14\r\nset align_board_roll 0\r\nset align_board_pitch 0\r\nset align_board_yaw 0\r\n(?:set rate_(?:center|expo)_(?:roll|pitch|yaw) [^\r\n]+\r\n){6}set motor_direction props-in\r\n/);assert.match(ex[2],/\r\nset motor_direction props-in\r\n/,'diff after defaults <group> still carries props-in');
+ assert.equal(gets(o).at(-1),'motor_direction=props-in\r\n');
 }
 // 4. Save + reboot keeps props-in, storage clean, the mixer applies it after boot.
 {
@@ -69,4 +69,4 @@ const norm=s=>s.replace(/\r/g,'');
  assert.equal(norm(reports(o).at(-1)),norm(new MockMotorDirection('props-in').report()));
  const st=storage(o);assert.equal(st.dirty,false);assert.equal(st.schema,13);
 }
-console.log('PASS firmware motor_direction CLI -> Configurator parsers/view: default props-out, mixer report == mock (signs -1 +1 +1 -1 / +1 -1 -1 +1), set -> get -> mixer replies == mock, refusal lines == FW header and verbatim with the value unchanged, diff/dump parsed under 3072 B, defaults -> props-out, save + reboot keeps props-in. Host build.');
+console.log('PASS firmware motor_direction CLI -> Configurator parsers/view: default props-out, mixer report == mock (signs -1 +1 +1 -1 / +1 -1 -1 +1), set -> get -> mixer replies == mock, refusal lines == FW header and verbatim with the value unchanged, diff/dump parsed under 3072 B, defaults <group> keeps props-in, save + reboot keeps props-in. Host build.');

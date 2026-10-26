@@ -11,6 +11,9 @@ bool persist_load(void);
 bool persist_save(void);
 bool persist_dirty(void);
 const char *persist_accel_storage(void);
+/* True only when the last verified save (or boot load) record carries the
+ * accelerometer calibration (`storage` line accel_cal_saved: yes|no). */
+bool persist_accel_calibration_saved(void);
 const char *persist_last_error(void);
 const char *persist_backend(void);
 uint32_t persist_generation(void);

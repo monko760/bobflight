@@ -155,6 +155,10 @@ jobs:
           node ../.github/scripts/ports-modes-contract.cjs
       - name: Firmware to configurator persistent storage and exports
         run: node ../.github/scripts/storage-contract.cjs
+      - name: Firmware D1 scoped defaults pid|rates|filters and storage accel_cal_saved to Configurator parsers
+        run: |
+          npm --prefix protocol run test:storage-accel-cal-saved
+          node ../.github/scripts/defaults-contract.cjs
       - name: Actual firmware PID diagnostic framing and config isolation
         run: node ../.github/scripts/pid-diagnostics-contract.cjs
       - name: Firmware to configurator Blackbox status api 2 (SD throughput model)

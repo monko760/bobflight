@@ -273,6 +273,9 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_persist_config_test tests/host_persist_config.c src/sched/loop_rate_setting.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
   target_link_libraries(bobflight_persist_config_test m)
   add_test(NAME persist_config COMMAND bobflight_persist_config_test)
+  add_executable(bobflight_defaults_scoped_test tests/host_defaults_scoped.c src/sched/loop_rate_setting.c src/flight/config.c src/flight/mode_range.c src/drivers/sensor_calibration.c src/drivers/power.c)
+  target_link_libraries(bobflight_defaults_scoped_test m)
+  add_test(NAME defaults_scoped COMMAND bobflight_defaults_scoped_test)
   add_executable(bobflight_pid_aw_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_pid_aw.c)
   target_link_libraries(bobflight_pid_aw_test m)
   add_test(NAME pid_aw COMMAND bobflight_pid_aw_test)
@@ -631,6 +634,8 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/tests/host_rpm_filter_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
   add_test(NAME motor_direction_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_motor_direction_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
+  add_test(NAME defaults_scoped_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_defaults_cli.py $<TARGET_FILE:bobflight_host> ${BOBFLIGHT_BOARD})
 
   foreach(task_test pid_elapsed loop_dt bench_safety control_mode)
     target_sources(bobflight_${task_test}_test PRIVATE tests/pid_diag_stub.c)
