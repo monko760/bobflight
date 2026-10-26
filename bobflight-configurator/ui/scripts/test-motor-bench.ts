@@ -207,6 +207,17 @@ async function main() {
     assert.deepEqual(host.wire, ["other page", "motor_test 0", "storage"], "Stop right after the reply on the wire; the poll sent nothing");
     assert.match(c.state.reply, /Stop acknowledged/); assert.equal(c.state.error, "");
   });
+  await test("a connection change drops this page's reads still queued (even without the adapter's drain)", async () => {
+    const { c, host } = await setupGated();
+    const hold=deferred<string>(); const other=host.gate.run(async()=>{ host.wire.push("other page"); return hold.promise; });
+    for(let i=0;i<4;i++) await Promise.resolve();
+    const poll=c.poll(); for(let i=0;i<4;i++) await Promise.resolve();
+    assert.equal(host.gate.queued, 1, "the poll's status read waits");
+    c.connection(false);
+    assert.equal(host.gate.queued, 0, "dropped at once by the controller itself");
+    hold.resolve("x"); await Promise.all([other, poll]);
+    assert.deepEqual(host.wire, ["other page"]);
+  });
   await test("Stop while the poll's read is on the wire: next line is motor_test 0, the poll sends nothing more", async () => {
     const { c, host } = await setupGated(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
     const poll=c.poll(); for(let i=0;i<6;i++) await Promise.resolve();
