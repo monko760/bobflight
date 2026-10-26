@@ -505,6 +505,17 @@ async function main() {
     await r.done();
   });
 
+  await test("Filters: a controller read error (FC never answers a get) -> read error + Read again, never demo memory; Read again recovers", async () => {
+    const r = await rig(); r.swallow.add("get gyro_lpf_hz"); render(r, "filters");
+    assert.ok(await waitFor(() => shown("filters-read-error") !== null, 12000), `read error: ${pageText().slice(0, 500)}`);
+    assert.match(shown("filters-read-error")!, /Could not read the controller's filter settings/);
+    assert.ok(noMock(), `no demo fallback: ${pageText().slice(0, 500)}`);
+    assert.ok(isDisabled(findButton("Save")!)); assert.ok(isDisabled(findButton("Defaults…")!));
+    r.swallow.delete("get gyro_lpf_hz"); await sleep(1200); click("Read again");
+    assert.ok(await waitFor(() => !isDisabled(findButton("Defaults…")!) && input("gyro_lpf_hz").value === "320", 10000), "loads after Read again");
+    await r.done();
+  });
+
   await test("double confirm (two clicks before React re-renders) sends exactly one `defaults pid`", async () => {
     const r = await rig(); await openTab(r, "pid"); await openDialog();
     const b = button("Restore PID defaults"); const m = r.mark();
