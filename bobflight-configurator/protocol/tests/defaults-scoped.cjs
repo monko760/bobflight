@@ -35,6 +35,30 @@ await test('ok frame per group: keys verbatim, count and group checked',()=>{
   const pid=parse(mockDefaultsReply('pid'),'pid');assert.ok(pid.keyLines.includes('defaults_key: pid_yaw_d=5e-05'),'%.6g value kept verbatim');
   assert.ok(pid.keyLines.includes('defaults_key: airmode=0'));
 });
+await test('N1: success needs the group\'s EXACT key set and count (swapped, missing+10, extra+12, empty 0, other group\'s keys) -> unknown',()=>{
+  const real=mockDefaultsReply('pid','ok');
+  const cases={
+    swapped:real.replace(/defaults_key: pid_roll_p=[^\r]*/,'defaults_key: rate_max_roll=800'),
+    missing10:real.replace(/defaults_key: airmode=[^\r]*\r\n/,'').replace('defaults_end: pid 11','defaults_end: pid 10'),
+    extra12:real.replace('defaults_end: pid 11','defaults_key: motor_poles=14\r\ndefaults_end: pid 12'),
+    empty0:'defaults_group: pid\r\ndefaults_end: pid 0\r\n',
+    ratesKeys:mockDefaultsReply('rates','ok').replace(/rates/g,'pid').replace('defaults_end: pid 9','defaults_end: pid 9'),
+  };
+  for(const [n,raw] of Object.entries(cases)){const r=parse(raw,'pid');assert.equal(r.kind,'unknown',`${n}: ${r.kind}`);}
+  assert.match(parse(cases.swapped,'pid').reason,/key not in pid: rate_max_roll/);
+  assert.match(parse(cases.missing10,'pid').reason,/pid has 11 keys/);
+  assert.match(parse(cases.extra12,'pid').reason,/pid has 11 keys/);
+  assert.match(parse(cases.empty0,'pid').reason,/pid has 11 keys/);
+  for(const g of DEFAULTS_GROUPS)assert.equal(parse(mockDefaultsReply(g,'ok'),g).kind,'ok',`${g}: exact set is ok`);
+  // Same keys in a different order are still the exact set.
+  const ls=real.split('\r\n');const re=[ls[0],...ls.slice(1,12).reverse(),...ls.slice(12)].join('\r\n');assert.equal(parse(re,'pid').kind,'ok','order-independent set');
+});
+await test('U5: only the FW unknown-command line means older firmware; "unknown key" and other unknown… lines are unknown, not unsupported',()=>{
+  assert.equal(parse('unknown — try help\r\n','pid').kind,'unsupported');
+  for(const l of ['unknown key','unknown','unknown group','unknown — try help please'])
+    if(l!=='unknown'){const r=parse(l+'\r\n','pid');assert.notEqual(r.kind,'unsupported',l);assert.equal(r.kind,'unknown',l);}
+  assert.equal(P.isDefaultsReplyEnd('unknown key'),false,'"unknown key" does not end a defaults reply');
+});
 await test('missing defaults_end -> unknown (never success)',()=>{
   for(const g of DEFAULTS_GROUPS){const r=parse(mockDefaultsReply(g,'missing_end'),g);assert.equal(r.kind,'unknown');assert.match(r.reason,/defaults_end line missing/);assert.equal(r.keyLines.length,KEYS[g].length,'key lines kept for display');}
   assert.equal(parse(crlf(['defaults_group: pid']),'pid').kind,'unknown');
@@ -46,7 +70,7 @@ await test('count mismatch -> unknown, both directions and non-numeric counts',(
   const k=['defaults_key: pid_roll_p=0.002','defaults_key: pid_roll_i=0.001'];
   assert.equal(parse(crlf(['defaults_group: pid',...k,'defaults_end: pid 1']),'pid').kind,'unknown','fewer counted than sent');
   assert.equal(parse(crlf(['defaults_group: pid',...k,'defaults_end: pid 3']),'pid').kind,'unknown','more counted than sent');
-  assert.equal(parse(crlf(['defaults_group: pid',...k,'defaults_end: pid 2']),'pid').kind,'ok','consistent frame');
+  { const r=parse(crlf(['defaults_group: pid',...k,'defaults_end: pid 2']),'pid');assert.equal(r.kind,'unknown','self-consistent but partial key set');assert.match(r.reason,/pid has 11 keys/); }
   for(const c of ['02','2.0','-2','two','0x2'])assert.equal(parse(crlf(['defaults_group: pid',...k,`defaults_end: pid ${c}`]),'pid').kind,'unknown',c);
 });
 await test('group mismatch (group line or end line) -> unknown',()=>{
@@ -136,6 +160,33 @@ await test('reply ends on defaults_end without waiting for idle; missing end res
   assert.ok(fast<P.DEFAULTS_REPLY_IDLE_MS,`end line finishes early (${fast} ms)`);assert.ok(slow>=P.DEFAULTS_REPLY_IDLE_MS-20,`no end line: idle gap (${slow} ms)`);
   await client.disconnect();
 });
+await test('late bytes: FC pauses > idle mid-reply -> unknown; the tail is drained, the follow-up get is clean (same for a timeout)',async()=>{
+  const client=await connect();
+  await client.setSetting('pid_roll_p','0.009');
+  const full=mockDefaultsReply('pid','ok');const ls=full.split('\r\n');const head=ls.slice(0,4).join('\r\n')+'\r\n',tail=ls.slice(4).join('\r\n');
+  const w=port.write.bind(port);
+  port.write=(d)=>{if(String(d).trim()==='defaults pid'){w(d);return true;}return w(d);};
+  // Replace the mock FC's own emission for this one command by head + tail 450 ms later.
+  const emit=port.emit.bind(port);let hold=true;
+  port.emit=(ev,b)=>{if(ev==='data'&&hold&&String(b).includes('defaults_group: pid')){hold=false;setTimeout(()=>emit('data',Buffer.from(head)),1);setTimeout(()=>emit('data',Buffer.from(tail)),450);return true;}return emit(ev,b);};
+  const r=await client.restoreDefaultsGroup('pid');assert.equal(r.kind,'unknown','incomplete at the idle gap');
+  const g=await client.getSetting('pid_roll_p');assert.equal(g.value,'0.002','follow-up get is clean (FC reset value), not the late tail');
+  const g2=await client.getSetting('rate_max_roll');assert.match(g2.value,/^\d/,'next get clean too');
+  // No reply at all: timeout, then the next command still works.
+  port.emit=(ev,b)=>{if(ev==='data'&&String(b).includes('defaults_group: rates'))return true;return emit(ev,b);};
+  await client.restoreDefaultsGroup('rates').then(()=>assert.fail('resolved'),(e)=>assert.match(String(e),/timed out|timeout/i));
+  port.emit=emit;
+  assert.equal((await client.getSetting('pid_roll_p')).value,'0.002');
+  await client.disconnect();
+});
+await test('a throwing port write on defaults leaves no stale collector: the next command is not "in flight" and gets a clean reply',async()=>{
+  const client=await connect();const w=port.write.bind(port);
+  port.write=(d)=>{if(String(d).trim()==='defaults pid')throw new Error('EIO: write failed');return w(d);};
+  await assert.rejects(client.restoreDefaultsGroup('pid'),/EIO/);
+  port.write=w;
+  assert.equal((await client.getSetting('pid_roll_p')).value,'0.002','next command works');
+  await client.disconnect();
+});
 // ---- REAL host firmware (the CI contract build) -----------------------------------
 const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:child_process');
 const fwRoot=path.resolve(__dirname,'../../../bobflight-firmware');
@@ -176,10 +227,16 @@ else{
     assert.match(real,/\r\naccel_cal_saved: no\r\nstorage_end: 1\r\n$/,'real host: no saved accel calibration, line just before storage_end');
     assert.deepEqual(P.readAccelCalSaved(real),{value:'no',line:'accel_cal_saved: no'});
     const yes=real.replace('accel_cal_saved: no','accel_cal_saved: yes');assert.deepEqual(P.readAccelCalSaved(yes),{value:'yes',line:'accel_cal_saved: yes'});
-    const missing=real.replace('accel_cal_saved: no\r\n','');assert.deepEqual(P.readAccelCalSaved(missing),{value:'unknown',line:null});
+    const missing=real.replace('accel_cal_saved: no\r\n','');assert.deepEqual(P.readAccelCalSaved(missing),{value:'unknown',line:null,reason:'missing'});
     assert.deepEqual(P.readAccelCalSaved(real.replace(/\r\n/g,'\n')),{value:'no',line:'accel_cal_saved: no'},'LF too');
-    assert.deepEqual(P.readAccelCalSaved(real.replace('accel_cal_saved: no','accel_cal_saved: pending')),{value:'unknown',line:'accel_cal_saved: pending'},'unknown value: line verbatim, value unknown');
-    assert.deepEqual(P.readAccelCalSaved(real.replace('accel_cal_saved: no','accel_cal_saved: yes\r\naccel_cal_saved: no')),{value:'unknown',line:null},'repeated -> unknown');
+    assert.deepEqual(P.readAccelCalSaved(real.replace('accel_cal_saved: no','accel_cal_saved: pending')),{value:'unknown',line:'accel_cal_saved: pending',reason:'unrecognised'},'unknown value: line verbatim, value unknown');
+    // B1: only a byte-exact yes/no is known; look-alikes are unrecognised (never yes).
+    for(const v of ['yes ','yes\t','y\u200bes','y\u0435s','Yes',' yes','no ','n\u043e']){const line=`accel_cal_saved: ${v}`;
+      assert.deepEqual(P.readAccelCalSaved(real.replace('accel_cal_saved: no',line)),{value:'unknown',line,reason:'unrecognised'},JSON.stringify(line));}
+    // A4: lines after storage_end do not count.
+    assert.deepEqual(P.readAccelCalSaved(missing+'accel_cal_saved: yes\r\n'),{value:'unknown',line:null,reason:'missing'},'after storage_end ignored');
+    assert.deepEqual(P.readAccelCalSaved(real+'accel_cal_saved: yes\r\n'),{value:'no',line:'accel_cal_saved: no'},'a later line does not repeat or override');
+    assert.deepEqual(P.readAccelCalSaved(real.replace('accel_cal_saved: no','accel_cal_saved: yes\r\naccel_cal_saved: no')),{value:'unknown',line:null,reason:'repeated'},'repeated -> unknown (repeated)');
     assert.deepEqual(P.parseStorage(real),P.parseStorage(missing),'storage snapshot unchanged by the line');
   });
   await test('real host FW: defaults reset only the group, never save; storage dirty is RAM-vs-flash (accel_cal_saved just before storage_end parses)',()=>{

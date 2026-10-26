@@ -30,6 +30,8 @@ export interface NotchSnapshot {
   schema: number | null;
   /** `storage` dirty flag if readable (null = unknown). */
   fcDirty: boolean | null;
+  /** Raw `storage` reply of this read (accel_cal_saved next to Save); absent when unread. */
+  storageRaw?: string;
 }
 
 export function emptyNotchSnapshot(): NotchSnapshot {
@@ -55,6 +57,7 @@ export async function readNotches(host: NotchHost): Promise<NotchSnapshot> {
   try { snap.report = parseFiltersReport(await host.sendCommand("filters")); } catch { snap.report = null; }
   try {
     const raw = await host.sendCommand("storage");
+    snap.storageRaw = raw;
     const declared = /^schema: (\d+)\r?$/m.exec(raw);
     // An explicitly incompatible format is unsupported, not an unknown schema
     // that would allow legacy settings through the feature-presence fallback.

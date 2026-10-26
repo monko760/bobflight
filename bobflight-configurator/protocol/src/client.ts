@@ -48,6 +48,9 @@ import {
 
 /** Idle gap tolerated inside a scoped defaults reply before it counts as complete (the end line usually ends it first). */
 export const DEFAULTS_REPLY_IDLE_MS = 300;
+/** After an incomplete scoped-defaults reply: quiet time that ends the late-tail drain, and its hard cap. */
+export const DEFAULTS_LATE_QUIET_MS = 1000;
+export const DEFAULTS_LATE_MAX_MS = 5000;
 
 /** R0b patterned CLI: get erpm_m1..4 / dshot_telem_m1..4 / get|set dshot_bidir on|off. */
 export function isR0bDshotCliCommand(cmd: string): boolean {
@@ -100,6 +103,13 @@ export class BobFlightCliClient {
   private status: ConnectionStatus = "disconnected";
   private lineBuf = new LineBuffer();
   private collector: ResponseCollector | null = null;
+  /**
+   * After an incomplete `defaults <group>` reply (idle gap, no end line) the
+   * FC may still send the tail. Until it does (an end line) or the link stays
+   * quiet for DEFAULTS_LATE_QUIET_MS, incoming bytes are discarded and the
+   * next command waits, so the tail never lands in a later reply.
+   */
+  private lateDrain: { done: Promise<void>; finish: () => void; timer: ReturnType<typeof setTimeout> | null; cap: ReturnType<typeof setTimeout> | null } | null = null;
   private lineListeners = new Set<(line: string) => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private lastConnect: ConnectOptions | null = null;
@@ -202,6 +212,7 @@ export class BobFlightCliClient {
 
   async disconnect(): Promise<void> {
     this.intentionalClose = true;
+    this.lateDrain?.finish();
     if (this.collector) {
       this.collector.cancel(new Error("disconnected"));
       this.collector = null;
@@ -246,6 +257,7 @@ export class BobFlightCliClient {
       this.collector.push(text);
     }
     const lines = this.lineBuf.push(text);
+    if (this.lateDrain) this.armLateDrain(lines.some((l) => isDefaultsReplyEnd(l)));
     for (const line of lines) {
       for (const cb of this.lineListeners) {
         try {
@@ -303,11 +315,28 @@ export class BobFlightCliClient {
     return this.sendRaw(cmd, opts);
   }
 
+  /** Starts (or extends) the late-tail drain; `ended`: the tail's end line arrived. */
+  private armLateDrain(ended = false): void {
+    if (!this.lateDrain) {
+      let finish!: () => void;
+      const done = new Promise<void>((r) => { finish = r; });
+      const d = { done, finish: () => {}, timer: null as ReturnType<typeof setTimeout> | null, cap: null as ReturnType<typeof setTimeout> | null };
+      d.finish = () => { if (d.timer) clearTimeout(d.timer); if (d.cap) clearTimeout(d.cap); if (this.lateDrain === d) this.lateDrain = null; finish(); };
+      d.cap = setTimeout(d.finish, DEFAULTS_LATE_MAX_MS);
+      this.lateDrain = d;
+    }
+    const d = this.lateDrain;
+    if (ended) { d.finish(); return; }
+    if (d.timer) clearTimeout(d.timer);
+    d.timer = setTimeout(d.finish, DEFAULTS_LATE_QUIET_MS);
+  }
+
   /**
    * Send a free-form CLI line (settings get/set/save/defaults, etc.).
    * Does not widen CliCommand; dedicated settings methods prefer this.
    */
   async sendRaw(line: string, opts?: SendCommandOptions): Promise<string> {
+    if (this.lateDrain && !this.collector) await this.lateDrain.done;
     if (!this.port?.isOpen || this.status !== "connected") {
       throw new Error("not connected");
     }
@@ -323,10 +352,13 @@ export class BobFlightCliClient {
       this.collector = new ResponseCollector(
         (text) => {
           this.collector = null;
+          // Idle gap without the end line: the tail may still come; drain it before the next command.
+          if (scopedDefaults && !text.split(/\r?\n/).some((l) => isDefaultsReplyEnd(l))) this.armLateDrain();
           resolve(text);
         },
         (err) => {
           this.collector = null;
+          if (scopedDefaults) this.armLateDrain(); // the reply may still arrive late
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
           if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "barometer" || line === "storage" || line === "flash_info" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
@@ -340,7 +372,17 @@ export class BobFlightCliClient {
     const wireCmd = line.trim();
     this.sentCommands.push(wireCmd);
     const wire = encodeCommand(wireCmd);
-    this.port.write(wire);
+    try {
+      this.port.write(wire);
+    } catch (e) {
+      // A throwing write must not leave a stale collector behind (every later command would be "in flight").
+      const c = this.collector as ResponseCollector | null;
+      this.collector = null;
+      void responsePromise.catch(() => {});
+      c?.cancel(e instanceof Error ? e : new Error(String(e)));
+      if (scopedDefaults) this.armLateDrain(); // part of the line may have gone out
+      throw e;
+    }
 
     return responsePromise;
   }

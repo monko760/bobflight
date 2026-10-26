@@ -13,16 +13,22 @@ export const ACCEL_CAL_SAVED_PREFIX = "accel_cal_saved:";
 export const ACCEL_CAL_SAVED_UNKNOWN = "unknown";
 
 export interface AccelCalSaved {
-  /** "unknown" when the line is missing, repeated or has a value this client does not know. */
+  /** "unknown" unless exactly one `accel_cal_saved: yes|no` line (byte-exact) came before `storage_end`. */
   value: "yes" | "no" | "unknown";
   /** The FC line exactly as received (null when missing or repeated). */
   line: string | null;
+  /** Why the value is unknown (absent when known). */
+  reason?: "missing" | "repeated" | "unrecognised";
 }
 
-/** Reads `accel_cal_saved:` from a raw `storage` reply; never throws. */
+/** Reads `accel_cal_saved:` from a raw `storage` reply; lines after `storage_end` do not count. Never throws. */
 export function readAccelCalSaved(raw: string): AccelCalSaved {
-  const lines = raw.split(/\r?\n/).map((l) => l.replace(/\r$/, "")).filter((l) => l.startsWith(ACCEL_CAL_SAVED_PREFIX));
-  if (lines.length !== 1) return { value: ACCEL_CAL_SAVED_UNKNOWN, line: null };
-  const m = /^accel_cal_saved: (yes|no)$/.exec(lines[0]);
-  return { value: m ? (m[1] as "yes" | "no") : ACCEL_CAL_SAVED_UNKNOWN, line: lines[0] };
+  const all = raw.split(/\r?\n/).map((l) => l.replace(/\r$/, ""));
+  const end = all.findIndex((l) => /^storage_end:/.test(l));
+  const lines = (end >= 0 ? all.slice(0, end) : all).filter((l) => l.startsWith(ACCEL_CAL_SAVED_PREFIX));
+  if (lines.length === 0) return { value: ACCEL_CAL_SAVED_UNKNOWN, line: null, reason: "missing" };
+  if (lines.length > 1) return { value: ACCEL_CAL_SAVED_UNKNOWN, line: null, reason: "repeated" };
+  if (lines[0] === "accel_cal_saved: yes") return { value: "yes", line: lines[0] };
+  if (lines[0] === "accel_cal_saved: no") return { value: "no", line: lines[0] };
+  return { value: ACCEL_CAL_SAVED_UNKNOWN, line: lines[0], reason: "unrecognised" };
 }

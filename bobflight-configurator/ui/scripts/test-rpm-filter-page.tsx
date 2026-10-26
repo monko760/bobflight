@@ -1014,19 +1014,21 @@ async function main() {
     root.unmount(); await t.mock.disconnect();
   });
 
-  await test("trip 7: a transport error / FC reply on getAllSettings is not retried: today's fallback, but no 'older firmware' (QA #60)", async () => {
+  await test("trip 7: a transport error / FC reply on getAllSettings is not retried: a read error with Read again, never the demo fallback (#98 review), and no 'older firmware' (QA #60)", async () => {
     const t = await gatedHost("ok", { getAllError: "serial write failed" });
     const t0 = Date.now();
     const root = mountFilters(t.host);
-    assert.ok(await waitFor(() => fallbackErr() !== null, 1500), `fallback shown: ${failText().join(" | ")}`);
+    const readErr = () => failText().find((x) => /Could not read the controller's filter settings/.test(x)) ?? null;
+    assert.ok(await waitFor(() => readErr() !== null, 1500), `read error shown: ${failText().join(" | ")}`);
+    assert.equal(fallbackErr(), null, "never the demo fallback while a controller is linked");
     assert.ok(Date.now() - t0 < RPM_GATE_DELAY_MS + 500, `no retry delay: ${Date.now() - t0} ms`);
     await sleep(3 * RPM_GATE_DELAY_MS);
     assert.equal(count(t.ops, "getAll"), 1, `sent once, never retried: ${JSON.stringify(t.ops)}`);
     assert.deepEqual(t.refused, [], "the gate was free");
-    assert.ok(/serial write failed/.test(fallbackErr() ?? ""), "the error is shown as today");
+    assert.ok(/serial write failed/.test(readErr() ?? ""), "the error is shown");
     assert.equal(testId("settings-busy"), null, "not a busy line");
-    assert.ok(!OLDER.test(rpmSection()), `a fallback alone never claims older firmware (RPM): ${rpmSection()}`);
-    assert.ok(!OLDER.test(notchSection()), `a fallback alone never claims older firmware (notch): ${notchSection()}`);
+    assert.ok(!OLDER.test(rpmSection()), `a failed read never claims older firmware (RPM): ${rpmSection()}`);
+    assert.ok(!OLDER.test(notchSection()), `a failed read never claims older firmware (notch): ${notchSection()}`);
     root.unmount(); await t.mock.disconnect();
   });
 

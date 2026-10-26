@@ -26,6 +26,7 @@ import { FiltersPage } from "../src/pages/FiltersPage";
 import { SetupPage } from "../src/pages/SetupPage";
 import { StoragePanel } from "../src/components/StoragePanel";
 import { ACCEL_CAL_NOT_SAVED_NOTE } from "../src/components/AccelCalSavedNote";
+import { GATE_BUSY_MESSAGE } from "../src/protocol/commandGate";
 import { createHost } from "../src/protocol/createHost";
 import type { BobFlightHost } from "../src/protocol/types";
 import { DEFAULTS_BUSY_TEXT, DEFAULTS_UNSAVED_TEXT, DEFAULTS_CLEAN_TEXT, DEFAULTS_MAYBE_UNSAVED_TEXT, DEFAULTS_UNSUPPORTED_TEXT, DEFAULTS_GATE_WAIT_MS } from "../src/tuning/scopedDefaults";
@@ -114,6 +115,10 @@ interface Rig {
   accel: { line: string | null; storageRaw: string | null; onSave?: () => void };
   /** host.storageActionPending() at the moment each `defaults <group>` hit the wire. */
   pendingAtDefaults: boolean[];
+  /** Called for every line the UI writes (before the FC answers). */
+  onWire?: (line: string) => void;
+  /** Every gated adapter call is refused busy (nothing sent) until this time. */
+  busyUntil: number;
   done(): Promise<void>;
 }
 const LABEL: Record<DefaultsGroup, string> = { pid: "PID", rates: "Rates", filters: "Filters" };
@@ -153,9 +158,11 @@ async function rig(): Promise<Rig> {
   const accel: Rig["accel"] = { line: "accel_cal_saved: no", storageRaw: null };
   const pendingAtDefaults: boolean[] = [];
   // FW `storage` report (MockSerial has none); a successful scoped defaults reply is the real FW's bytes.
+  const rigRef: { r?: Rig } = {};
   const write = port.write.bind(port);
   (port as unknown as { write: (d: string | Buffer) => boolean }).write = (data) => {
     const line = String(data).trim();
+    rigRef.r?.onWire?.(line);
     if (swallow.has(line)) return true; // an FC that never answers this line
     if (line === "storage") { const d = fcDirty(); const reply = accel.storageRaw ?? storageReply(d, accel.line); setTimeout(() => port.emit("data", Buffer.from(reply)), 1); return true; }
     if (/^defaults (pid|rates|filters)$/.test(line)) pendingAtDefaults.push(host.storageActionPending!());
@@ -180,12 +187,15 @@ async function rig(): Promise<Rig> {
   };
   (globalThis as Record<string, unknown>).__setupTestHost = ctx;
   const root = createRoot(container as never);
-  const gate = (host as unknown as { commands: { run<T>(w: () => Promise<T>): Promise<T> } }).commands;
-  return {
+  const gate = (host as unknown as { commands: { run<T>(w: () => Promise<T>, ...a: unknown[]): Promise<T> } }).commands;
+  const run = gate.run.bind(gate);
+  gate.run = (w, ...a) => (Date.now() < (rigRef.r?.busyUntil ?? 0) ? Promise.reject(new Error(GATE_BUSY_MESSAGE)) : run(w, ...a)) as never;
+  return rigRef.r = {
+    busyUntil: 0,
     host, client, port, root, ctx, swallow, accel, pendingAtDefaults,
     mark: () => client.getSentCommands().length,
     since: (m) => client.getSentCommands().slice(m),
-    holdGate: (ms) => gate.run(() => sleep(ms)),
+    holdGate: (ms) => run(() => sleep(ms)),
     done: async () => { flushSync(() => root.unmount()); await host.disconnect(); },
   };
 }
@@ -441,6 +451,96 @@ async function main() {
     assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(pageText())), `saved: ${alerts().join(" | ")}`);
     assert.equal(accelText(), "accel_cal_saved: no", "post-save storage line shown verbatim");
     assert.equal(shown("accel-cal-not-saved"), ACCEL_CAL_NOT_SAVED_NOTE);
+    await r.done();
+  });
+
+  const noMock = () => !/mockSettingsApi|demo memory|Local demo/i.test(pageText());
+  await test("PID: tab load while the gate stays busy (4 s) -> read error + Read again, Save and Defaults disabled, never demo memory; Read again recovers", async () => {
+    const r = await rig(); const held = r.holdGate(4000); render(r, "pid");
+    assert.ok(await waitFor(() => shown("pid-read-error") !== null, 6000), `read error shown: ${pageText().slice(0, 400)}`);
+    assert.match(shown("pid-read-error")!, new RegExp(GATE_BUSY_MESSAGE.replace(/[;()]/g, ".")));
+    assert.ok(noMock(), `no demo fallback: ${pageText().slice(0, 400)}`);
+    assert.ok(isDisabled(findButton("Save")!), "Save disabled"); assert.ok(isDisabled(findButton("Defaults…")!), "Defaults disabled");
+    await held; click("Read again");
+    assert.ok(await waitFor(() => !isDisabled(findButton("Defaults…")!) && !isDisabled(findButton("Save")!)), "real read enables Defaults and Save");
+    assert.equal(shown("pid-read-error"), null); assert.ok(noMock());
+    await r.done();
+  });
+
+  await test("PID: the re-read right after `defaults pid` hits a busy gate beyond the retry -> read error + Read again, no demo memory, Defaults/Save disabled; Read again recovers", async () => {
+    const r = await rig(); await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, "pid");
+    await openDialog();
+    r.onWire = (l) => { if (l === "defaults pid") { r.busyUntil = Date.now() + 3500; r.onWire = undefined; } };
+    click("Restore PID defaults");
+    assert.ok(await waitFor(() => shown("pid-read-error") !== null, 8000), `read error after defaults: ${pageText().slice(-500)}`);
+    assert.ok(await waitFor(() => !!findButton("Defaults…"), 8000), "run settled");
+    assert.ok(shown("defaults-key-lines") !== null, "the FC reply itself is still shown");
+    assert.ok(noMock(), "no demo fallback");
+    assert.ok(isDisabled(findButton("Save")!)); assert.ok(isDisabled(findButton("Defaults…")!));
+    await sleep(Math.max(0, r.busyUntil - Date.now()) + 50); click("Read again");
+    assert.ok(await waitFor(() => input("pid_roll_p").value === "0.002" && !isDisabled(findButton("Save")!)), "re-read shows FC default");
+    await r.done();
+  });
+
+  await test("Filters: tab load with the gate held 5 s (beyond its retry) -> settings busy shown, Read again, no demo memory, Save/Defaults disabled (U22)", async () => {
+    const r = await rig(); const held = r.holdGate(5000); render(r, "filters");
+    await sleep(4300);
+    assert.ok(noMock(), `no demo fallback: ${pageText().slice(0, 500)}`);
+    assert.equal(shown("settings-busy"), GATE_BUSY_MESSAGE, "the gate's busy message");
+    assert.ok(shown("filters-read-error") !== null && !!findButton("Read again"), "Read again offered");
+    assert.ok(isDisabled(findButton("Save")!)); assert.ok(isDisabled(findButton("Defaults…")!));
+    await held; click("Read again");
+    assert.ok(await waitFor(() => !isDisabled(findButton("Defaults…")!) && input("gyro_lpf_hz").value === "320", 8000), "loads after Read again");
+    assert.ok(noMock());
+    await r.done();
+  });
+
+  await test("double confirm (two clicks before React re-renders) sends exactly one `defaults pid`", async () => {
+    const r = await rig(); await openTab(r, "pid"); await openDialog();
+    const b = button("Restore PID defaults"); const m = r.mark();
+    flushSync(() => { reactProps(b).onClick({}); reactProps(b).onClick({}); });
+    assert.ok(await waitFor(() => shown("defaults-key-lines") !== null, 8000)); await quiet(r);
+    assert.equal(r.since(m).filter((c) => c === "defaults pid").length, 1);
+    await r.done();
+  });
+
+  for (const g of ["pid", "rates", "filters"] as const) {
+    await test(`${LABEL[g]} tab: accel_cal_saved shown next to Save (verbatim no + note; exact yes after a Save; repeated -> repeated line)`, async () => {
+      let r = await rig(); await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, g);
+      assert.ok(await waitFor(() => shown("accel-cal-saved-line") === "accel_cal_saved: no"), `${g}: ${shown("accel-cal-saved-line")}`);
+      assert.equal(shown("accel-cal-not-saved"), ACCEL_CAL_NOT_SAVED_NOTE);
+      await r.done();
+      r = await rig(); r.accel.line = "accel_cal_saved: yes"; await openTab(r, g);
+      assert.ok(await waitFor(() => shown("accel-cal-saved-line") === "accel_cal_saved: yes"));
+      assert.equal(shown("accel-cal-not-saved"), null);
+      await r.done();
+      if (g === "pid") {
+        r = await rig(); r.accel.storageRaw = storageReply(false, "accel_cal_saved: yes\r\naccel_cal_saved: yes"); render(r, "pid");
+        assert.ok(await waitFor(() => /repeated line/.test(shown("accel-cal-saved") ?? "")), `repeated: ${shown("accel-cal-saved")}`);
+        assert.equal(shown("accel-cal-saved-line"), "accel_cal_saved: unknown");
+        await r.done();
+      }
+    });
+  }
+
+  await test("accel_cal_saved B1: only byte-exact yes/no shown bare; trailing space, tab, ZWSP, Cyrillic е -> unknown (FC sent: \"...\"), no note; a line after storage_end does not count", async () => {
+    for (const line of ["accel_cal_saved: yes ", "accel_cal_saved: yes\t", "accel_cal_saved: y\u200bes", "accel_cal_saved: y\u0435s", "accel_cal_saved: n\u043e"]) {
+      const r = await rig(); r.accel.line = line; render(r, "storage");
+      assert.ok(await waitFor(() => shown("accel-cal-saved-line") !== null), pageText().slice(0, 300));
+      assert.equal(shown("accel-cal-saved-line"), `unknown (FC sent: ${JSON.stringify(line)})`, JSON.stringify(line));
+      assert.ok(!shown("accel-cal-saved-line")!.startsWith("accel_cal_saved: yes"), "never looks like a yes");
+      assert.equal(shown("accel-cal-not-saved"), null);
+      await r.done();
+    }
+    for (const line of ["accel_cal_saved: yes", "accel_cal_saved: no"]) {
+      const r = await rig(); r.accel.line = line; render(r, "storage");
+      assert.ok(await waitFor(() => shown("accel-cal-saved-line") === line), `${line}: ${shown("accel-cal-saved-line")}`);
+      await r.done();
+    }
+    const r = await rig(); r.accel.storageRaw = storageReply(false, null) + "accel_cal_saved: yes\r\n"; render(r, "pid");
+    assert.ok(await waitFor(() => shown("accel-cal-saved-line") !== null), pageText().slice(0, 300));
+    assert.equal(shown("accel-cal-saved-line"), "accel_cal_saved: unknown", "after storage_end ignored");
+    assert.match(shown("accel-cal-saved")!, /line missing/);
     await r.done();
   });
 

@@ -68,7 +68,15 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
     setPhase("confirm");
   }
 
+  /** One run per confirm: a second click/Enter before React re-renders must not send `defaults` twice. */
+  const runningRef = useRef(false);
   async function confirm() {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    try { await runConfirmed(); } finally { runningRef.current = false; }
+  }
+
+  async function runConfirmed() {
     setPhase("running");
     if (localFallback) {
       await localFallback();

@@ -133,6 +133,13 @@ export function parseDefaultsGroupReply(raw: string, requested: DefaultsGroup): 
     keys.push({ key: k[1], value: k[2], line: l });
   }
   if (keys.length !== count) return unknown(`count mismatch: defaults_end says ${count}, FC sent ${keys.length} defaults_key lines`);
+  // N1: success needs exactly this group's key set (FW table order), nothing more or less.
+  const want = DEFAULTS_GROUP_KEYS[requested];
+  if (count !== want.length) return unknown(`count mismatch: ${requested} has ${want.length} keys, defaults_end says ${count}`);
+  const foreign = keys.find((k) => !(want as readonly string[]).includes(k.key));
+  if (foreign) return unknown(`key not in ${requested}: ${foreign.key}`);
+  const missing = want.find((k) => !seen.has(k));
+  if (missing) return unknown(`key missing from ${requested}: ${missing}`);
   return { kind: "ok", group: requested, count, keys, keyLines: keys.map((k) => k.line), raw };
 }
 

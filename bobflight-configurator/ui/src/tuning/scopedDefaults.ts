@@ -62,6 +62,15 @@ async function gatedOnce<T>(fn: () => Promise<T>, waitMs = DEFAULTS_GATE_WAIT_MS
   }
 }
 
+/**
+ * Runs a page read, retrying only the gate's own refusal (nothing was sent)
+ * for up to DEFAULTS_GATE_WAIT_MS; then rethrows the gate's error. FC replies
+ * and transport errors are never retried.
+ */
+export async function retryWhileGateBusy<T>(fn: () => Promise<T>, waitMs = DEFAULTS_GATE_WAIT_MS): Promise<T> {
+  return gatedOnce(fn, waitMs);
+}
+
 export type CurrentValues = Record<string, string>;
 export type ReadCurrentResult = { kind: "ok"; values: CurrentValues } | { kind: "busy"; detail: string };
 
