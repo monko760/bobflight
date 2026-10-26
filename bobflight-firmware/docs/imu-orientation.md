@@ -25,7 +25,7 @@ Sensor/binding mismatches, malformed calibration flags, non-finite/invalid coeff
 
 ## Bounded validation
 
-Tests cover 12 independent basis-vector mappings, norm and four-turn cycle preservation, invalid inputs, real gyro-driver MPU6000 register fixtures under both host and physical compile paths, aligned gyro/accel/raw-diagnostic agreement, cached sample freshness, initialization-only mapping, old-versus-new calibration bindings and seven IR regression cases. Persistence regressions verify cold reload, unchanged aircraft-setting bytes, no automatic flash writes, explicit save, seven corruption cases, and combined legacy control-source migration. The full native regression suite covers existing control timing, persistence, failsafe and logging paths. F722 image checks validate build format/vectors/bounds, not physical execution. No hardware latency measurement or physical `bl` validation is claimed.
+Tests cover 12 independent basis-vector mappings, norm and four-turn cycle preservation, invalid inputs, real gyro-driver MPU6000 register fixtures under both host and physical compile paths, aligned gyro/accel/raw-diagnostic agreement, cached sample freshness, initialization-only mapping, old-versus-new calibration bindings and seven IR regression cases. Persistence regressions verify cold reload, unchanged aircraft-setting bytes, no automatic flash writes, explicit save and seven corruption cases. The full native regression suite covers existing control timing, persistence, failsafe and logging paths. F722 image checks validate build format/vectors/bounds, not physical execution. No hardware latency measurement or physical `bl` validation is claimed.
 
 ## Optional source-only Windows review
 

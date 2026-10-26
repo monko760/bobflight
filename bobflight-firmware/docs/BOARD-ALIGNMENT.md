@@ -81,8 +81,10 @@ represent the new mounting correction; do not assume it is retained on downgrade
 
 ## Props-off acceptance checks
 
-1. Verify firmware suffix `-mount1`, storage schema 13, retained receiver UART/map,
-   and no unexpected setting changes.
+1. Verify `version` matches the image you built (only the Matek F722-PX string
+   still carries a `-mount1` tag; do not rely on it), `calibration` reports
+   `board_alignment_api: 1`, storage schema 13, retained receiver UART/map, and no
+   unexpected setting changes.
 2. Apply the desired angles and inspect configured versus active values. The
    model must not jump merely because values were staged. Save and fully reboot.
 3. Confirm active equals configured and `board_align_reboot_required: no`.

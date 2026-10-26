@@ -8,7 +8,9 @@ Development firmware, not flight-qualified.
 
 Only schema 13 configuration is supported (`CONFIG_STORE_SCHEMA` 13, payload **256** bytes, `src/drivers/persist.c`). There are no loaders or migrations for schemas 1..12. Old, future or foreign records are not interpreted or automatically erased:
 
-- With no valid schema 13 record, load reports `last_error: fresh_install_required` and Save is refused with the same error.
+- An erased store (both slots blank) loads nothing and reports `last_error: empty` with `state: defaults`; the first Save writes a schema 13 record.
+- `fresh_install_required` appears only when a slot holds an old, future or foreign record (BobFlight record header with another schema, board or payload size) and no valid schema 13 record exists. Load and Save then both report it.
+- Any other unreadable, non-blank slot content reports `invalid_record`.
 - With one valid schema 13 slot and one old-schema slot, load succeeds, but Save is still refused with `fresh_install_required` until the old slot is erased.
 - Erase the internal configuration as part of a deliberate fresh installation, then re-enter receiver/map/modes/mounting and calibrate again. Do not paste an old dump wholesale; the Configurator rejects exports of any schema other than 13.
 

@@ -76,6 +76,11 @@ for pre in ([],['save']):
         st=storages(lines);assert st[0]==st[1],(cmd,st)
         i=lines.index(want);assert getmap(lines[:i])==getmap(lines[i:]),cmd
 
-# 4. help documents the scoped form.
+# 4. One shared formatter: `get` prints six significant digits exactly, and the
+#    defaults_key lines stay byte-identical to `get` (section 1).
+lines=run(['set rate_center_roll 123.456','get rate_center_roll','set pid_roll_p 0.0123456','get pid_roll_p'])
+assert 'rate_center_roll=123.456' in lines and 'pid_roll_p=0.0123456' in lines,lines
+
+# 5. help documents the scoped form.
 assert any(l.startswith('  defaults pid|rates|filters - ') for l in run(['help'])),'help'
 print(f'PASS {board}: defaults pid|rates|filters replies == get, end count == key lines, only the group resets (props-in, align 90, loop, poles, DShot, map survive save+reboot), refusals exact and storage/dirty unchanged, accel_cal_saved present')

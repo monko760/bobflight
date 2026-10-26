@@ -79,7 +79,7 @@ need "loop_rate_setting_hz: 1000"
 need "loop_rate_pending_reboot: 0"
 need "loop_rate_end: 1"
 
-# Schema 8 manual gyro notches (dummy board runs 1000 Hz: 600 Hz is above Nyquist margin)
+# Manual gyro notches (schema 13) (dummy board runs 1000 Hz: 600 Hz is above Nyquist margin)
 need "gyro_notch1_hz=0"
 need "set failed: gyro_notch1_hz needs 0 < gyro_notch1_cutoff_hz < gyro_notch1_hz (set the cutoff first)"
 need "ok gyro_notch1_cutoff_hz=150"
@@ -101,10 +101,10 @@ need "filters_end: 1"
 need "set gyro_notch1_cutoff_hz 150"
 need "set gyro_notch1_hz 200"
 need "set gyro_notch2_cutoff_hz 400"
-need "# schema: 10"
+need "# schema: 13"
 need "gyro_notch1_reason: off"
 
-# Schema 9 RPM notch filter (host has no ESC: bidir off, no motor tracked)
+# RPM notch filter (schema 13) (host has no ESC: bidir off, no motor tracked)
 need "rpm_filter_harmonics=0"
 need "set failed: rpm_filter_harmonics must be 0..3"
 need "ok rpm_filter_harmonics=3"
@@ -114,4 +114,4 @@ need "rpm_filter_reason: bidir-off"
 need "rpm_filter_m1_hz: unavailable"
 if printf '%s\n' "$OUT" | tr -d '\r' | grep -q '^rpm_filter_harmonics: '; then echo "FAIL: rpm_filter report must not carry rpm_filter_harmonics (frozen format)"; exit 1; fi
 
-echo "PASS: CLI get/set/save/defaults (schema10 motor_direction + schema9 RPM filter + schema8 gyro notches + schema7 loop_rate_hz + schema6 pid_yaw_d + LPF + rates/PID + dshot R0c M1-M4) + status loop_target/actual/overruns"
+echo "PASS: CLI get/set/save/defaults <group> (schema 13: motor_direction, RPM filter, gyro notches, loop_rate_hz, pid_yaw_d, LPF, rates/PID; dshot R0c M1-M4) + status loop_target/actual/overruns"

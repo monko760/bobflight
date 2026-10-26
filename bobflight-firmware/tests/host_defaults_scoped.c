@@ -183,7 +183,25 @@ int main(void){
  /* Non-defaults lines are not ours. */
  {char b[16]="defaultsx";out[0]=0;CHECK(!cmd_defaults(b)&&!out[0],"defaultsx handled");}
  CHECK(config_defaults_group_keys("x",NULL)==NULL&&!config_defaults_group(NULL),"unknown group API");
+ /* Boot defaults and per-key defaults are one table: config_defaults() must equal
+  * config_get_default_key() bit for bit for every config key (the 29 grouped keys
+  * plus motor_poles and align_board_*), and set motor_direction to props-out. */
+ {tune();CHECK(config_set_key("align_board_roll",180)&&config_set_key("align_board_pitch",-90)&&config_set_key("align_board_yaw",45),"align");
+  CHECK(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN),"dir");
+  config_defaults();size_t n=config_key_count(),grouped=0;CHECK(n==33,"config key count %zu",n);
+  for(size_t i=0;i<n;i++){const char *k=config_key_name(i);float v,d;uint32_t vb,db;
+   CHECK(config_get_key(k,&v)&&config_get_default_key(k,&d),"%s: no value/default",k);memcpy(&vb,&v,4);memcpy(&db,&d,4);
+   CHECK(vb==db,"%s: config_defaults()=%g but config_get_default_key()=%g",k,v,d);
+   for(unsigned g=0;g<3;g++)if(in_group(GROUPS[g],k))grouped++;}
+  CHECK(grouped==29,"grouped keys covered %zu",grouped);
+  CHECK(config_motor_direction()==MOTOR_DIRECTION_PROPS_OUT,"config_defaults motor_direction");}
+ /* The shared formatter gives defaults_key the exact `get` text for any value, not only today's defaults. */
+ {static const float vals[]={123.456f,.0123456f,5e-05f,1234.56f,0.f};char a[96],b[96];
+  for(size_t i=0;i<sizeof vals/sizeof vals[0];i++){setting_format_line(a,sizeof a,"","k",vals[i]);setting_format_line(b,sizeof b,"defaults_key: ","k",vals[i]);
+   CHECK(!strncmp(b,"defaults_key: ",14)&&!strcmp(b+14,a),"prefix changes the value text: '%s' vs '%s'",a,b);}
+  setting_format_line(a,sizeof a,"","rate_center_roll",123.456f);CHECK(!strcmp(a,"rate_center_roll=123.456\r\n"),"%s",a);
+  setting_format_line(a,sizeof a,"","pid_roll_p",.0123456f);CHECK(!strcmp(a,"pid_roll_p=0.0123456\r\n"),"%s",a);}
  if(failures){fprintf(stderr,"%d failure(s)\n",failures);return 1;}
- puts("PASS D1 scoped defaults: pid 11 / rates 9 / filters 9 reset only their keys; props-in, align yaw 90 (active), loop 1000, accel cal, motor_poles, DShot, map, UART survive defaults+save+reload; accel_cal_saved stays yes; exact replies and end counts; refusals byte-identical incl. dirty, in order");
+ puts("PASS D1 scoped defaults: pid 11 / rates 9 / filters 9 reset only their keys; props-in, align yaw 90 (active), loop 1000, accel cal, motor_poles, DShot, map, UART survive defaults+save+reload; accel_cal_saved stays yes; exact replies and end counts; refusals byte-identical incl. dirty, in order; config_defaults() == config_get_default_key() for all 33 config keys (29 grouped)");
  return 0;
 }

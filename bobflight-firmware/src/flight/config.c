@@ -79,7 +79,8 @@ bool config_get_default_key(const char *key,float *out){
  if(!strcmp(key,"airmode")){*out=(float)DEF_AIRMODE;return true;}
  if(!strcmp(key,"gyro_lpf_hz")){*out=DEF_GYRO_LPF;return true;}
  if(!strcmp(key,"dterm_lpf_hz")){*out=DEF_DTERM_LPF;return true;}
- if(!strcmp(key,"gyro_notch1_hz")||!strcmp(key,"gyro_notch1_cutoff_hz")||!strcmp(key,"gyro_notch2_hz")||!strcmp(key,"gyro_notch2_cutoff_hz")){*out=0.f;return true;}
+ if(!strcmp(key,"gyro_notch1_hz")||!strcmp(key,"gyro_notch2_hz")){*out=DEF_GYRO_NOTCH;return true;}
+ if(!strcmp(key,"gyro_notch1_cutoff_hz")||!strcmp(key,"gyro_notch2_cutoff_hz")){*out=DEF_GYRO_NOTCH_CUTOFF;return true;}
  if(!strcmp(key,"rpm_filter_harmonics")){*out=DEF_RPM_HARMONICS;return true;}
  if(!strcmp(key,"rpm_filter_min_hz")){*out=DEF_RPM_MIN_HZ;return true;}
  if(!strcmp(key,"rpm_filter_q_x100")){*out=DEF_RPM_Q_X100;return true;}
