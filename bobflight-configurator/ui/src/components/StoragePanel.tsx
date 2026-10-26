@@ -3,11 +3,13 @@ import {useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
 import {parseStorage,parseConfigurationExport,canSaveStorage,type StorageSnapshot} from '../protocol';
 import {requestRefresh,storageDirty,browserConfirm} from './storageRefresh';
+import {AccelCalSavedNote} from './AccelCalSavedNote';
 /** onPending: told whenever a save / refresh / export starts or settles (and false on unmount), so a page can lock its own setters; it never feeds `blocked`. */
 export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:{revision?:number|string;blocked?:boolean;requiredScope?:string;onPending?:(pending:boolean)=>void}){
  const {host,connectionStatus,postFlashGate}=useHost();
  const connected=connectionStatus==='connected'&&!postFlashGate;
  const [state,setState]=useState<StorageSnapshot|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+ const [storageRaw,setStorageRaw]=useState('');/* D1 accel_cal_saved line */
  const epoch=useRef(0),busy=useRef(false);
  const live=(id:number)=>id===epoch.current&&host.getConnectionStatus()==='connected';
  async function run(action:'refresh'|'save'|'diff'|'dump'){
@@ -26,7 +28,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
     try{const a=document.createElement('a');a.href=url;a.download=`bobflight-${data.board}-${data.firmware}-${action}-config.txt`;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
     setMessage('Exported runtime configuration. Calibration metadata cannot be replayed; retain controller flash or recalibrate if it is lost. Export does not save to the controller.');
    }
-   const next=parseStorage(await host.sendCommand('storage'));if(!live(id))return;
+   const nextRaw=await host.sendCommand('storage'),next=parseStorage(nextRaw);if(!live(id))return;setStorageRaw(nextRaw);
    if(action==='save'&&(next.backend!=='flash'||next.state!=='saved'||next.dirty))throw Error('Save readback was not verified.');
    setState(next);if(action==='save')setMessage('Saved to controller flash and verified. Confirm once with a complete power-cycle test.');
   }catch(e){if(live(id)){setState(null);setError(String(e));}}
@@ -45,6 +47,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
   <button className="ghost" disabled={!connected||pending||blocked} onClick={()=>{requestRefresh({dirty:storageDirty(state),confirm:browserConfirm,refresh:()=>void run('refresh')});}}>Refresh storage</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('diff')}>Export changes</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('dump')}>Export full configuration</button>
+  {state&&<AccelCalSavedNote raw={storageRaw}/>}
   {state&&state.lastError!=='none'&&<p role="alert">{state.lastError==='migrated_control_source_manual'?'Older AUX mode routing was restored as manual selection. Your stored manual mode and other settings were retained. Review Modes, then explicitly Save to controller to accept this migration.':`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
   {state&&<p>Saved scope: {state.scope.replaceAll("_"," ").replaceAll(",",", ")}</p>}
   {blocked&&<p>Apply all edits on this page before saving, and finish any active operation.</p>}

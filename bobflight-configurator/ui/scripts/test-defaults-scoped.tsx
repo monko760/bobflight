@@ -24,6 +24,8 @@ import { PidPage } from "../src/pages/PidPage";
 import { RatesPage } from "../src/pages/RatesPage";
 import { FiltersPage } from "../src/pages/FiltersPage";
 import { SetupPage } from "../src/pages/SetupPage";
+import { StoragePanel } from "../src/components/StoragePanel";
+import { ACCEL_CAL_NOT_SAVED_NOTE } from "../src/components/AccelCalSavedNote";
 import { createHost } from "../src/protocol/createHost";
 import type { BobFlightHost } from "../src/protocol/types";
 import { DEFAULTS_BUSY_TEXT, DEFAULTS_UNSAVED_TEXT, DEFAULTS_CLEAN_TEXT, DEFAULTS_MAYBE_UNSAVED_TEXT, DEFAULTS_UNSUPPORTED_TEXT, DEFAULTS_GATE_WAIT_MS } from "../src/tuning/scopedDefaults";
@@ -108,6 +110,10 @@ interface Rig {
   mark(): number; since(m: number): string[];
   holdGate(ms: number): Promise<unknown>;
   swallow: Set<string>;
+  /** Tail line of the FW storage reply (null: line missing); `storageRaw` replaces the whole reply (real host bytes). */
+  accel: { line: string | null; storageRaw: string | null; onSave?: () => void };
+  /** host.storageActionPending() at the moment each `defaults <group>` hit the wire. */
+  pendingAtDefaults: boolean[];
   done(): Promise<void>;
 }
 const LABEL: Record<DefaultsGroup, string> = { pid: "PID", rates: "Rates", filters: "Filters" };
@@ -129,9 +135,9 @@ function loadRealFrames() {
     REAL_FRAME[g] = m![0];
   }
 }
-function storageReply(dirty: boolean): string {
+function storageReply(dirty: boolean, accelLine: string | null = "accel_cal_saved: no"): string {
   return ["storage_api: 1", "backend: flash", "schema: 13", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty ? 1 : 0}`, "generation: 2",
-    "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "accel_cal_saved: no", "storage_end: 1"]
+    "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", ...(accelLine === null ? [] : [accelLine]), "storage_end: 1"]
     .map((l) => `${l}\r\n`).join("");
 }
 async function rig(): Promise<Rig> {
@@ -144,12 +150,15 @@ async function rig(): Promise<Rig> {
   let savedSnap = JSON.stringify(port.getSettingsSnapshot());
   const fcDirty = () => JSON.stringify(port.getSettingsSnapshot()) !== savedSnap;
   const swallow = new Set<string>();
+  const accel: Rig["accel"] = { line: "accel_cal_saved: no", storageRaw: null };
+  const pendingAtDefaults: boolean[] = [];
   // FW `storage` report (MockSerial has none); a successful scoped defaults reply is the real FW's bytes.
   const write = port.write.bind(port);
   (port as unknown as { write: (d: string | Buffer) => boolean }).write = (data) => {
     const line = String(data).trim();
     if (swallow.has(line)) return true; // an FC that never answers this line
-    if (line === "storage") { const d = fcDirty(); setTimeout(() => port.emit("data", Buffer.from(storageReply(d))), 1); return true; }
+    if (line === "storage") { const d = fcDirty(); const reply = accel.storageRaw ?? storageReply(d, accel.line); setTimeout(() => port.emit("data", Buffer.from(reply)), 1); return true; }
+    if (/^defaults (pid|rates|filters)$/.test(line)) pendingAtDefaults.push(host.storageActionPending!());
     const g = /^defaults (pid|rates|filters)$/.exec(line)?.[1] as DefaultsGroup | undefined;
     if (g && port.defaultsScenario === "ok" && REAL_FRAME[g]) {
       const emit = port.emit.bind(port); let mock = "";
@@ -161,7 +170,7 @@ async function rig(): Promise<Rig> {
       return true;
     }
     // FW flash-save reply shape (MockSerial only acks "saved", which is not a verified flash save).
-    if (line === "save") { savedSnap = JSON.stringify(port.getSettingsSnapshot()); setTimeout(() => port.emit("data", Buffer.from("saved: flash verified\r\n")), 1); return true; }
+    if (line === "save") { accel.onSave?.(); savedSnap = JSON.stringify(port.getSettingsSnapshot()); setTimeout(() => port.emit("data", Buffer.from("saved: flash verified\r\n")), 1); return true; }
     return write(data);
   };
   client.clearSentCommands();
@@ -173,15 +182,15 @@ async function rig(): Promise<Rig> {
   const root = createRoot(container as never);
   const gate = (host as unknown as { commands: { run<T>(w: () => Promise<T>): Promise<T> } }).commands;
   return {
-    host, client, port, root, ctx, swallow,
+    host, client, port, root, ctx, swallow, accel, pendingAtDefaults,
     mark: () => client.getSentCommands().length,
     since: (m) => client.getSentCommands().slice(m),
     holdGate: (ms) => gate.run(() => sleep(ms)),
     done: async () => { flushSync(() => root.unmount()); await host.disconnect(); },
   };
 }
-function render(r: Rig, page: "pid" | "rates" | "filters" | "setup") {
-  const el = page === "pid" ? <PidPage /> : page === "rates" ? <RatesPage /> : page === "filters" ? <FiltersPage /> : <SetupPage />;
+function render(r: Rig, page: "pid" | "rates" | "filters" | "setup" | "storage") {
+  const el = page === "pid" ? <PidPage /> : page === "rates" ? <RatesPage /> : page === "filters" ? <FiltersPage /> : page === "storage" ? <StoragePanel /> : <SetupPage />;
   flushSync(() => r.root.render(el));
 }
 /** Opens the page and waits until it shows FC values. */
@@ -269,6 +278,7 @@ async function main() {
       assert.deepEqual(sent.filter((c) => c.startsWith("defaults")), [`defaults ${g}`], `one defaults command, this tab's group: ${JSON.stringify(sent)}`);
       assert.ok(!sent.some(isSave), `no save: ${JSON.stringify(sent)}`);
       assert.ok(pendingSeen, "tracked host-wide as a settings storage action");
+      assert.deepEqual(r.pendingAtDefaults, [true], "the defaults command itself ran as a tracked storage action");
       const after = sent.slice(sent.indexOf(`defaults ${g}`) + 1);
       for (const k of DEFAULTS_GROUP_KEYS[g]) assert.ok(after.includes(`get ${k}`), `re-read ${k} after the reset: ${JSON.stringify(after)}`);
       assert.ok(after.includes("storage"), `the FC storage report read after the reset: ${JSON.stringify(after)}`);
@@ -396,6 +406,41 @@ async function main() {
     await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, "pid"); r.swallow.add("storage");
     await openDialog(); await confirm("pid");
     assert.ok(await waitFor(() => shown("defaults-unsaved") === DEFAULTS_MAYBE_UNSAVED_TEXT, 8000), `maybe: ${shown("defaults-unsaved")}`);
+    await r.done();
+  });
+
+  await test("StoragePanel: accel_cal_saved shown verbatim next to Save: yes, no (+ recalibrate note), missing -> unknown; real host storage reply; a save that drops it shows no", async () => {
+    const accelText = () => shown("accel-cal-saved-line");
+    for (const [line, want, note] of [["accel_cal_saved: yes", "accel_cal_saved: yes", false], ["accel_cal_saved: no", "accel_cal_saved: no", true], [null, "accel_cal_saved: unknown", false]] as [string | null, string, boolean][]) {
+      const r = await rig(); r.accel.line = line; render(r, "storage");
+      assert.ok(await waitFor(() => accelText() !== null), `panel loaded: ${pageText().slice(0, 300)}`);
+      assert.equal(accelText(), want, `${line}: shown verbatim`);
+      assert.equal(shown("accel-cal-not-saved"), note ? ACCEL_CAL_NOT_SAVED_NOTE : null, `${line}: recalibrate note only for no`);
+      if (line === null) assert.match(shown("accel-cal-saved") ?? "", /line missing from the storage reply/);
+      await r.done();
+    }
+    if (REAL_FRAME.pid) {
+      const out = spawnSync(HOST_BIN, [], { input: "set align_board_roll 90\nsave\nstorage\n", encoding: "utf8" }).stdout;
+      const real = /storage_api: 1\r\n[\s\S]*?storage_end: 1\r\n/.exec(out)![0];
+      const r = await rig(); r.accel.storageRaw = real; render(r, "storage");
+      assert.ok(await waitFor(() => accelText() !== null), `real host reply rendered: ${pageText().slice(0, 300)}`);
+      assert.equal(accelText(), "accel_cal_saved: no", "real host bytes, verbatim");
+      assert.equal(shown("accel-cal-not-saved"), ACCEL_CAL_NOT_SAVED_NOTE);
+      assert.match(pageText(), /Host simulation/);
+      await r.done();
+    }
+    // Calibrated FC; a save (e.g. after a board alignment change) drops it: the save reply says nothing, the storage line does.
+    const r = await rig(); r.accel.line = "accel_cal_saved: yes"; render(r, "storage");
+    assert.ok(await waitFor(() => accelText() === "accel_cal_saved: yes"));
+    await r.host.setSetting("pid_roll_p", "0.009");
+    click("Refresh storage"); await sleep(300);
+    r.accel.onSave = () => { r.accel.line = "accel_cal_saved: no"; };
+    const btn = () => findButton("Save to controller");
+    assert.ok(await waitFor(() => !!btn() && !isDisabled(btn()!)), `Save enabled: ${pageText().slice(0, 400)}`);
+    click("Save to controller");
+    assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(pageText())), `saved: ${alerts().join(" | ")}`);
+    assert.equal(accelText(), "accel_cal_saved: no", "post-save storage line shown verbatim");
+    assert.equal(shown("accel-cal-not-saved"), ACCEL_CAL_NOT_SAVED_NOTE);
     await r.done();
   });
 

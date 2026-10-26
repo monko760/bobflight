@@ -217,3 +217,4 @@ export type { DefaultsGroup, DefaultsCliCommand, DefaultsErrorCode, DefaultsKeyL
 export { DEFAULTS_MOCK_SCENARIOS, DEFAULTS_MOCK_ERROR_LINES, MOCK_BARE_DEFAULTS_REPLY, defaultsKeyLines, mockDefaultsReply } from "./defaults-scoped-mock";
 export type { DefaultsMockScenario } from "./defaults-scoped-mock";
 export { DEFAULTS_REPLY_IDLE_MS } from "./client";
+export { ACCEL_CAL_SAVED_PREFIX, ACCEL_CAL_SAVED_UNKNOWN, readAccelCalSaved, type AccelCalSaved } from "./accel-cal-saved";

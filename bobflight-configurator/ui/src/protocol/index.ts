@@ -37,6 +37,7 @@ export { parsePorts, parseModes, modeRangeCommand, isModeRangeCommand, controlSo
 export type { ParsedPorts, ParsedModes, ModeRow } from "@bobflight/protocol";
 
 export {parseStorage,parseConfigurationExport,canSaveStorage} from "@bobflight/protocol";
+export {readAccelCalSaved,ACCEL_CAL_SAVED_UNKNOWN,type AccelCalSaved} from "@bobflight/protocol";
 export type {StorageSnapshot} from "@bobflight/protocol";
 
 export { parseLoopStatus, loopRateView, LOOP_LABELS, LOOP_STATUS_KEYS, LOOP_UNKNOWN, mockLoopStatusLines, LOOP_RATE_MOCK_SCENARIOS } from "@bobflight/protocol";

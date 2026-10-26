@@ -1,11 +1,11 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
-/** Bundles test-defaults-scoped.tsx with the PID/Rates/Filters/Setup pages' useHost swapped for the test stub, then runs it. */
+/** Bundles test-defaults-scoped.tsx with the PID/Rates/Filters/Setup pages' and StoragePanel's useHost swapped for the test stub, then runs it. */
 import { build } from "esbuild";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outfile = path.join(here, "test-defaults-scoped.bundle.mjs");
-const pages = ["PidPage.tsx", "RatesPage.tsx", "FiltersPage.tsx", "SetupPage.tsx"].map((p) => path.join("src", "pages", p));
+const pages = [...["PidPage.tsx", "RatesPage.tsx", "FiltersPage.tsx", "SetupPage.tsx"].map((p) => path.join("src", "pages", p)), path.join("src", "components", "StoragePanel.tsx")];
 const swapped = new Map(pages.map((p) => [p, 0]));
 await build({
   entryPoints: [path.join(here, "test-defaults-scoped.tsx")],
