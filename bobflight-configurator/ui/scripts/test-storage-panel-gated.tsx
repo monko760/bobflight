@@ -373,6 +373,19 @@ async function main() {
     await r.done();
   });
 
+  await test("StoragePanel: the automatic first load waits while the page is blocked (its own first read goes first), then loads once", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" blocked={true} />);
+    await sleep(150);
+    assert.equal(r.fw.count("storage"), 0, "no storage read while blocked");
+    assert.equal(storageStatus(), "Storage capability not yet verified.");
+    r.render(<StoragePanel requiredScope="receiver_map" blocked={false} />);
+    assert.ok(await waitFor(loaded, 2000));
+    await sleep(50);
+    assert.equal(r.fw.count("storage"), 1, "exactly one load after unblocking");
+    await r.done();
+  });
+
   await test("StoragePanel: after the page unblocks (an apply finished) storage is re-read quietly and shows the FC's unsaved changes", async () => {
     const r = await rig();
     r.render(<StoragePanel requiredScope="receiver_map" blocked={false} />);
