@@ -3,6 +3,7 @@ import {isBoardAlignmentCommand} from "@bobflight/protocol";
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import {useHost} from "./useHost";
 import type {CliCommand} from "../protocol/types";
+import {isGateNotSent} from "../protocol/commandGate";
 import {checkActionGates,isSnapshotFresh,parseKeyValueSnapshot,type SensorSnapshot} from "../sensors/telemetry";
 import {SensorRequestLane} from "../sensors/requestLane";
 
@@ -64,7 +65,8 @@ export function useSensorTelemetry(){
       }catch(e){
         if(!disposed && generation===lane.generation){
           const msg=e instanceof Error?e.message:String(e);
-          if(!/another.*command.*in flight|request not queued|busy/i.test(msg)){setError(msg);resetTelemetry();}
+          // A gate rejection (busy / queue timeout / cancel / drain) never reached the FC: transient, keep the sample ageing.
+          if(!isGateNotSent(e)){setError(msg);resetTelemetry();}
         }
       }finally{
         if(!disposed && document.visibilityState==="visible" && generation===lane.generation)

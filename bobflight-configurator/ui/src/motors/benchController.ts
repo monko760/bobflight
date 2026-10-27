@@ -3,6 +3,7 @@
  * Command acknowledgments are NOT motor/RPM telemetry.
  */
 import type { BobFlightHost, CliCommand, ParsedStatus, MotorPulsePercent } from "../protocol/types";
+import { isGateNotSent } from "../protocol/commandGate";
 import { emptyErpmCells, erpmCommand, telemCommand, parseErpmReply, parseTelemReply, detailForTelemStatus, type ErpmCell } from "./erpmTelemetry";
 
 export const STATUS_MAX_AGE_MS = 1500;
@@ -47,10 +48,12 @@ export interface BenchState {
   /** Live eRPM cells (M1–M4 R0c first-class; null when telem not OK). */
   erpm: Record<MotorNumber, ErpmCell>;
   estimatedUntil: number; testLabel: string; reply: string; error: string;
+  /** Bumped only when a DShot rate change is confirmed by readback (StoragePanel revision; never keyed on `rate`, M4). */
+  rateRevision: number;
 }
 const initial = (): BenchState => ({ connected: false, visible: true, status: null, statusAt: -Infinity,
   capabilities: null, rate: null, propsOff: false, stationary: false, busy: false, actionPending: false, stopping: false,
-  pulsePercent: zeroSliders(), erpm: emptyErpmCells(), estimatedUntil: 0, testLabel: "", reply: "", error: "" });
+  pulsePercent: zeroSliders(), erpm: emptyErpmCells(), estimatedUntil: 0, testLabel: "", reply: "", error: "", rateRevision: 0 });
 export function benchBlockReason(s: BenchState, now: number): string | null {
   if (!s.connected) return "Connect a flight controller over USB.";
   if (!s.visible) return "Motor controls are locked while this page is hidden.";
@@ -77,6 +80,8 @@ export class BenchController {
   private flight: Promise<void> | null = null;
   private stopFlight: Promise<void> | null = null;
   private possibleMotion = false;
+  /** Aborted on leave / connection change: drops this page's reads still waiting in the shared CommandGate queue. */
+  private abort = new AbortController();
   private listeners = new Set<(state: BenchState) => void>();
   constructor(private host: Pick<BobFlightHost, "getStatus" | "sendCommand" | "getConnectionStatus">,
     private now: () => number = () => performance.now()) {}
@@ -84,7 +89,7 @@ export class BenchController {
   private patch(p: Partial<BenchState>): void { this.state = { ...this.state, ...p }; this.listeners.forEach(fn => fn(this.state)); }
   connection(connected: boolean): void {
     if (connected === this.state.connected) return;
-    this.generation++; this.session++; this.possibleMotion = false;
+    this.generation++; this.session++; this.possibleMotion = false; this.cancelQueued();
     this.patch({ ...initial(), connected, visible: this.state.visible });
   }
   confirmProps(value: boolean): void {
@@ -103,14 +108,16 @@ export class BenchController {
   }
   leave(): Promise<void> {
     this.patch({ visible: false, propsOff: false, stationary: false, pulsePercent: zeroSliders() });
-    this.generation++;
+    this.generation++; this.cancelQueued();
     return this.possibleMotion ? this.stop() : Promise.resolve();
   }
+  private cancelQueued(): void { this.abort.abort(); this.abort = new AbortController(); }
+  private get opts() { return { signal: this.abort.signal }; }
   private valid(g: number): boolean {
     return g === this.generation && this.state.connected && this.host.getConnectionStatus() === "connected";
   }
   private async status(g: number): Promise<void> {
-    const status = await this.host.getStatus();
+    const status = await this.host.getStatus(this.opts);
     if (this.valid(g)) this.patch({ status, statusAt: this.now() });
   }
   private actionFresh(g: number, requestedAt: number): boolean {
@@ -131,7 +138,15 @@ export class BenchController {
     const p = Promise.resolve(previous).then(async () => {
       if (this.valid(g) && (!action || this.actionFresh(g, requestedAt))) await work(g, requestedAt);
     })
-      .catch(e => { if (this.valid(g)) this.patch({ error: e instanceof Error ? e.message : String(e), status: null, rate: null, propsOff: false, stationary: false, pulsePercent: zeroSliders() }); })
+      .catch(e => {
+        if (!this.valid(g)) return;
+        const message = e instanceof Error ? e.message : String(e);
+        // M2: a gate refusal / queue timeout / cancel never reached the FC, so it says nothing
+        // about the controller: keep status, rate and the user's confirmations. A clicked action
+        // reports it; a background poll just lets the next tick retry (status ages out honestly).
+        if (isGateNotSent(e)) { if (action) this.patch({ error: message }); return; }
+        this.patch({ error: message, status: null, rate: null, propsOff: false, stationary: false, pulsePercent: zeroSliders() });
+      })
       .finally(() => { if (this.flight === p) { this.flight = null; if (!this.stopFlight) this.patch({ busy: false, actionPending: false }); } });
     this.flight = p;
     return p;
@@ -141,17 +156,18 @@ export class BenchController {
       await this.status(g);
       if (!this.valid(g)) return;
       if (!this.state.capabilities) {
-        const help = await this.host.sendCommand("help");
+        const help = await this.host.sendCommand("help", this.opts);
         if (!this.valid(g)) return;
         this.patch({ capabilities: parseBenchHelp(help) });
       }
       if (this.state.capabilities?.dshot) {
         try {
-          const raw = await this.host.sendCommand("dshot");
+          const raw = await this.host.sendCommand("dshot", this.opts);
           if (this.valid(g)) this.patch({ rate: parseDshot(raw) });
         } catch (e) {
           // Rate readback failure must not block eRPM polling.
-          if (this.valid(g)) this.patch({ rate: null, error: e instanceof Error ? e.message : String(e) });
+          // A gate refusal is not a readback failure: keep the last confirmed rate (M2/M4).
+          if (this.valid(g) && !isGateNotSent(e)) this.patch({ rate: null, error: e instanceof Error ? e.message : String(e) });
         }
       }
       // Live eRPM M1–M4 (R0c). Telem polled only when erpm is none — enrich detail,
@@ -160,12 +176,12 @@ export class BenchController {
       for (const motor of [1, 2, 3, 4] as const) {
         if (!this.valid(g)) return;
         try {
-          const reply = await this.host.sendCommand(erpmCommand(motor));
+          const reply = await this.host.sendCommand(erpmCommand(motor), this.opts);
           if (!this.valid(g)) return;
           let cell = parseErpmReply(motor, reply);
           if (cell.value === null) {
             try {
-              const telemRaw = await this.host.sendCommand(telemCommand(motor));
+              const telemRaw = await this.host.sendCommand(telemCommand(motor), this.opts);
               if (!this.valid(g)) return;
               const st = parseTelemReply(telemRaw);
               if (st) cell = { value: null, detail: detailForTelemStatus(st) };
@@ -210,7 +226,7 @@ export class BenchController {
       if (!this.actionFresh(g, requestedAt) || benchBlockReason(this.state, this.now())) return;
       this.possibleMotion = true;
       this.patch({ stationary: false, estimatedUntil: this.now() + duration, testLabel: label, error: "", reply: "Sending test request…" });
-      const text = await this.host.sendCommand(cmd);
+      const text = await this.host.sendCommand(cmd, this.opts);
       if (!this.valid(g)) return;
       assertBenchAck(cmd, text);
       this.patch({ estimatedUntil: this.now() + duration, reply: text.trim() });
@@ -223,14 +239,14 @@ export class BenchController {
       if (!this.actionFresh(g, requestedAt) || benchBlockReason(this.state, this.now())) return;
       const cmd: CliCommand = `dshot ${rate}`;
       this.patch({ rate: null, error: "" });
-      const text = await this.host.sendCommand(cmd);
+      const text = await this.host.sendCommand(cmd, this.opts);
       if (!this.valid(g)) return;
       assertBenchAck(cmd, text);
-      const raw = await this.host.sendCommand("dshot");
+      const raw = await this.host.sendCommand("dshot", this.opts);
       if (!this.valid(g)) return;
       const reported = parseDshot(raw);
       if (reported !== rate) throw new Error("DShot readback does not match the requested rate.");
-      this.patch({ rate: reported, reply: text.trim() });
+      this.patch({ rate: reported, reply: text.trim(), rateRevision: this.state.rateRevision + 1 });
     }, true);
   }
   stop(): Promise<void> {
@@ -239,10 +255,14 @@ export class BenchController {
     if (!this.state.connected || this.host.getConnectionStatus() !== "connected") return Promise.resolve();
     const session = this.session;
     this.patch({ busy: true, actionPending: true, stopping: true, stationary: false, pulsePercent: zeroSliders() });
-    const previous = this.flight;
-    const p = Promise.resolve(previous).then(async () => {
-      if (session !== this.session || this.host.getConnectionStatus() !== "connected") return;
-      const text = await this.host.sendCommand("motor_test 0");
+    // Review round 1 (blocker): never wait for the poll / action flight. Drop this page's reads still
+    // queued in the shared gate and enqueue `motor_test 0` NOW (urgent class, no queue timeout), so it
+    // goes on the wire right after the reply currently on the wire. The old flight sees the bumped
+    // generation (and its cancelled reads) and exits without sending anything else.
+    this.cancelQueued();
+    let sent: Promise<string>;
+    try { sent = this.host.sendCommand("motor_test 0"); } catch (e) { sent = Promise.reject(e); }
+    const p = sent.then(text => {
       if (session !== this.session) return;
       assertBenchAck("motor_test 0", text);
       this.patch({ estimatedUntil: 0, reply: "Stop acknowledged by firmware. Check that motors have physically stopped.", error: "" });

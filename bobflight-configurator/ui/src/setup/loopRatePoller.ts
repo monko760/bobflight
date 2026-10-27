@@ -7,6 +7,7 @@
  * the shared useHost `status` and never feeds any StoragePanel `blocked`
  * (the Motors flicker lock from PR #54 stays exactly as it is).
  */
+import { isGateNotSent } from "../protocol/commandGate";
 export const LOOP_RATE_POLL_MS = 1000;
 /** Shared-gate refusals in a row before the old reading is dropped as stale (~3 s). */
 export const LOOP_RATE_MAX_SKIPS = 3;
@@ -61,7 +62,7 @@ export class LoopRatePoller {
       }, e => {
         if (epoch !== this.epoch) return;
         const msg = e instanceof Error ? e.message : String(e);
-        if (/in flight|not queued/i.test(msg)) {
+        if (isGateNotSent(e)) { // the shared gate never sent it (busy / queue timeout / cancel): transient
           if (++this.skips >= LOOP_RATE_MAX_SKIPS && this.state.raw !== null) this.patch({ raw: null, error: "" });
         } else {
           this.skips = 0;

@@ -10,8 +10,9 @@
  * and then `rpm_filter` (no optimistic update); a refused set shows the FC's
  * line verbatim and the inputs return to what the FC holds.
  *
- * Busy gate (QA #60): the shared CommandGate refuses, never queues, a command
- * while another is in flight (e.g. the Motors-tab eRPM poll). That refusal
+ * Busy gate (QA #60): since P1 the shared CommandGate queues a command while
+ * another is in flight (e.g. the Motors-tab eRPM poll) and refuses only when
+ * its bounded queue is full. That refusal
  * happens before anything is sent, so it is the ONLY outcome retried, up to
  * RPM_GATE_ATTEMPTS tries RPM_GATE_DELAY_MS apart. An FC reply (a `set failed`
  * line, a malformed value, "unknown key") or any other error is never retried,
@@ -28,7 +29,7 @@ import {
   type RpmFilterKey, type RpmFilterReportResult, type RpmFilterView, type RpmGetResult, type SettingsKey,
 } from "../protocol";
 import type { CliCommand } from "../protocol/types";
-import { isGateBusy } from "../protocol/commandGate";
+import { isGateBusy, isGateNotSent } from "../protocol/commandGate";
 
 export interface RpmHost {
   getSetting(key: SettingsKey): Promise<{ key: SettingsKey; value: string }>;
@@ -39,7 +40,8 @@ export interface RpmHost {
   getConnectionStatus?(): string;
 }
 
-/** The command gate stayed busy for every try, so nothing was read. */
+/** The FC was not read: the gate stayed busy for every try, or rejected the command before it was
+ * sent (queue timeout, cancel, disconnect drain; see isGateNotSent). */
 export type RpmBusy = { kind: "busy"; message: string };
 /** A `get` result, or `busy`. */
 export type RpmReadResult = RpmGetResult | RpmBusy;
@@ -87,7 +89,9 @@ export async function readRpmKey(host: RpmHost, key: RpmFilterKey, signal?: Abor
   } catch (e) {
     if (e instanceof RpmCancelled) throw e;
     const msg = e instanceof Error ? e.message : String(e);
-    if (isGateBusy(e)) return { kind: "busy", message: msg };
+    // Any gate rejection (busy after the retries, queue timeout, cancel, disconnect drain): nothing
+    // was sent, so the FC was not read. Never "malformed" / "unsupported" (older firmware).
+    if (isGateNotSent(e)) return { kind: "busy", message: msg };
     return /unknown key/.test(msg) ? { kind: "unsupported" } : { kind: "malformed", raw: msg };
   }
 }
@@ -95,7 +99,7 @@ export async function readRpmKey(host: RpmHost, key: RpmFilterKey, signal?: Abor
 export async function readRpmReport(host: RpmHost, signal?: AbortSignal): Promise<RpmFilterReportResult | RpmBusy | null> {
   try { return parseRpmFilterReport(await gated(() => host.sendCommand("rpm_filter"), signal)); } catch (e) {
     if (e instanceof RpmCancelled) throw e;
-    return isGateBusy(e) ? { kind: "busy", message: e instanceof Error ? e.message : String(e) } : null;
+    return isGateNotSent(e) ? { kind: "busy", message: e instanceof Error ? e.message : String(e) } : null;
   }
 }
 /** The gate's message when any key or the report was not read because the gate stayed busy. */

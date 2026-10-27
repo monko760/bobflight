@@ -82,6 +82,12 @@ export function isBootloaderCommand(cmd: CliCommand): boolean {
   return cmd === "bl" || cmd === "bl discard";
 }
 
+/** Per-call options for gated host commands (P1 CommandGate FIFO). */
+export interface HostCallOptions {
+  /** Abort drops the command while it is still waiting in the shared CommandGate queue (unmount / tab leave). */
+  signal?: AbortSignal;
+}
+
 /** Thin host surface — mirrors BobFlightCliClient for screens. */
 export interface BobFlightHost {
   enumeratePorts(): Promise<PortInfo[]>;
@@ -91,9 +97,9 @@ export interface BobFlightHost {
   }): Promise<PortInfo>;
   connect(options: ConnectOptions): Promise<void>;
   disconnect(): Promise<void>;
-  sendCommand(cmd: CliCommand): Promise<string>;
-  getVersion(): Promise<string>;
-  getStatus(): Promise<ParsedStatus>;
+  sendCommand(cmd: CliCommand, opts?: HostCallOptions): Promise<string>;
+  getVersion(opts?: HostCallOptions): Promise<string>;
+  getStatus(opts?: HostCallOptions): Promise<ParsedStatus>;
   getConnectionStatus(): ConnectionStatus;
   /** True ONLY when currently connected via real WebSerial/serial transport (not mock). */
   isLiveConnection?(): boolean;
@@ -125,12 +131,13 @@ export interface BobFlightHost {
   refreshWebSerialPorts?(): Promise<PortInfo[]>;
 
   /** Settings — mirrors BobFlightCliClient (FW-locked first-12 keys). */
-  getSetting(key: SettingsKey): Promise<{ key: SettingsKey; value: string }>;
+  getSetting(key: SettingsKey, opts?: HostCallOptions): Promise<{ key: SettingsKey; value: string }>;
   setSetting(
     key: SettingsKey,
     value: string,
+    opts?: HostCallOptions,
   ): Promise<{ key: SettingsKey; value: string }>;
-  saveSettings(): Promise<void>;
-  restoreDefaults(): Promise<Record<SettingsKey, string>>;
-  getAllSettings(): Promise<Record<SettingsKey, string>>;
+  saveSettings(opts?: HostCallOptions): Promise<void>;
+  restoreDefaults(opts?: HostCallOptions): Promise<Record<SettingsKey, string>>;
+  getAllSettings(opts?: HostCallOptions): Promise<Record<SettingsKey, string>>;
 }

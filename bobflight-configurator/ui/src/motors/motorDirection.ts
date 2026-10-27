@@ -9,9 +9,9 @@
  * update); a refused set returns the FC line verbatim and the re-read value.
  * Only `props-out` / `props-in` are ever sent.
  *
- * Busy gate (QA #60, same rule as filters/rpmFilter.ts): the shared
- * CommandGate refuses, never queues, a command while another is in flight
- * (e.g. the Motors-tab eRPM poll). That refusal happens before anything is
+ * Busy gate (QA #60, same rule as filters/rpmFilter.ts): since P1 the shared
+ * CommandGate queues a command while another is in flight (e.g. the Motors-tab
+ * eRPM poll) and refuses only when its bounded queue is full. That refusal happens before anything is
  * sent, so it is the ONLY outcome retried, up to MOTOR_DIRECTION_GATE_ATTEMPTS
  * tries MOTOR_DIRECTION_GATE_DELAY_MS apart. An FC reply (a `set failed` line,
  * a malformed value, "unknown key") or any other error is never retried, so an
