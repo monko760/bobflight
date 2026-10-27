@@ -270,14 +270,17 @@ class ProtocolHostAdapter implements BobFlightHost {
    * write priority); a full queue, queue timeout or cancel rejects before
    * `work` runs (nothing is sent; the caller may retry a busy refusal). Tracked as a host-wide storage action once it owns
    * the gate. Only storage lines may be sent; a USB session change mid-run
-   * stops it.
+   * stops it. Waiting urgent commands (Stop) go on the wire before each of
+   * its lines (the gate's yieldToUrgent), as for getAllSettings / restoreDefaults.
    */
   async runStorageSequence<T>(work: (send: (cmd: StorageSequenceCommand) => Promise<string>) => Promise<T>, opts?: HostCallOptions & { priority?: "write" | "normal" }): Promise<T> {
     try {
-      return await this.commands.run(() => {
+      return await this.commands.run((yieldToUrgent) => {
         const generation = this.sessionGeneration;
         return this.storage.track(() => work(async (cmd) => {
           if (!isStorageSequenceCommand(cmd)) throw new Error(`not a storage sequence command: ${String(cmd)}`);
+          // Stop (urgent) is never held behind the sequence: it goes on the wire before this line.
+          await yieldToUrgent();
           if (generation !== this.sessionGeneration) throw new Error(GATE_SESSION_CHANGED_MESSAGE);
           return this.client.sendCommand(cmd);
         }));

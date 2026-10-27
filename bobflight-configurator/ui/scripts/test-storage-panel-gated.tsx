@@ -13,15 +13,19 @@ import { createRoot, type Root } from "react-dom/client";
 import type { ReactElement } from "react";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { StoragePanel } from "../src/components/StoragePanel";
-import { STORAGE_BUSY_TEXT, STORAGE_BUSY_RETRIES, STORAGE_BUSY_RETRY_MS, runStorageGated, StorageBusyError, isBusyRefusal } from "../src/components/storageSequence";
+import { STORAGE_BUSY_TEXT, STORAGE_BUSY_RETRIES, STORAGE_BUSY_RETRY_MS, runStorageGated, StorageBusyError, StorageCancelledError, describeStorageError } from "../src/components/storageSequence";
 import { ReceiverPage } from "../src/pages/ReceiverPage";
 import { PowerBatteryPage } from "../src/pages/PowerBatteryPage";
 import { SensorsPage } from "../src/pages/SensorsPage";
 import { ModesPage } from "../src/pages/ModesPage";
 import { PortsPage } from "../src/pages/PortsPage";
+import { SNAPSHOT_NOT_SENT_TEXT } from "../src/pages/useConfigSnapshot";
 import { MotorsPage } from "../src/pages/MotorsPage";
 import { createHostWithTransport } from "../src/protocol/createHost";
-import { isGateBusy, GATE_BUSY_MESSAGE, GATE_START_BUSY_MESSAGE, GATE_QUEUE_LIMIT, GATE_QUEUE_TIMEOUT_MS, CommandGate, GateBusyError } from "../src/protocol/commandGate";
+import {
+  isGateBusy, gateErrorCode, GATE_BUSY_MESSAGE, GATE_START_BUSY_MESSAGE, GATE_QUEUE_LIMIT, GATE_QUEUE_TIMEOUT_MS, CommandGate, GateBusyError,
+  GateQueueTimeoutError, GateCancelledError, GateDisconnectedError, GateSessionChangedError,
+} from "../src/protocol";
 import { parseStatus, type CliCommand } from "@bobflight/protocol";
 import { MockStorageFirmware, StorageSimTransportFactory, type StorageSimOptions } from "../../protocol/src/storage-sim";
 
@@ -290,7 +294,7 @@ async function main() {
     const elapsed = Date.now() - t0;
     assert.equal(storageError(), STORAGE_BUSY_TEXT.save);
     assert.equal(storageError(), "Another command was using the connection, so nothing was saved. Try Save to controller again.");
-    assert.equal(shown("storage-error-detail"), `Connection reply: ${GATE_BUSY_MESSAGE}`);
+    assert.equal(shown("storage-error-detail"), `Nothing was sent to the controller. Connection reply: ${GATE_BUSY_MESSAGE}`);
     assert.equal(r.gate.attempts - attemptsBefore, STORAGE_BUSY_RETRIES + 1, "exactly 1 + retries panel attempts");
     assert.ok(elapsed >= STORAGE_BUSY_RETRIES * STORAGE_BUSY_RETRY_MS * 0.9 && elapsed < 4800, `bounded (~3 s): ${elapsed} ms`);
     assert.deepEqual(r.fw.log.slice(sentBefore), [], "nothing reached the FC");
@@ -352,7 +356,7 @@ async function main() {
     click("Save to controller");
     assert.ok(await waitFor(() => !!storageError(), GATE_QUEUE_TIMEOUT_MS + 300));
     assert.equal(storageError(), STORAGE_BUSY_TEXT.save);
-    assert.equal(shown("storage-error-detail"), `Connection reply: timed out after ${GATE_QUEUE_TIMEOUT_MS} ms waiting in the command queue; request not sent`);
+    assert.equal(shown("storage-error-detail"), `Nothing was sent to the controller. Connection reply: timed out after ${GATE_QUEUE_TIMEOUT_MS} ms waiting in the command queue; request not sent`);
     assert.equal(r.gate.attempts - before, 1, "no retry after a queue timeout");
     assert.deepEqual(r.fw.log.slice(mark), [], "nothing reached the FC");
     assert.match(storageStatus(), /^Controller flash · saved · /, "busy keeps the last verified status");
@@ -372,7 +376,7 @@ async function main() {
     await r.done();
   });
 
-  await test("both busy forms are retried on a real FIFO CommandGate (queue full, refused motor start); 'busy' text from the FC or client is not", async () => {
+  await test("both busy codes are retried on a real FIFO CommandGate (GATE_QUEUE_FULL, GATE_BUSY_START), matched by code", async () => {
     // Queue full: a real gate with a bound of 1, held, with one command waiting.
     const full = new CommandGate(() => 1, 1);
     let release = () => {};
@@ -387,8 +391,7 @@ async function main() {
     const v1 = await runStorageGated(fullHost as never, "refresh", async (send) => { await send("storage"); return 1; }, { sleep: () => sleep(5) });
     await holding; await waiting;
     assert.equal(v1, 1);
-    assert.ok(errs.length >= 2 && errs.every((e) => e instanceof GateBusyError && (e as Error).message === GATE_BUSY_MESSAGE), "refused with the queue-full GateBusyError, then retried");
-    assert.match(GATE_BUSY_MESSAGE, /^busy, queue full/);
+    assert.ok(errs.length >= 2 && errs.every((e) => gateErrorCode(e) === "GATE_QUEUE_FULL"), "refused with GATE_QUEUE_FULL, then retried");
     assert.deepEqual(sentLines, ["storage"], "one line once the queue had room");
     // Refused motor start: an exclusive run on a busy real gate (starts are never queued).
     const start = new CommandGate(() => 1);
@@ -402,17 +405,73 @@ async function main() {
     const v2 = await runStorageGated(startHost as never, "refresh", async (send) => { await send("storage"); return 2; }, { sleep: () => sleep(5) });
     await holding2;
     assert.equal(v2, 2);
-    assert.ok(errs.length >= 2 && errs.every((e) => (e as Error).message === GATE_START_BUSY_MESSAGE), "refused with the motor-start busy error, then retried");
+    assert.ok(errs.length >= 2 && errs.every((e) => gateErrorCode(e) === "GATE_BUSY_START"), "refused with GATE_BUSY_START, then retried");
+    assert.match(GATE_START_BUSY_MESSAGE, /^busy, try again/, "#99 round 1 wording (UI copy only; never matched)");
     assert.deepEqual(sentLines, ["storage"]);
-    // Anything else that merely says busy is a real error: never retried.
-    for (const msg of ["busy: motor test running", "save failed: flash busy", "another UI command is in flight; request not queued (from the FC)"]) {
-      let calls = 0;
-      const h = { sendCommand: async () => "", runStorageSequence: async () => { calls++; throw new Error(msg); } };
-      await assert.rejects(runStorageGated(h as never, "save", async () => 1, { sleep: async () => {} }), (e) => (e as Error).message === msg);
-      assert.equal(calls, 1, `not retried: ${msg}`);
+  });
+
+  /** A host whose gated run throws `errs[i]` on attempt i, then runs the work (one `storage` line). */
+  function scripted(errs: unknown[]) {
+    const st = { calls: 0, lines: 0 };
+    const host = { sendCommand: async () => "", runStorageSequence: async <T,>(work: (s: (c: string) => Promise<string>) => Promise<T>) => {
+      const e = errs[st.calls++]; if (e !== undefined) throw e;
+      return work(async () => { st.lines++; return "ok"; });
+    } };
+    return { host: host as never, st };
+  }
+
+  await test("busy by CODE, not text: a GateBusyError whose message is reworded but keeps GATE_QUEUE_FULL / GATE_BUSY_START is still retried", async () => {
+    for (const code of ["GATE_QUEUE_FULL", "GATE_BUSY_START"] as const) {
+      const reworded = new GateBusyError("the connection is occupied, please hold", code);
+      assert.equal(gateErrorCode(reworded), code);
+      const { host, st } = scripted([reworded, reworded, reworded]);
+      const v = await runStorageGated(host, "save", async (send) => { await send("storage"); return 7; }, { sleep: async () => {} });
+      assert.equal(v, 7, `${code}: retried past three reworded refusals`);
+      assert.equal(st.calls, 4, `${code}: 3 refusals + 1 run`);
+      assert.equal(st.lines, 1);
     }
-    assert.equal(isBusyRefusal(new GateBusyError()), true);
-    assert.equal(isBusyRefusal(new GateBusyError(GATE_START_BUSY_MESSAGE)), true);
+  });
+
+  await test("'busy' text with no gate code is a real error: never retried, never shown as busy (incl. the gate's own wording on a plain Error)", async () => {
+    const msgs = [GATE_BUSY_MESSAGE, GATE_START_BUSY_MESSAGE, "busy, try again", "busy: motor test running", "save failed: flash busy",
+      "another UI command is in flight; request not queued (from the FC)"];
+    const fakes: Error[] = msgs.map((m) => new Error(m));
+    // A plain Error that copies the code (but is not a gate rejection) is not busy either.
+    fakes.push(Object.assign(new Error(GATE_BUSY_MESSAGE), { code: "GATE_QUEUE_FULL" }));
+    fakes.push(Object.assign(new Error("busy"), { code: "GATE_BUSY_START", gate: "yes" }));
+    for (const e of fakes) {
+      assert.equal(isGateBusy(e), false, `no gate code: ${e.message}`);
+      const { host, st } = scripted([e, e, e]);
+      await assert.rejects(runStorageGated(host, "save", async () => 1, { sleep: async () => {} }), (x) => x === e, `rethrown unchanged: ${e.message}`);
+      assert.equal(st.calls, 1, `not retried: ${e.message}`);
+      assert.equal(describeStorageError(e).kind, "other", `not shown as busy: ${e.message}`);
+    }
+  });
+
+  await test("not sent, no retry: queue timeout / disconnect drain / session change / a cancel the panel did not ask for show the busy text + 'Nothing was sent'", async () => {
+    const cases: Array<[unknown, string]> = [
+      [new GateQueueTimeoutError(GATE_QUEUE_TIMEOUT_MS), "GATE_QUEUE_TIMEOUT"], [new GateDisconnectedError(), "GATE_DISCONNECTED"],
+      [new GateSessionChangedError(), "GATE_SESSION_CHANGED"], [new GateCancelledError(), "GATE_CANCELLED"],
+    ];
+    for (const [e, code] of cases) {
+      const { host, st } = scripted([e, e]);
+      let caught: unknown;
+      await runStorageGated(host, "save", async () => 1, { sleep: async () => {} }).catch((x) => { caught = x; });
+      assert.ok(caught instanceof StorageBusyError, `${code}: busy wording`);
+      assert.equal((caught as StorageBusyError).code, code);
+      assert.equal((caught as StorageBusyError).attempts, 1);
+      assert.equal(st.calls, 1, `${code}: no retry`);
+      const p = describeStorageError(caught);
+      assert.equal(p.kind, "busy");
+      assert.equal(p.text, STORAGE_BUSY_TEXT.save);
+      assert.equal(p.detail, `Nothing was sent to the controller. Connection reply: ${(e as Error).message}`);
+    }
+    // The panel's own abort (unmount / revision change) while queued: silent, no retry.
+    const ac = new AbortController();
+    let ownCalls = 0;
+    const ownHost = { sendCommand: async () => "", runStorageSequence: async () => { ownCalls++; ac.abort(); throw new GateCancelledError(); } };
+    await assert.rejects(runStorageGated(ownHost as never, "save", async () => 1, { signal: ac.signal, sleep: async () => {} }), StorageCancelledError);
+    assert.equal(ownCalls, 1);
   });
 
   await test("bounded retry helper by behaviour: never retries a non-busy error, retries are counted and capped", async () => {
@@ -421,14 +480,71 @@ async function main() {
     await assert.rejects(runStorageGated(fwErr as never, "save", async () => 1, { sleep: async () => {} }), /save failed: error/);
     assert.equal(calls, 1);
     calls = 0;
-    const busy = { sendCommand: async () => "", runStorageSequence: async () => { calls++; throw new Error(GATE_BUSY_MESSAGE); } };
-    await assert.rejects(runStorageGated(busy as never, "refresh", async () => 1, { retries: 7, sleep: async () => {} }), (e) => e instanceof StorageBusyError && e.attempts === 8);
+    const busy = { sendCommand: async () => "", runStorageSequence: async () => { calls++; throw new GateBusyError(); } };
+    await assert.rejects(runStorageGated(busy as never, "refresh", async () => 1, { retries: 7, sleep: async () => {} }), (e) => e instanceof StorageBusyError && e.attempts === 8 && e.code === "GATE_QUEUE_FULL");
     assert.equal(calls, 8);
     // Line-by-line host (no gated run): a refusal after a line already went out is not retried.
     calls = 0;
-    const lineHost = { sendCommand: async (c: CliCommand) => { calls++; if (c === "save") throw new Error(GATE_BUSY_MESSAGE); return "x"; } };
-    await assert.rejects(runStorageGated(lineHost as never, "save", async (send) => { await send("storage"); return send("save"); }, { sleep: async () => {} }), StorageBusyError);
+    const lineHost = { sendCommand: async (c: CliCommand) => { calls++; if (c === "save") throw new GateBusyError(); return "x"; } };
+    let partial: unknown;
+    await runStorageGated(lineHost as never, "save", async (send) => { await send("storage"); return send("save"); }, { sleep: async () => {} }).catch((e) => { partial = e; });
+    assert.ok(partial instanceof StorageBusyError);
     assert.equal(calls, 2, "storage then a refused save; the sequence is not replayed");
+    assert.equal(describeStorageError(partial).detail, `The rest of the sequence was not sent. Connection reply: ${GATE_BUSY_MESSAGE}`);
+  });
+
+  await test("Stop preempts the held storage run: an urgent `motor_test 0` queued during a Save goes on the wire before the next line; the Save still verifies", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded));
+    r.fw.markDirty();
+    let stop: Promise<string> | null = null;
+    const mark = r.fw.log.length;
+    r.fw.onLine = (line) => { if (line === "storage" && !stop) stop = r.host.sendCommand("motor_test 0"); };
+    click("Save to controller");
+    assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(shown("storage-message") ?? "") || !!storageError(), 4000));
+    r.fw.onLine = null;
+    assert.equal(storageError(), null, `save verified (${shown("storage-error-detail")})`);
+    assert.ok(stop, "Stop was queued while the save held the gate");
+    await stop;
+    assert.deepEqual(r.fw.log.slice(mark), ["storage", "motor_test 0", "save", "storage"], "Stop went out right after the reply on the wire, ahead of the rest of the sequence");
+    assert.equal(r.fw.count("save"), 1);
+    await r.done();
+  });
+
+  await test("Stop with the panel's load still queued: Stop jumps ahead, the panel's waiting run is not dropped and loads after it", async () => {
+    const r = await rig();
+    const held = r.holdGate(250);
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(() => r.commands.queued === 1, 1000), "the auto-load is waiting in the FIFO");
+    const mark = r.fw.log.length;
+    const stop = r.host.sendCommand("motor_test 0");
+    await held; await stop;
+    assert.ok(await waitFor(loaded, 2000));
+    assert.equal(storageError(), null);
+    assert.deepEqual(r.fw.log.slice(mark), ["motor_test 0", "storage"], "Stop first, then the panel's queued load");
+    await r.done();
+  });
+
+  await test("a queued Save dropped by the gate (disconnect drain) ends cleanly: busy text + 'Nothing was sent', no retry, nothing sent, last status kept", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded));
+    r.fw.markDirty();
+    const held = r.holdGate(300);
+    const before = r.gate.attempts, mark = r.fw.log.length;
+    click("Save to controller");
+    assert.ok(await waitFor(() => r.commands.queued === 1, 1000), "the save is waiting in the FIFO");
+    r.commands.drain();
+    assert.ok(await waitFor(() => !!storageError(), 1000));
+    assert.equal(storageError(), STORAGE_BUSY_TEXT.save);
+    assert.equal(shown("storage-error-detail"), "Nothing was sent to the controller. Connection reply: disconnected");
+    assert.equal(r.gate.attempts - before, 1, "no retry");
+    await held; await sleep(50);
+    assert.deepEqual(r.fw.log.slice(mark), [], "the dropped save was never sent");
+    assert.match(storageStatus(), /^Controller flash · saved · /, "last verified status kept");
+    assert.ok(!isDisabled(button("Save to controller")), "the panel is usable again");
+    await r.done();
   });
 
   await test("F5: a storage reply with a mismatched scope says the reply could not be read, shows the raw reply, never 'Fresh install required'", async () => {
@@ -598,6 +714,17 @@ async function main() {
     assert.ok(await waitFor(loaded, 6000), `panel loaded (${storageStatus()} / ${storageError()})`);
     await sleep(300);
     assert.ok(!pageText().includes("request not queued"), `the page's first read was retried, not failed: ${pageText().slice(0, 600)}`);
+    await r.done();
+  });
+
+  await test("Ports page: a first read that times out in the FIFO (isGateNotSent) says nothing was sent, is not retried and is not shown as an FC error", async () => {
+    const r = await rig();
+    const held = r.holdGate(GATE_QUEUE_TIMEOUT_MS + 400);
+    r.render(<PortsPage />);
+    assert.ok(await waitFor(() => pageText().includes(SNAPSHOT_NOT_SENT_TEXT), GATE_QUEUE_TIMEOUT_MS + 300), pageText().slice(0, 600));
+    assert.ok(pageText().includes(`${SNAPSHOT_NOT_SENT_TEXT} (timed out after ${GATE_QUEUE_TIMEOUT_MS} ms waiting in the command queue; request not sent)`));
+    await held; await sleep(100);
+    assert.equal(r.fw.count("ports"), 0, "the timed-out read was not retried");
     await r.done();
   });
 

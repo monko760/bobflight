@@ -7,31 +7,26 @@
  *   (`diff all`|`dump all` -> `storage`) each run as ONE gated run
  *   (host.runStorageSequence holds the CommandGate for the whole sequence).
  * - Since the P1 FIFO gate a sequence that finds the gate in use WAITS in the
- *   gate's queue (save at write priority). "Busy" now means only the gate's own
- *   refusal before anything was sent (`isBusyRefusal`: queue full, "... request
- *   not queued"); that, and only that, gets the bounded retry. A queue wait
- *   timeout is reported as busy without a retry (it already waited). A
- *   controller reply, a client error (timeout, disconnect) or a parse failure
- *   is never retried. Abort (unmount / revision change) drops a waiting run.
+ *   gate's queue (save at write priority). Gate rejections are recognised by
+ *   their stable `code` (isGateBusy / isGateNotSent from the protocol index),
+ *   never by message text:
+ *   - isGateBusy (GATE_QUEUE_FULL, GATE_BUSY_START): the only case that gets
+ *     the bounded retry, and only while nothing of the sequence was sent;
+ *   - any other gate rejection (GATE_QUEUE_TIMEOUT, GATE_CANCELLED,
+ *     GATE_DISCONNECTED, GATE_SESSION_CHANGED): nothing reached the FC, shown
+ *     with the busy text ("nothing sent"), never retried. A cancel the panel
+ *     asked for (unmount / revision change / leaving) is silent.
+ *   A controller reply, a client error (timeout, port closed mid-reply), a
+ *   parse failure or any plain error whose text merely says "busy" is never
+ *   retried.
+ * - Stop (urgent) is never held behind a storage sequence: the host's gated
+ *   run lets waiting urgent commands onto the wire before each of its lines.
  * - Errors keep the controller's own line verbatim; the busy case gets plain
  *   wording plus the raw refusal as a visible detail.
  */
-import { parseStorage, parseConfigurationExport, canSaveStorage, isVerifiedFlashSave, StorageReplyError, type StorageSnapshot } from "../protocol";
-import { GateBusyError, GATE_BUSY_MESSAGE, GATE_START_BUSY_MESSAGE, GateQueueTimeoutError, GateCancelledError, type GatePriority } from "../protocol/commandGate";
+import { parseStorage, parseConfigurationExport, canSaveStorage, isVerifiedFlashSave, StorageReplyError, type StorageSnapshot,
+  isGateBusy, isGateNotSent, gateErrorCode, type GatePriority } from "../protocol";
 import type { CliCommand, HostCallOptions, StorageSequenceCommand } from "../protocol/types";
-
-/**
- * The shared gate's own busy refusal, raised before anything was sent. Two forms since the P1 FIFO gate:
- * - queue full: GateBusyError "busy, queue full: …; request not queued" (GATE_BUSY_MESSAGE);
- * - a refused motor start (starts are never queued): "busy: …; motor start request not queued".
- * Only these are retried. A controller reply, a client error or any other text that merely says "busy" is not.
- */
-export function isBusyRefusal(e: unknown): boolean {
-  if (!(e instanceof Error)) return false;
-  const queueFull = e.message === GATE_BUSY_MESSAGE || (e instanceof GateBusyError && e.message !== GATE_START_BUSY_MESSAGE);
-  const startRefused = e.message === GATE_START_BUSY_MESSAGE;
-  return queueFull || startRefused;
-}
 
 /** Gate attempts after the first refusal, and the wait between them: ~3 s in total, then give up. */
 export const STORAGE_BUSY_RETRIES = 100;
@@ -45,9 +40,10 @@ export interface StorageSequenceHost {
   runStorageSequence?<T>(work: (send: StorageSend) => Promise<T>, opts?: { priority?: GatePriority; signal?: AbortSignal }): Promise<T>;
 }
 
-/** The gate stayed busy for the whole retry budget; nothing reached the FC. */
+/** The gate stayed busy for the whole retry budget, or rejected the run before it was sent (queue
+ * timeout, disconnect drain, session change); nothing reached the FC. `code`: the gate's error code. */
 export class StorageBusyError extends Error {
-  constructor(readonly action: StorageAction, readonly detail: string, readonly attempts: number) {
+  constructor(readonly action: StorageAction, readonly detail: string, readonly attempts: number, readonly code: string | null = null, readonly linesSent = 0) {
     super(STORAGE_BUSY_TEXT[action]);
     this.name = "StorageBusyError";
   }
@@ -121,9 +117,9 @@ export async function runStorageGated<T>(host: StorageSequenceHost, action: Stor
     if (o.cancelled?.() || o.signal?.aborted) throw new StorageCancelledError();
     o.onAttempt?.(attempt + 1);
     let sent = 0;
-    // A line counts as sent unless the gate itself refused it.
+    // A line counts as sent unless the gate itself rejected it (it never reached the FC).
     const counted = (send: StorageSend): StorageSend => async (cmd) => {
-      try { const r = await send(cmd); sent++; return r; } catch (err) { if (!isBusyRefusal(err)) sent++; throw err; }
+      try { const r = await send(cmd); sent++; return r; } catch (err) { if (!isGateNotSent(err)) sent++; throw err; }
     };
     try {
       // Hosts without a gated sequence (demo host) send line by line; a refusal after a line went out is not retried.
@@ -131,13 +127,16 @@ export async function runStorageGated<T>(host: StorageSequenceHost, action: Stor
         ? await host.runStorageSequence((send) => work(counted(send)), { priority: action === "save" ? "write" : "normal", signal: o.signal })
         : await work(counted((cmd) => host.sendCommand(cmd, { signal: o.signal })));
     } catch (e) {
-      if (e instanceof GateCancelledError) throw new StorageCancelledError();
-      // It waited the gate's whole queue limit and never ran: busy wording, no retry (nothing was sent).
-      if (e instanceof GateQueueTimeoutError && sent === 0) throw new StorageBusyError(action, e.message, attempt + 1);
-      if (!isBusyRefusal(e)) throw e;
-      if (sent > 0) throw new StorageBusyError(action, (e as Error).message, attempt + 1);
-      if (attempt >= retries) throw new StorageBusyError(action, (e as Error).message, attempt + 1);
-      await sleep(retryMs);
+      // Not a gate rejection (FC reply, client error, parse failure, or a plain error that only says "busy"): no retry.
+      if (!isGateNotSent(e)) throw e;
+      const message = e instanceof Error ? e.message : String(e), code = gateErrorCode(e);
+      // The panel dropped its own waiting run (unmount, revision change, leaving): nothing more to show.
+      if (o.cancelled?.() || o.signal?.aborted) throw new StorageCancelledError();
+      // Busy (queue full / refused start) with nothing sent yet: the bounded retry.
+      if (isGateBusy(e) && sent === 0 && attempt < retries) { await sleep(retryMs); continue; }
+      // Busy after the budget, busy part-way, queue timeout, a cancel or drain it did not ask for, a
+      // session change: the gate never sent it. Busy wording ("nothing sent"), no retry.
+      throw new StorageBusyError(action, message, attempt + 1, code, sent);
     }
   }
 }
@@ -145,7 +144,7 @@ export async function runStorageGated<T>(host: StorageSequenceHost, action: Stor
 /** What the panel shows for a failure: plain text, plus the raw controller/gate line as a visible detail. */
 export interface StorageProblem { kind: "busy" | "controller" | "reply" | "other"; text: string; detail?: string }
 export function describeStorageError(e: unknown): StorageProblem {
-  if (e instanceof StorageBusyError) return { kind: "busy", text: e.message, detail: `Connection reply: ${e.detail}` };
+  if (e instanceof StorageBusyError) return { kind: "busy", text: e.message, detail: `${e.linesSent === 0 ? "Nothing was sent to the controller." : "The rest of the sequence was not sent."} Connection reply: ${e.detail}` };
   if (e instanceof StorageControllerError) return { kind: "controller", text: e.message, detail: `Controller reply: ${e.reply}` };
   if (e instanceof StorageReplyError) return { kind: "reply", text: "The controller’s storage reply could not be read, so storage status is unknown.", detail: `${e.message}. Controller reply: ${e.raw.trim() || "(empty)"}` };
   return { kind: "other", text: e instanceof Error ? e.message : String(e) };
