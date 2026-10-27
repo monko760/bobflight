@@ -1,0 +1,21 @@
+name: Pinned ARM GNU toolchain
+description: Restore or download an official checksum-pinned ARM archive and verify its libraries
+outputs:
+  bin:
+    description: Fresh verified toolchain binary directory
+    value: ${{ steps.install.outputs.bin }}
+runs:
+  using: composite
+  steps:
+    - name: Restore pinned ARM archive
+      uses: actions/cache@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
+      with:
+        # No restore-keys: never reuse a different version or installer policy.
+        path: ${{ runner.tool_cache }}/bobflight-arm-gnu/arm-gnu-toolchain.tar.xz
+        key: arm-gnu-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/setup-arm-toolchain.sh') }}
+    - name: Verify archive, extract and check compiler/newlib
+      id: install
+      shell: bash
+      run: bash "$GITHUB_WORKSPACE/.github/scripts/setup-arm-toolchain.sh"
