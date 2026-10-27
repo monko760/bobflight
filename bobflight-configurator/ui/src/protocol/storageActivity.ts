@@ -57,5 +57,5 @@ export class StorageActivity {
 
 /** CLI lines that are settings storage actions (sent through `sendCommand`). */
 export function isStorageCommand(cmd: string): boolean {
-  return cmd === "storage" || cmd === "save" || cmd === "defaults";
+  return cmd === "storage" || cmd === "save" || cmd === "defaults" || /^defaults (?:pid|rates|filters)$/.test(cmd);
 }

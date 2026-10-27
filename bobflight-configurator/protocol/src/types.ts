@@ -95,7 +95,11 @@ export type CliCommand =
   | "get motor_direction"
   | "set motor_direction props-out"
   | "set motor_direction props-in"
-  | "mixer";
+  | "mixer"
+  // Scoped defaults (D1; see defaults-scoped.ts). Bare `defaults` is not a UI command.
+  | "defaults pid"
+  | "defaults rates"
+  | "defaults filters";
 
 export interface ConnectOptions {
   path: string;

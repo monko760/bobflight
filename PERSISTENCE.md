@@ -1,8 +1,6 @@
-> **Schema 4:** adds `min_throttle` + `airmode` (176-byte payload). Schema 3 loads migrate with defaults (min_throttle=0.05, airmode=0) and stay dirty until Save. See `bobflight-firmware/docs/SETTINGS-PERSISTENCE.md`.
-
-> Calibration persistence update: current schema 2 adds validated, applied accelerometer correction. See [CALIBRATION-PERSISTENCE.md](CALIBRATION-PERSISTENCE.md) for migration, supported targets and power-cycle acceptance. Older schema-1 descriptions below exclude calibration; gyro bias, power and DShot remain excluded.
-
-> **Current image:** use [MAIN-BUILD.md](MAIN-BUILD.md). The sections below document earlier increments; the main Kakute image now permits verified flash Save while disarmed and inactive, and uses the configured ARM switch.
+> **Current state (schema 13, fresh install, not migration).** The firmware stores one 256-byte schema 13 record; there are no loaders or migrations for schemas 1..12. Old, future or foreign records are not interpreted or automatically erased; load and Save report `fresh_install_required`. Erase the internal configuration as part of a deliberate fresh installation, then re-enter settings and calibrate again. The current layout, `defaults pid|rates|filters` and the `storage` line `accel_cal_saved` are described in [bobflight-firmware/docs/SETTINGS-PERSISTENCE.md](bobflight-firmware/docs/SETTINGS-PERSISTENCE.md); calibration storage in [CALIBRATION-PERSISTENCE.md](CALIBRATION-PERSISTENCE.md). For the current image use [MAIN-BUILD.md](MAIN-BUILD.md).
+>
+> The sections below record the first persistence increment (its 96-byte record, scope and tests) for history. Where they disagree with the current state above, the current state wins.
 
 # Persistent configuration and CLI backups — experimental bench increment
 
@@ -23,7 +21,7 @@ Not included in this schema: gyro/accelerometer calibration, battery/power confi
 
 Exports are read-only and contain board, configuration schema and firmware version headers. Exporting does not save anything. They intentionally omit `arm`, motor commands, `defaults`, `save`, and automatic reboot. Exports reflect the current runtime configuration, including unsaved changes. Automatic import/replay is **not** implemented in this increment: verify the board/schema/firmware and review commands before applying a backup. A diff is meaningful only relative to the correct defaults; prefer a full export for auditing/restoration. Never blindly paste a Betaflight backup into BobFlight.
 
-The existing `defaults` command still resets PID/rates only and does not auto-save. It does not promise to reset the complete persisted scope or erase storage.
+`defaults` now takes a group: `defaults pid|rates|filters` resets only that tab's keys in RAM and does not auto-save; bare `defaults` is refused with `defaults_error: group_required pid|rates|filters`. It never resets mounting, motor direction, `motor_poles`, loop rate, DShot, power, ports, map, modes or calibration, and never erases storage.
 
 ## Installation protocol
 
@@ -66,6 +64,6 @@ Both dummy and Kakute host configurations passed 39/39 tests after PR #20 integr
 
 Configurator clean install, protocol/UI typechecks, production build and existing protocol/UI test suites passed. Firmware-to-configurator contract tests passed for numeric Ports/Modes and the new storage/backup protocol. Physical power-cycle persistence, brownout behavior and USB recovery during flash operations remain untested on Robert's board. Do not infer hardware qualification from these software tests.
 
-## Main-image legacy source migration
+## Main-image legacy source migration (removed)
 
-If a saved four-row configuration requests retired AUX mode routing, loading restores its stored manual mode and all other settings. It reports `last_error: migrated_control_source_manual`, state `dirty`, and does not write flash automatically. The configurator displays this notice. Review the manual mode (select Acro for the props-off rate-controller check), then explicitly `save`; verified Save commits manual source and clears the notice. If applying manual source fails, loading reports `control_source_failed` and state `error`, never a successful migration. ARM ranges remain operative; non-ARM ranges remain stored configuration rather than mode-switch routing.
+The earlier `migrated_control_source_manual` load path was removed together with the schema 1..12 loaders. A schema 13 record stores the manual mode and the manual/AUX source directly; an unsupported value rejects the whole record.

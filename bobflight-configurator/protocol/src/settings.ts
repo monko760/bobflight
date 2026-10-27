@@ -13,7 +13,8 @@
  *   set bad:     `set failed\r\n`
  *   save ok:     `saved\r\n` / host: `saved: flash verified\r\n`
  *   save fail:   `save failed\r\n`
- *   defaults:    `defaults restored\r\n` (does not auto-save)
+ *   defaults:    scoped `defaults pid|rates|filters` (D1, see defaults-scoped.ts; does not auto-save);
+ *                bare `defaults` -> `defaults_error: group_required ...` (older FW: `defaults restored`)
  *
  * Validation (config.c config_set_key):
  *   rate_max_*: 10..2000

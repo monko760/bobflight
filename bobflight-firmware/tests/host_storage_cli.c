@@ -40,6 +40,7 @@ const char *persist_last_error(void){return saved?"none":"write_error";}
 uint32_t persist_generation(void){return 7;}
 bool persist_save(void){writes++;return saved;}
 const char *persist_accel_storage(void){return long_cal?"flash":"not-calibrated";}
+bool persist_accel_calibration_saved(void){return long_cal;}
 /* long_cal: a calibrated FC whose bias/scale print with all 9 %.9g digits (worst-case export). */
 void gyro_calibration_info(gyro_calibration_info_t*c){memset(c,0,sizeof(*c));for(unsigned i=0;i<3;i++)c->accel_scale[i]=1.f;
  if(long_cal){static const float b[3]={-0.00123456791f,0.00234567891f,-0.00345678912f},k[3]={1.00123453f,0.998765409f,1.01234567f};
@@ -56,7 +57,7 @@ int main(void){
  output[0]=0;cmd_config_export(true);assert(strstr(output,"set rate_max_roll 800\r\n"));assert(strstr(output,"mode_range ANGLE 1 2 900 2100\r\n"));assert(strlen(output)<3072);assert(!strstr(output,"\r\nsave\r\n"));assert(!strstr(output,"\r\narm\r\n"));assert(strstr(output,"\r\ncontrol_mode angle\r\n"));assert(!writes);
  assert(config_set_key("rate_max_roll",555.f));modes[1]=(mode_config_t){false,12,1100,1450};map="TAER";
  output[0]=0;cmd_config_export(false);assert(strstr(output,"set rate_max_roll 555\r\n"));assert(strstr(output,"receiver_map TAER\r\n"));assert(strstr(output,"mode_range ANGLE 0 12 1100 1450\r\n"));assert(!strstr(output,"set rate_expo "));assert(!strstr(output,"set rate_type "));assert(!writes);
- output[0]=0;dirty=true;cmd_storage();assert(strstr(output,"storage_api: 1\r\nbackend: flash\r\n"));assert(strstr(output,"dirty: 1\r\n"));assert(strstr(output,"storage_end: 1\r\n"));assert(!writes);
+ output[0]=0;dirty=true;cmd_storage();assert(strstr(output,"storage_api: 1\r\nbackend: flash\r\n"));assert(strstr(output,"dirty: 1\r\n"));assert(strstr(output,"flight_enabled: 0\r\naccel_cal_saved: no\r\nstorage_end: 1\r\n"));assert(!writes);
  output[0]=0;saved=false;cmd_save_config();assert(!strcmp(output,"save failed: write_error\r\n"));
  output[0]=0;saved=true;cmd_save_config();assert(!strcmp(output,"saved: flash verified\r\n"));
  output[0]=0;backend="host_sim";cmd_save_config();assert(!strcmp(output,"saved: host_sim verified\r\n"));

@@ -20,8 +20,8 @@ is now the resulting aircraft-frame value before calibration correction.
 The rotation is activated only during startup, after complete configuration
 restore and before the first IMU sample. Trigonometry is performed once at boot;
 each active sample uses a bounded matrix-vector multiplication. This does not
-claim zero timing cost. Zero mounting bypasses the multiply. Set/defaults change
-the requested values, never the live matrix. Diagnostics explicitly report
+claim zero timing cost. Zero mounting bypasses the multiply. `set` changes
+the requested values, never the live matrix; no `defaults <group>` touches them. Diagnostics explicitly report
 configured values, active values, and whether a reboot is required.
 
 Use Sensors > Aircraft board orientation, or explicit CLI commands (no equals sign):
@@ -54,7 +54,7 @@ Do not expect +1 g until a valid stationary, level accelerometer calibration.
 
 ## Calibration and storage
 
-Schema 11 keeps the existing 256-byte payload and flash layout. Bytes 232..243
+The schema 13 payload is 256 bytes ([SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md)). Bytes 232..243
 store requested roll/pitch/yaw floats. Bytes 244..255 bind valid accelerometer
 coefficients to their aircraft-frame angles. The existing sensor/resource/range
 binding remains mandatory as well. The record is validated before restore.
@@ -63,15 +63,17 @@ Saving while requested mounting differs from active mounting deliberately exclud
 the old-frame accelerometer correction. It remains active in RAM in the old
 frame only until reboot. Recalibrate after reboot and Save again. Old gyro bias
 is never restored from flash; startup measures it in the new frame. A subsequent
-return to stock mounting does not resurrect a discarded old correction.
+return to stock mounting does not resurrect a discarded old correction. `storage`
+reports `accel_cal_saved: no` after such a save and `yes` once the recalibrated
+correction is saved. `defaults pid|rates|filters` never changes the mounting, so a
+Save after it keeps the calibration.
 
-Schema 1..10 records migrate to zero additional mounting, preserving valid prior
-calibration and other settings. Migration is dirty until explicit Save. Schema 10
-reserved mounting bytes must be zero; malformed data is not silently repaired.
-Partial, failed or interrupted flash writes use the existing two-slot commit/CRC
+There is no migration: records of any schema other than 13 are not read
+(`fresh_install_required`), and a fresh install starts at zero additional
+mounting. Malformed data is not silently repaired. Partial, failed or interrupted flash writes use the existing two-slot commit/CRC
 protection. Calibration frame mismatch rejects the record atomically.
 
-**Downgrade warning:** older firmware cannot read schema 11 records. It may select
+**Downgrade warning:** older firmware cannot read schema 13 records. It may select
 an older compatible slot if one remains, or report invalid storage. Back up
 `diff all` before updating. Do not mass erase to address this. Return to the
 mounting-capable firmware to access saved settings. Old firmware also cannot
@@ -79,8 +81,10 @@ represent the new mounting correction; do not assume it is retained on downgrade
 
 ## Props-off acceptance checks
 
-1. Verify firmware suffix `-mount1`, storage schema 11, retained receiver UART/map,
-   and no unexpected setting changes. Initial schema migration may report dirty.
+1. Verify `version` matches the image you built (only the Matek F722-PX string
+   still carries a `-mount1` tag; do not rely on it), `calibration` reports
+   `board_alignment_api: 1`, storage schema 13, retained receiver UART/map, and no
+   unexpected setting changes.
 2. Apply the desired angles and inspect configured versus active values. The
    model must not jump merely because values were staged. Save and fully reboot.
 3. Confirm active equals configured and `board_align_reboot_required: no`.

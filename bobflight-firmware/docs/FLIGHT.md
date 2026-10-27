@@ -29,11 +29,12 @@ Live gains — `pid_update` / `rates_update` read `config_get()` each tick.
 
 | Key | Default | Notes |
 |-----|---------|-------|
+| `rate_center_roll` / `pitch` / `yaw` | `200` | Actual center rate, deg/s |
 | `rate_max_roll` / `pitch` / `yaw` | `800` | deg/s full stick |
-| `rate_expo` | `0.30` | 0 = linear, 1 = max expo |
+| `rate_expo_roll` / `pitch` / `yaw` | `0.30` | 0 = linear, 1 = max expo |
 | `pid_roll_p` / `i` / `d` | `0.002` / `0.001` / `0.00005` | roll axis |
 | `pid_pitch_p` / `i` / `d` | same | pitch axis |
-| `pid_yaw_p` / `i` / `d` | same P/I / `0.00005` | yaw D same path + dterm LPF (schema 6) |
+| `pid_yaw_p` / `i` / `d` | same P/I / `0.00005` | yaw D same path + dterm LPF |
 | `gyro_lpf_hz` | `320` | soft gyro LPF; `0`=off |
 | `dterm_lpf_hz` | `53` | soft D-term LPF; `0`=off |
 
@@ -41,11 +42,13 @@ Also: DT `1/4000`, I limit ±50, output clamp ±0.4 with conditional I anti-wind
 
 AirMode (`airmode` 0/1, default **0**): when off, low throttle (`<0.05`) resets I while armed; when on, I keeps integrating at idle. Always resets on disarm.
 
-Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). **With airmode off there is no roll/pitch/yaw correction at `min_throttle`** (safety S1 mixer: motors may not go below it and the average may not rise above the throttle), and with `min_throttle` above 0.05 stick between 5 % and `min_throttle` is uncorrected; fly tests with `airmode 1` or the default 0.05 (`docs/SAFETY-NOISE.md`). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults` (`scripts/test_cli_config.sh`).
+Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick + post-mix). **With airmode off there is no roll/pitch/yaw correction at `min_throttle`** (safety S1 mixer: motors may not go below it and the average may not rise above the throttle), and with `min_throttle` above 0.05 stick between 5 % and `min_throttle` is uncorrected; fly tests with `airmode 1` or the default 0.05 (`docs/SAFETY-NOISE.md`). Independent of `ARMING_THROTTLE_MAX` arm gate. Disarmed motors forced to 0 in the task loop. CLI: `get` / `set` / `save` / `defaults pid` (`scripts/test_cli_config.sh`).
 
-## Soft LPF (`flight/filter`) — Filters R0 (schema 5)
+`defaults pid` resets the eleven PID-tab keys (nine gains, `min_throttle`, `airmode`), `defaults rates` the nine rate keys and `defaults filters` the LPF/notch/RPM-filter keys. None of them touches mounting, motor direction, `motor_poles`, loop rate or calibration ([SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md)).
 
-First-order low-pass used by soft gyro filtering (`gyro_filter` via `loop_filter`) and PID D-term. Filter math is Flight-owned; Lead owns Schema 5 persist/CLI.
+## Soft LPF (`flight/filter`) — Filters R0
+
+First-order low-pass used by soft gyro filtering (`gyro_filter` via `loop_filter`) and PID D-term. Filter math is Flight-owned; Lead owns persist/CLI.
 
 ```
 tau   = 1 / (2 * pi * fc)
@@ -62,7 +65,7 @@ y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
 
 Gyro LPF `dt` is the gyro sample period (`1 / gyro_hz`, default 1/8000): since safety S1 `loop_filter` runs on every gyro sample, not only on PID cycles. D-term LPF uses the live `pid_set_dt` period (default `1/4000`); on 8 kHz-ODR gyros (Kakute at `loop_rate_hz` 4000/8000) it is two first-order stages, still -3 dB at `dterm_lpf_hz`. Mixer desaturation, I-term freeze and the upgrade note: `docs/SAFETY-NOISE.md`.
 
-Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 6, 188 bytes; 176–179 `gyro_lpf_hz`, 180–183 `dterm_lpf_hz`, 184–187 `pid_yaw_d`).
+Payload layout: see `docs/SETTINGS-PERSISTENCE.md` (schema 13, 256 bytes; `gyro_lpf_hz` at 184, `dterm_lpf_hz` at 188, `pid_yaw_d` with the PID gains at 36..71).
 
 Host unit test: `bobflight_filter_test` / `scripts/test_flight_host_math.sh`.
 
@@ -99,14 +102,14 @@ Ship/treat as flight-ready when dual-IR unblocks. Host default dummy remains fai
 > **FLASH HELD.** Validate yaw D offline / CLI get-set only. No flight maneuvers.
 > No props-on. Do not arm for gain checks.
 
-Schema 6 adds independent `pid_yaw_d` (persist bytes 184–187; default `0.00005`).
+`pid_yaw_d` is independent (default `0.00005`, stored with the other PID gains in schema 13).
 Yaw D uses the same D-term path + `dterm_lpf_hz` LPF as roll/pitch (see table above).
 
 ### Acceptance (no board / host)
 
 | Check | How | PASS |
 |-------|-----|------|
-| Key exists | host persist / config tests (`pid_yaw_d` in schema 6) | set/get/save/load round-trip |
+| Key exists | host persist / config tests (`pid_yaw_d` in schema 13) | set/get/save/load round-trip |
 | Range refuse | `set pid_yaw_d` out of range | refused (see `host_persist_config`) |
 | Filter continuity | `bobflight_filter_test` / flight host math | PASS |
 | Zero-output PID path | `pid_diag` (when on-target CDC available) | runs without motor output |
@@ -119,13 +122,12 @@ get pid_yaw_d
 set pid_yaw_d 0.0001
 get pid_yaw_d   # expect ok readback
 # optional: save — only if Lead wants persist proof; still props-off / disarmed
-defaults        # or restore prior value; disarmed, motors stopped
+defaults pid    # or restore prior value; disarmed, motors stopped; PID tab keys only
 ```
 
 **Not in scope:** stick yaw doublets, hover, or any maneuver that implies props-on.
 Cross-link DShot telem smokes only if RPM feedback is needed later —
 [`DSHOT-R0B-M1-TELEM-SMOKE.md`](./DSHOT-R0B-M1-TELEM-SMOKE.md) (Kakute worktree).
 
-Main worktree `docs/FLIGHT.md` may still say yaw D reuses `pid_roll_d` (MVP) until
-this branch merges — treat **this** file as source of truth for schema 6 yaw D.
+This file is the source of truth for yaw D.
 

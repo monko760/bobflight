@@ -16,6 +16,8 @@ import {
   isWebSerialAvailable,
   type CliCommand,
   type ConnectOptions,
+  type DefaultsGroup,
+  type DefaultsGroupResult,
   type ConnectionStatus,
   type ParsedStatus,
   type PortInfo,
@@ -363,6 +365,16 @@ class ProtocolHostAdapter implements BobFlightHost {
   async restoreDefaults(opts?: HostCallOptions): Promise<Record<SettingsKey, string>> {
     try {
       return await this.storage.track(() => this.commands.run((y) => this.client.restoreDefaults({ beforeSend: y }), { priority: "write", signal: opts?.signal }));
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      throw err;
+    }
+  }
+
+  async restoreDefaultsGroup(group: DefaultsGroup, opts?: HostCallOptions): Promise<DefaultsGroupResult> {
+    try {
+      // Write class (state-changing; a later save can never overtake it); the caller's signal cancels it while queued.
+      return await this.storage.track(() => this.commands.run((y) => this.client.restoreDefaultsGroup(group, { beforeSend: y }), { priority: "write", signal: opts?.signal }));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;

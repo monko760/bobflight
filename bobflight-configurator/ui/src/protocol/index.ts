@@ -37,6 +37,7 @@ export { parsePorts, parseModes, modeRangeCommand, isModeRangeCommand, controlSo
 export type { ParsedPorts, ParsedModes, ModeRow } from "@bobflight/protocol";
 
 export {parseStorage,parseConfigurationExport,canSaveStorage,isVerifiedFlashSave,StorageReplyError,StorageFreshInstallError} from "@bobflight/protocol";
+export {readAccelCalSaved,ACCEL_CAL_SAVED_UNKNOWN,type AccelCalSaved} from "@bobflight/protocol";
 export type {StorageSnapshot} from "@bobflight/protocol";
 
 export { parseLoopStatus, loopRateView, LOOP_LABELS, LOOP_STATUS_KEYS, LOOP_UNKNOWN, mockLoopStatusLines, LOOP_RATE_MOCK_SCENARIOS } from "@bobflight/protocol";
@@ -54,6 +55,8 @@ export {
   isMotorDirectionOption, motorDirectionSetCommand, parseMotorDirectionGetReply, parseMotorDirectionSetReply, parseMixerReport, motorDirectionView,
 } from "@bobflight/protocol";
 export type { MotorDirectionOption, MotorDirectionGetResult, MixerReport, MotorDirectionView, MotorDirectionMockScenario } from "@bobflight/protocol";
+export { DEFAULTS_GROUPS, DEFAULTS_GROUP_KEYS, DEFAULTS_ERROR_CODES, DEFAULTS_ERROR_PREFIX, DEFAULTS_RESULT_UNKNOWN, DEFAULTS_NOT_TOUCHED, isDefaultsGroup, parseDefaultsGroupReply } from "@bobflight/protocol";
+export type { DefaultsGroup, DefaultsGroupResult, DefaultsKeyLine } from "@bobflight/protocol";
 
 // CommandGate (P1): stable error types, codes and predicates. Match on these, never on message text.
 export {

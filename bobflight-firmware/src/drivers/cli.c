@@ -55,6 +55,7 @@ static void cli_write_str(const char *s)
 #include "drivers/filters_cli.h"
 #include "drivers/rpm_filter_cli.h"
 #include "drivers/motor_direction_cli.h"
+#include "drivers/defaults_cli.h"
 
 static void cmd_control_mode(void)
 {
@@ -86,7 +87,7 @@ static void cmd_help(void)
         "  storage  - backend, dirty state and verified-save status\r\n"
         "  save     - verify/write supported settings to controller flash\r\n"
         "  diff all / dump all - export changed / all supported settings\r\n"
-        "  defaults - restore defaults (no auto-save)\r\n"
+        "  defaults pid|rates|filters - reset one tab group (no auto-save; keeps calibration)\r\n"
         "  sensors / calibration - live samples / calibration diagnostics\r\n"
         "  calibrate_gyro - stationary bias calibration (RAM until reboot)\r\n"
         "  calibrate_accel <level|start|+x|-x|+y|-y|+z|-z|apply|cancel> - level offset or advanced six-face calibration\r\n"
@@ -318,7 +319,7 @@ static void cmd_get(const char *key)
         cli_write_str("unknown key\r\n");
         return;
     }
-    snprintf(buf, sizeof(buf), "%s=%.6g\r\n", key, (double)v);
+    setting_format_line(buf, sizeof(buf), "", key, v);
     cli_write_str(buf);
 }
 
@@ -526,11 +527,8 @@ static void handle_line(char *line)
         }
     } else if (strcmp(line, "save") == 0) {
         cmd_save_config();
-    } else if (strcmp(line, "defaults") == 0) {
-        if (arming_state() == ARM_ARMED || bench_motor_active()) { cli_write_str("refused: disarm and stop motors\r\n"); return; }
-        config_defaults();
-        loop_rate_setting_defaults();
-        cli_write_str("defaults restored\r\n");
+    } else if (cmd_defaults(line)) {
+        /* D1: `defaults pid|rates|filters` resets that group only (RAM, no save). */
     } else if (strcmp(line, "arm") == 0) {
         if (arming_try_arm()) {
             cli_write_str("armed\r\n");
