@@ -59,14 +59,14 @@ class GateStillBusy extends Error {
  * not retried. Both throw GateStillBusy. FC replies and transport errors
  * (the command may have gone out) are rethrown as they are.
  */
-async function gatedOnce<T>(fn: () => Promise<T>, waitMs = DEFAULTS_GATE_WAIT_MS): Promise<T> {
+async function gatedOnce<T>(fn: () => Promise<T>, waitMs = DEFAULTS_GATE_WAIT_MS, signal?: AbortSignal): Promise<T> {
   const deadline = Date.now() + waitMs;
   for (;;) {
     try {
       return await fn();
     } catch (e) {
       if (!isGateNotSent(e)) throw e;
-      if (!isGateBusy(e) || Date.now() + DEFAULTS_GATE_STEP_MS > deadline) throw new GateStillBusy(e);
+      if (!isGateBusy(e) || signal?.aborted || Date.now() + DEFAULTS_GATE_STEP_MS > deadline) throw new GateStillBusy(e);
     }
     await sleep(DEFAULTS_GATE_STEP_MS);
   }
@@ -90,11 +90,11 @@ export type CurrentValues = Record<string, string>;
 export type ReadCurrentResult = { kind: "ok"; values: CurrentValues } | { kind: "busy"; detail: string };
 
 /** Current FC values of one group's keys, read one `get` at a time. A failed key shows unknown (with the reason). */
-export async function readGroupValues(host: DefaultsHost, group: DefaultsGroup): Promise<ReadCurrentResult> {
+export async function readGroupValues(host: DefaultsHost, group: DefaultsGroup, signal?: AbortSignal): Promise<ReadCurrentResult> {
   const values: CurrentValues = {};
   for (const key of DEFAULTS_GROUP_KEYS[group]) {
     try {
-      values[key] = (await gatedOnce(() => host.getSetting(key as SettingsKey))).value;
+      values[key] = (await gatedOnce(() => host.getSetting(key as SettingsKey, { signal }), DEFAULTS_GATE_WAIT_MS, signal)).value;
     } catch (e) {
       if (e instanceof GateStillBusy) return { kind: "busy", detail: e.message };
       const msg = e instanceof Error ? e.message : String(e);
@@ -112,12 +112,16 @@ export type DefaultsOutcome =
   | { kind: "busy"; detail: string }
   | { kind: "no-host" };
 
-/** Sends `defaults <group>` once (gate refusals retried, bounded) and classifies the FC reply. */
-export async function runGroupDefaults(host: DefaultsHost, group: DefaultsGroup): Promise<DefaultsOutcome> {
+/**
+ * Sends `defaults <group>` once (gate refusals retried, bounded) and classifies the FC reply.
+ * `signal` (the caller's unmount / cancel) drops the command while it still waits in the gate's
+ * queue (GateCancelledError: nothing sent) and stops the busy retry.
+ */
+export async function runGroupDefaults(host: DefaultsHost, group: DefaultsGroup, signal?: AbortSignal): Promise<DefaultsOutcome> {
   if (typeof host.restoreDefaultsGroup !== "function") return { kind: "no-host" };
   let r;
   try {
-    r = await gatedOnce(() => host.restoreDefaultsGroup!(group));
+    r = await gatedOnce(() => host.restoreDefaultsGroup!(group, { signal }), DEFAULTS_GATE_WAIT_MS, signal);
   } catch (e) {
     if (e instanceof GateStillBusy) return { kind: "busy", detail: e.message };
     // The command may have reached the FC: the outcome is unknown.

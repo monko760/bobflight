@@ -52,7 +52,10 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
   /** After a reset: "yes"/"clean" per the FC's `storage` dirty flag; "maybe": result unknown or storage unreadable. */
   const [unsaved, setUnsaved] = useState<"no" | "yes" | "clean" | "maybe">("no");
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  /** Aborted on unmount and on Cancel: drops this tab's dialog reads / `defaults <group>` still queued in the CommandGate. */
+  const life = useRef<AbortController | null>(null);
+  const fresh = () => { life.current?.abort(); const ac = new AbortController(); life.current = ac; return ac.signal; };
+  useEffect(() => () => { alive.current = false; life.current?.abort(); }, []);
   useEffect(() => { setUnsaved("no"); }, [savedRevision]);
 
   async function open() {
@@ -61,7 +64,7 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
     setNotice(null);
     if (localFallback) { setCurrent({}); setPhase("confirm"); return; }
     setPhase("reading");
-    const r = await readGroupValues(host, group);
+    const r = await readGroupValues(host, group, fresh());
     if (!alive.current) return;
     if (r.kind === "busy") { setOutcome({ kind: "busy", detail: r.detail }); setPhase("idle"); return; }
     setCurrent(r.values);
@@ -85,7 +88,7 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
       setPhase("idle");
       return;
     }
-    const r = await runGroupDefaults(host, group);
+    const r = await runGroupDefaults(host, group, fresh());
     if (!alive.current) return;
     setOutcome(r);
     if (r.kind === "ok" || r.kind === "unknown") {
@@ -144,7 +147,7 @@ export function ScopedDefaults({ host, group, onReread, savedRevision = 0, pageD
             : `Sends "defaults ${group}". The controller resets these ${keys.length} ${label} settings to firmware defaults:`}
           confirmLabel={`Restore ${label} defaults`}
           danger
-          onCancel={() => setPhase("idle")}
+          onCancel={() => { life.current?.abort(); setPhase("idle"); }}
           onConfirm={() => void confirm()}
         >
           <table data-testid="defaults-confirm-keys">

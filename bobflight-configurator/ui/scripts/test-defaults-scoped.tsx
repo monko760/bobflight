@@ -453,6 +453,32 @@ async function main() {
     await r.done();
   });
 
+  await test("A3: AccelCalSavedNote ships exactly QA's copy for `no`", async () => {
+    assert.equal(ACCEL_CAL_NOT_SAVED_NOTE, "Accel calibration is not saved on the board. If you calibrated after the last alignment change, press Save; otherwise recalibrate on the Setup tab.");
+  });
+
+  await test("ScopedDefaults passes an AbortSignal to restoreDefaultsGroup; unmount aborts it, so a `defaults pid` still queued behind a held gate is never sent", async () => {
+    // Unit: the signal reaches the host and an aborted signal stops the busy retry.
+    let got: AbortSignal | undefined; let calls = 0;
+    const ac = new AbortController();
+    const h = { getSetting: async () => ({ key: "pid_roll_p", value: "0" }), getConnectionStatus: () => "connected", restoreDefaultsGroup: async (_g: string, o?: { signal?: AbortSignal }) => { calls++; got = o?.signal; ac.abort(); throw new GateBusyError(); } };
+    const out = await runGroupDefaults(h as never, "pid", ac.signal);
+    assert.equal(got, ac.signal, "signal passed to restoreDefaultsGroup"); assert.equal(out.kind, "busy"); assert.equal(calls, 1, "aborted: busy not retried");
+    // Render: hold the gate, confirm, unmount while `defaults pid` waits in the queue.
+    const r = await rig(); await openTab(r, "pid"); await openDialog();
+    const seen: (AbortSignal | undefined)[] = []; const orig = r.host.restoreDefaultsGroup!.bind(r.host);
+    r.host.restoreDefaultsGroup = (g, o) => { seen.push(o?.signal); return orig(g, o); };
+    const m = r.mark(); const held = r.holdGate(GATE_QUEUE_TIMEOUT_MS - 1500);
+    click("Restore PID defaults");
+    assert.ok(await waitFor(() => seen.length === 1, 2000), "restoreDefaultsGroup called");
+    assert.ok(seen[0] instanceof AbortSignal && !seen[0].aborted, "a live signal while mounted");
+    flushSync(() => r.root.unmount());
+    assert.equal(seen[0]!.aborted, true, "unmount aborts the signal");
+    await held; await sleep(400);
+    assert.ok(!r.since(m).includes("defaults pid"), `queued defaults never sent after unmount: ${r.since(m).join(" | ")}`);
+    await r.host.disconnect();
+  });
+
   await test("merge #100 (a): the raw storage reply rides StorageResult; StoragePanel shows a real yes/no bare after load and after Save, never 'unknown (line missing)'", async () => {
     // Sequence level: every StorageResult carries the exact bytes its snapshot was parsed from.
     const reply = storageReply(false, "accel_cal_saved: yes"), dirtyReply = storageReply(true, "accel_cal_saved: yes");
