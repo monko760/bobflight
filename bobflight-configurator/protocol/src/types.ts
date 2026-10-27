@@ -111,6 +111,12 @@ export interface SendCommandOptions {
   idleMs?: number;
   /** Reply size cap in characters (default 65536); `sd read` uses 16384. */
   maxResponseChars?: number;
+  /**
+   * Awaited before this line is written. A host CommandGate passes its yield-to-urgent hook here so
+   * a compound call (getAllSettings, restoreDefaults, saveSettings) lets a waiting Stop go on the
+   * wire between two of its lines. Still one line on the wire at a time; framing is unchanged.
+   */
+  beforeSend?: () => Promise<void>;
 }
 
 /** Parsed `status` key:value lines (fail-closed markers noted in README). */

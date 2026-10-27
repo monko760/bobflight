@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { LoopRatePoller, LOOP_RATE_POLL_MS, LOOP_RATE_MAX_SKIPS } from "../src/setup/loopRatePoller";
+import { GateBusyError } from "../src/protocol/commandGate";
 import { parseLoopStatus, loopRateView, LOOP_LABELS } from "../../protocol/src/loop-rate";
 import { mockLoopStatusLines, LOOP_RATE_MOCK_SCENARIOS, type LoopRateMockScenario } from "../../protocol/src/loop-rate-mock";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
@@ -35,7 +36,7 @@ function rig(scenario: LoopRateMockScenario = "8000/2") {
   return { timers, sent, host, poller };
 }
 const values = (p: LoopRatePoller) => loopRateView(p.state.raw === null ? null : parseLoopStatus(p.state.raw)).items.map(i => i.value);
-const rejected = (msg: string) => { const p = Promise.reject(new Error(msg)); p.catch(() => {}); return p; };
+const rejected = (msg: string | Error) => { const p = Promise.reject(typeof msg === "string" ? new Error(msg) : msg); p.catch(() => {}); return p; };
 
 async function main() {
   await test("polls read-only status only while enabled, at 1 s", async () => {
@@ -69,10 +70,10 @@ async function main() {
     const { host, poller, timers } = rig();
     poller.setEnabled(true); await flush(); const good = poller.state.raw; assert.notEqual(good, null);
     for (let i = 1; i < LOOP_RATE_MAX_SKIPS; i++) {
-      host.next = rejected("another UI command is in flight; request not queued"); await timers.tick();
+      host.next = rejected(new GateBusyError()); await timers.tick();
       assert.equal(poller.state.raw, good); assert.equal(poller.state.error, "");
     }
-    host.next = rejected("another UI command is in flight; request not queued"); await timers.tick();
+    host.next = rejected(new GateBusyError()); await timers.tick();
     assert.equal(poller.state.raw, null, "never shows a rate older than ~3 s as current");
     assert.deepEqual(values(poller), ["unknown", "unknown", "unknown"]);
     host.next = null; await timers.tick(); assert.notEqual(poller.state.raw, null);

@@ -38,13 +38,23 @@ class FakeHost {
     return ack;
   }
 }
-async function setup() {
-  const host = new FakeHost(); let now = 100;
+/** FakeHost behind the REAL CommandGate, exactly as the app adapter routes every bench command. */
+class GatedFakeHost extends FakeHost {
+  gate = new CommandGate(() => 1);
+  /** Lines in the order the gate put them on the "wire". */
+  wire: string[] = [];
+  override getStatus(o?: { signal?: AbortSignal }) { return this.gate.run(() => { this.wire.push("status"); return super.getStatus(); }, { signal: o?.signal }); }
+  override sendCommand(cmd: CliCommand, o?: { signal?: AbortSignal }) { return this.gate.run(() => { this.wire.push(cmd); return super.sendCommand(cmd); }, { ...commandGateOptions(cmd), signal: o?.signal }); }
+}
+async function setup(gated = false) {
+  const host = gated ? new GatedFakeHost() : new FakeHost(); let now = 100;
   const c = new BenchController(host, () => now);
   c.connection(true); await c.poll(); c.confirmProps(true); c.confirmStationary(true);
   host.commands = [];
+  if (host instanceof GatedFakeHost) host.wire = [];
   return { host, c, advance: (ms: number) => { now += ms; }, now: () => now };
 }
+async function setupGated() { const r = await setup(true); return { ...r, host: r.host as GatedFakeHost }; }
 async function main() {
   await test("capabilities are exact help-line tokens; old firmware stays unsupported", () => {
     assert.deepEqual(parseBenchHelp("  motor_test <0..4>\n mention motor_seq"), { individual: true, pulse: false, sequence: false, dshot: false });
@@ -173,21 +183,58 @@ async function main() {
     assert.deepEqual(host.commands,["status","motor_test 0"]);
     assert.equal(c.state.stationary,false); assert.equal(c.state.busy,false);
   });
-  await test("Stop during a sent test waits for reply then sends stop; repeated Stop is coalesced", async () => {
-    const { c, host } = await setup(); const d=deferred<string>(); host.commandWait=d.promise;
-    const start=c.start(3); for(let i=0;i<8;i++) await Promise.resolve();
+  await test("Stop during a sent test goes on the wire right after that reply (gate); repeated Stop is coalesced", async () => {
+    const { c, host } = await setupGated(); const d=deferred<string>(); host.commandWait=d.promise;
+    const start=c.start(3); for(let i=0;i<12;i++) await Promise.resolve();
     assert.ok(host.commands.includes("motor_test 3"));
     const stop=c.stop(); const again=c.stop();
-    assert.ok(!host.commands.includes("motor_test 0"));
+    assert.equal(host.gate.queued, 1, "Stop is enqueued at once (urgent), behind the start on the wire");
+    assert.ok(!host.commands.includes("motor_test 0"), "one command on the wire: the start's reply comes first");
     d.resolve(ack); await Promise.all([start,stop,again]);
+    assert.deepEqual(host.wire,["status","motor_test 3","motor_test 0"]);
     assert.equal(host.commands.filter(x=>x==="motor_test 0").length,1);
   });
+  await test("Stop never waits for the poll: its queued read is cancelled and motor_test 0 is next on the wire", async () => {
+    const { c, host } = await setupGated();
+    // Another page's command is on the wire; the poll's status read waits behind it, then another page's read.
+    const hold=deferred<string>(); const other=host.gate.run(async()=>{ host.wire.push("other page"); return hold.promise; });
+    for(let i=0;i<4;i++) await Promise.resolve();
+    const poll=c.poll(); for(let i=0;i<4;i++) await Promise.resolve(); const storage=host.sendCommand("storage");
+    assert.equal(host.gate.queued, 2, "poll status + storage waiting");
+    const stop=c.stop();
+    assert.equal(host.gate.queued, 2, "the poll's queued status was dropped; motor_test 0 enqueued at once (urgent)");
+    hold.resolve("x"); await Promise.all([other, poll, stop, storage]);
+    assert.deepEqual(host.wire, ["other page", "motor_test 0", "storage"], "Stop right after the reply on the wire; the poll sent nothing");
+    assert.match(c.state.reply, /Stop acknowledged/); assert.equal(c.state.error, "");
+  });
+  await test("a connection change drops this page's reads still queued (even without the adapter's drain)", async () => {
+    const { c, host } = await setupGated();
+    const hold=deferred<string>(); const other=host.gate.run(async()=>{ host.wire.push("other page"); return hold.promise; });
+    for(let i=0;i<4;i++) await Promise.resolve();
+    const poll=c.poll(); for(let i=0;i<4;i++) await Promise.resolve();
+    assert.equal(host.gate.queued, 1, "the poll's status read waits");
+    c.connection(false);
+    assert.equal(host.gate.queued, 0, "dropped at once by the controller itself");
+    hold.resolve("x"); await Promise.all([other, poll]);
+    assert.deepEqual(host.wire, ["other page"]);
+  });
+  await test("Stop while the poll's read is on the wire: next line is motor_test 0, the poll sends nothing more", async () => {
+    const { c, host } = await setupGated(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
+    const poll=c.poll(); for(let i=0;i<6;i++) await Promise.resolve();
+    assert.deepEqual(host.wire, ["status"]);
+    const reads=[host.sendCommand("storage"), host.sendCommand("get motor_poles")];
+    const stop=c.stop();
+    host.statusWait=null; d.resolve({ ...ready }); await Promise.all([poll, stop, ...reads]);
+    assert.deepEqual(host.wire, ["status", "motor_test 0", "storage", "get motor_poles"]);
+  });
   await test("disconnect/reconnect discards pending starts and stops, resets confirmations and rate", async () => {
-    const { c, host }=await setup(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
-    const start=c.start(1); await Promise.resolve(); const stop=c.stop();
-    host.connection="disconnected";c.connection(false);host.connection="connected";c.connection(true);
+    // Gated like the app: Stop is enqueued at once behind the preflight on the wire; the disconnect
+    // drains it (the adapter drains the gate on any non-connected status), so nothing crosses sessions.
+    const { c, host }=await setupGated(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
+    const start=c.start(1); for(let i=0;i<4;i++) await Promise.resolve(); const stop=c.stop();
+    host.connection="disconnected";host.gate.drain();c.connection(false);host.connection="connected";c.connection(true);
     d.resolve({ ...ready }); await Promise.all([start,stop]);
-    assert.deepEqual(host.commands,["status"]);assert.equal(c.state.propsOff,false);assert.equal(c.state.rate,null);assert.equal(c.state.status,null);
+    assert.deepEqual(host.commands,["status"]);assert.deepEqual(host.wire,["status"]);assert.equal(c.state.propsOff,false);assert.equal(c.state.rate,null);assert.equal(c.state.status,null);
   });
   await test("fresh preflight becoming armed prevents the write", async () => {
     const { c, host }=await setup();host.status.arm="armed";await c.start(1);

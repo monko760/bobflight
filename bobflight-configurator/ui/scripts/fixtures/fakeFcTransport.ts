@@ -9,6 +9,7 @@
 import { EventEmitter } from "node:events";
 import type { PortInfo, SerialPortLike, TransportFactory } from "@bobflight/protocol";
 import { STORAGE_SCOPE_V13 } from "../../../protocol/src/storage";
+import { SETTINGS_KEYS, DEFAULT_SETTINGS } from "../../../protocol/src/settings";
 
 export interface FakeFcOptions { rttMs?: number; saveMs?: number }
 
@@ -21,6 +22,12 @@ export class FakeFc {
   overlaps = 0;
   private pending = 0;
   private holds = new Map<string, Promise<void>>();
+  /** Every line with its arrival time (ms since `t0`). */
+  wire: { cmd: string; at: number }[] = [];
+  t0 = Date.now();
+  /** Per-line reply delay override (ms). */
+  delay = new Map<string, number>();
+  settings: Record<string, string> = { ...(DEFAULT_SETTINGS as unknown as Record<string, string>) };
   constructor(o: FakeFcOptions = {}) { this.rttMs = o.rttMs ?? 5; this.saveMs = o.saveMs ?? 50; }
   /** The next `cmd` is answered only after release(). */
   hold(cmd: string): () => void {
@@ -49,16 +56,24 @@ export class FakeFc {
     if (cmd === "mixer") return "mixer_api: 1\r\nmixer: quadx\r\nmotor_direction: props-out\r\nmixer_yaw_m1: -1\r\nmixer_yaw_m2: +1\r\nmixer_yaw_m3: +1\r\nmixer_yaw_m4: -1\r\nmixer_end: 1\r\n";
     if (cmd === "motor_test 0") return "motor test accepted (one second maximum)\r\n";
     if (cmd === "disarm") return "disarmed\r\n";
+    if (/^motor_test [1-4]$/.test(cmd)) return "motor test accepted (one second maximum)\r\n";
+    if (cmd === "motor_seq") return "sequence running: RR FR RL FL, 1s each - watch spin direction\r\n";
+    if (cmd === "defaults") return "defaults restored\r\n";
+    const g = /^get (\S+)$/.exec(cmd);
+    if (g && (SETTINGS_KEYS as readonly string[]).includes(g[1])) return `${g[1]}=${this.settings[g[1]]}\r\n`;
+    const st = /^set (\S+) (\S+)$/.exec(cmd);
+    if (st && (SETTINGS_KEYS as readonly string[]).includes(st[1])) { this.settings[st[1]] = st[2]; this.dirty = 1; return `ok ${st[1]}=${st[2]}\r\n`; }
     return "unknown — try help\r\n";
   }
   async handle(cmd: string, emit: (t: string) => void): Promise<void> {
     if (this.pending > 0) this.overlaps++;
     this.pending++;
     this.log.push(cmd);
+    this.wire.push({ cmd, at: Date.now() - this.t0 });
     try {
       const hold = this.holds.get(cmd);
       if (hold) { this.holds.delete(cmd); await hold; }
-      await new Promise(r => setTimeout(r, this.rttMs + (cmd === "save" ? this.saveMs : 0)));
+      await new Promise(r => setTimeout(r, this.delay.get(cmd) ?? (this.rttMs + (cmd === "save" ? this.saveMs : 0))));
       emit(this.reply(cmd));
     } finally { this.pending--; }
   }

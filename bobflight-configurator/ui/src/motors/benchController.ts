@@ -255,10 +255,14 @@ export class BenchController {
     if (!this.state.connected || this.host.getConnectionStatus() !== "connected") return Promise.resolve();
     const session = this.session;
     this.patch({ busy: true, actionPending: true, stopping: true, stationary: false, pulsePercent: zeroSliders() });
-    const previous = this.flight;
-    const p = Promise.resolve(previous).then(async () => {
-      if (session !== this.session || this.host.getConnectionStatus() !== "connected") return;
-      const text = await this.host.sendCommand("motor_test 0");
+    // Review round 1 (blocker): never wait for the poll / action flight. Drop this page's reads still
+    // queued in the shared gate and enqueue `motor_test 0` NOW (urgent class, no queue timeout), so it
+    // goes on the wire right after the reply currently on the wire. The old flight sees the bumped
+    // generation (and its cancelled reads) and exits without sending anything else.
+    this.cancelQueued();
+    let sent: Promise<string>;
+    try { sent = this.host.sendCommand("motor_test 0"); } catch (e) { sent = Promise.reject(e); }
+    const p = sent.then(text => {
       if (session !== this.session) return;
       assertBenchAck("motor_test 0", text);
       this.patch({ estimatedUntil: 0, reply: "Stop acknowledged by firmware. Check that motors have physically stopped.", error: "" });

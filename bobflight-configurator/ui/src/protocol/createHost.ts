@@ -350,7 +350,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async saveSettings(opts?: HostCallOptions): Promise<void> {
     try {
-      await this.storage.track(() => this.commands.run(() => this.client.saveSettings(), { priority: "write", signal: opts?.signal }));
+      await this.storage.track(() => this.commands.run((y) => this.client.saveSettings({ beforeSend: y }), { priority: "write", signal: opts?.signal }));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -359,7 +359,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async restoreDefaults(opts?: HostCallOptions): Promise<Record<SettingsKey, string>> {
     try {
-      return await this.storage.track(() => this.commands.run(() => this.client.restoreDefaults(), { priority: "write", signal: opts?.signal }));
+      return await this.storage.track(() => this.commands.run((y) => this.client.restoreDefaults({ beforeSend: y }), { priority: "write", signal: opts?.signal }));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -368,7 +368,7 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async getAllSettings(opts?: HostCallOptions): Promise<Record<SettingsKey, string>> {
     try {
-      return await this.commands.run(() => this.client.getAllSettings(), { signal: opts?.signal });
+      return await this.commands.run((y) => this.client.getAllSettings({ beforeSend: y }), { signal: opts?.signal });
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
