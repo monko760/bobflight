@@ -26,10 +26,10 @@ import { FiltersPage } from "../src/pages/FiltersPage";
 import { SetupPage } from "../src/pages/SetupPage";
 import { StoragePanel } from "../src/components/StoragePanel";
 import { ACCEL_CAL_NOT_SAVED_NOTE } from "../src/components/AccelCalSavedNote";
-import { GATE_BUSY_MESSAGE } from "../src/protocol/commandGate";
+import { GATE_BUSY_MESSAGE, GATE_QUEUE_TIMEOUT_MS, GateBusyError, GateQueueTimeoutError, GateCancelledError, GateDisconnectedError, GateSessionChangedError, commandGateOptions, isReadOnlyCliCommand } from "../src/protocol";
 import { createHost } from "../src/protocol/createHost";
 import type { BobFlightHost } from "../src/protocol/types";
-import { DEFAULTS_BUSY_TEXT, DEFAULTS_UNSAVED_TEXT, DEFAULTS_CLEAN_TEXT, DEFAULTS_MAYBE_UNSAVED_TEXT, DEFAULTS_UNSUPPORTED_TEXT, DEFAULTS_GATE_WAIT_MS } from "../src/tuning/scopedDefaults";
+import { DEFAULTS_BUSY_TEXT, DEFAULTS_UNSAVED_TEXT, DEFAULTS_CLEAN_TEXT, DEFAULTS_MAYBE_UNSAVED_TEXT, DEFAULTS_UNSUPPORTED_TEXT, DEFAULTS_GATE_WAIT_MS, runGroupDefaults, retryWhileGateBusy } from "../src/tuning/scopedDefaults";
 import {
   DEFAULTS_GROUP_KEYS,
   DEFAULTS_RESULT_UNKNOWN,
@@ -189,7 +189,7 @@ async function rig(): Promise<Rig> {
   const root = createRoot(container as never);
   const gate = (host as unknown as { commands: { run<T>(w: () => Promise<T>, ...a: unknown[]): Promise<T> } }).commands;
   const run = gate.run.bind(gate);
-  gate.run = (w, ...a) => (Date.now() < (rigRef.r?.busyUntil ?? 0) ? Promise.reject(new Error(GATE_BUSY_MESSAGE)) : run(w, ...a)) as never;
+  gate.run = (w, ...a) => (Date.now() < (rigRef.r?.busyUntil ?? 0) ? Promise.reject(new GateBusyError()) : run(w, ...a)) as never;
   return rigRef.r = {
     busyUntil: 0,
     host, client, port, root, ctx, swallow, accel, pendingAtDefaults,
@@ -255,6 +255,37 @@ const isSave = (c: string) => c === "save";
 
 async function main() {
   loadRealFrames();
+  await test("gate class: `defaults pid|rates|filters` is a non-read and lands in the write class by default; createHost sends it as write with the caller's signal", async () => {
+    for (const g of ["pid", "rates", "filters"] as const) {
+      assert.equal(isReadOnlyCliCommand(`defaults ${g}`), false, `defaults ${g} is not a read`);
+      assert.deepEqual(commandGateOptions(`defaults ${g}`), { priority: "write" }, `defaults ${g} -> write`);
+    }
+    const r = await rig();
+    const gate = (r.host as unknown as { commands: { run(w: unknown, o?: unknown): Promise<unknown> } }).commands;
+    const seen: unknown[] = []; const orig = gate.run.bind(gate);
+    gate.run = (w, o) => { seen.push(o); return orig(w, o); };
+    const ac = new AbortController();
+    const res = await r.host.restoreDefaultsGroup!("pid", { signal: ac.signal });
+    assert.equal(res.kind, "ok");
+    assert.equal(seen.length, 1); assert.equal((seen[0] as { priority?: string }).priority, "write"); assert.equal((seen[0] as { signal?: AbortSignal }).signal, ac.signal);
+    await r.done();
+  });
+
+  await test("not sent, matched by gate code (never text): queue timeout, cancel, disconnect, session change -> busy, called once, no retry; queue full -> retried; a look-alike plain Error is not 'not sent'", async () => {
+    const mk = (err: () => Error) => { let calls = 0; const host = { getSetting: async () => { throw new Error("x"); }, getConnectionStatus: () => "connected", restoreDefaultsGroup: async () => { calls++; throw err(); } }; return { host: host as never, calls: () => calls }; };
+    for (const [name, err] of [["queue timeout", () => new GateQueueTimeoutError(GATE_QUEUE_TIMEOUT_MS)], ["cancel", () => new GateCancelledError()], ["disconnect", () => new GateDisconnectedError()], ["session change", () => new GateSessionChangedError()]] as const) {
+      const h = mk(err); const out = await runGroupDefaults(h.host, "pid");
+      assert.equal(out.kind, "busy", `${name} -> busy`); assert.equal(h.calls(), 1, `${name}: not retried`);
+    }
+    const busy = mk(() => new GateBusyError()); const t0 = Date.now(); const ob = await runGroupDefaults(busy.host, "pid");
+    assert.equal(ob.kind, "busy"); assert.ok(busy.calls() > 1, "queue full is retried"); assert.ok(Date.now() - t0 >= DEFAULTS_GATE_WAIT_MS - 200, "bounded by the wait");
+    const look = mk(() => new Error(GATE_BUSY_MESSAGE)); const ol = await runGroupDefaults(look.host, "pid");
+    assert.equal(ol.kind, "unknown", "same text without the gate code: the command may have gone out"); assert.equal(look.calls(), 1);
+    // retryWhileGateBusy rethrows the gate's own error object (callers test it by code).
+    const qt = new GateQueueTimeoutError(GATE_QUEUE_TIMEOUT_MS); let n = 0;
+    await assert.rejects(retryWhileGateBusy(async () => { n++; throw qt; }), (e) => e === qt); assert.equal(n, 1, "queue timeout not retried");
+  });
+
   for (const g of ["pid", "rates", "filters"] as const) {
     await test(`${LABEL[g]} tab: confirm dialog lists the ${DEFAULTS_GROUP_KEYS[g].length} ${g} keys with current FC values, the not-touched note and nothing-saved note`, async () => {
       const r = await rig(); await dirtyFc(r); await openTab(r, g);
@@ -361,18 +392,20 @@ async function main() {
     await r.done();
   });
 
-  await test("busy connection: the gate's refusal is retried briefly, then plain text; nothing was sent (dialog read and the run)", async () => {
+  await test("busy connection: a queue timeout (nothing sent) on the dialog read and a queue-full refusal on the run -> plain busy text; a short hold just queues and goes through once", async () => {
     const r = await rig(); await openTab(r, "pid");
     let m = r.mark();
-    const held = r.holdGate(DEFAULTS_GATE_WAIT_MS + 1500);
+    // Held past the queue's own deadline: the dialog's first get is dropped unsent (GATE_QUEUE_TIMEOUT), never retried.
+    const held = r.holdGate(GATE_QUEUE_TIMEOUT_MS + 1500);
     click("Defaults…");
-    assert.ok(await waitFor(() => pageText().includes(DEFAULTS_BUSY_TEXT), DEFAULTS_GATE_WAIT_MS + 1000), "busy text while opening");
+    assert.ok(await waitFor(() => pageText().includes(DEFAULTS_BUSY_TEXT), GATE_QUEUE_TIMEOUT_MS + 1200), "busy text while opening");
     assert.equal(dialog(), null, "no dialog with unknown values");
     assert.deepEqual(r.since(m), [], "nothing sent");
     await held;
     // Busy only during the run itself.
     await openDialog(); m = r.mark();
-    const held2 = r.holdGate(DEFAULTS_GATE_WAIT_MS + 1500);
+    // Queue full (GateBusyError) for longer than the bounded retry: busy text, `defaults pid` never sent.
+    r.busyUntil = Date.now() + DEFAULTS_GATE_WAIT_MS + 1500; const held2 = sleep(DEFAULTS_GATE_WAIT_MS + 1500);
     click("Restore PID defaults");
     assert.ok(await waitFor(() => pageText().includes(DEFAULTS_BUSY_TEXT), DEFAULTS_GATE_WAIT_MS + 1000), "busy text on the run");
     assert.ok(!r.since(m).includes("defaults pid"), "defaults never sent while the gate stayed busy");
@@ -455,10 +488,10 @@ async function main() {
   });
 
   const noMock = () => !/mockSettingsApi|demo memory|Local demo/i.test(pageText());
-  await test("PID: tab load while the gate stays busy (4 s) -> read error + Read again, Save and Defaults disabled, never demo memory; Read again recovers", async () => {
-    const r = await rig(); const held = r.holdGate(4000); render(r, "pid");
-    assert.ok(await waitFor(() => shown("pid-read-error") !== null, 6000), `read error shown: ${pageText().slice(0, 400)}`);
-    assert.match(shown("pid-read-error")!, new RegExp(GATE_BUSY_MESSAGE.replace(/[;()]/g, ".")));
+  await test("PID: tab load while the gate stays held past the queue deadline -> read error (queue timeout, nothing sent) + Read again, Save and Defaults disabled, never demo memory; Read again recovers", async () => {
+    const r = await rig(); const held = r.holdGate(GATE_QUEUE_TIMEOUT_MS + 1500); render(r, "pid");
+    assert.ok(await waitFor(() => shown("pid-read-error") !== null, GATE_QUEUE_TIMEOUT_MS + 1200), `read error shown: ${pageText().slice(0, 400)}`);
+    assert.ok(shown("pid-read-error")!.includes(new GateQueueTimeoutError(GATE_QUEUE_TIMEOUT_MS).message), `queue timeout shown: ${shown("pid-read-error")}`);
     assert.ok(noMock(), `no demo fallback: ${pageText().slice(0, 400)}`);
     assert.ok(isDisabled(findButton("Save")!), "Save disabled"); assert.ok(isDisabled(findButton("Defaults…")!), "Defaults disabled");
     await held; click("Read again");
@@ -492,11 +525,11 @@ async function main() {
     await r.done();
   });
 
-  await test("Filters: tab load with the gate held 5 s (beyond its retry) -> settings busy shown, Read again, no demo memory, Save/Defaults disabled (U22)", async () => {
-    const r = await rig(); const held = r.holdGate(5000); render(r, "filters");
-    await sleep(4300);
+  await test("Filters: tab load with the gate held past the queue deadline -> the gate's not-sent message, Read again, no demo memory, Save/Defaults disabled (U22)", async () => {
+    const r = await rig(); const held = r.holdGate(GATE_QUEUE_TIMEOUT_MS + 1500); render(r, "filters");
+    assert.ok(await waitFor(() => shown("settings-busy") !== null, GATE_QUEUE_TIMEOUT_MS + 1200), `settings busy: ${pageText().slice(0, 500)}`);
     assert.ok(noMock(), `no demo fallback: ${pageText().slice(0, 500)}`);
-    assert.equal(shown("settings-busy"), GATE_BUSY_MESSAGE, "the gate's busy message");
+    assert.equal(shown("settings-busy"), new GateQueueTimeoutError(GATE_QUEUE_TIMEOUT_MS).message, "the gate's not-sent message");
     assert.ok(shown("filters-read-error") !== null && !!findButton("Read again"), "Read again offered");
     assert.ok(isDisabled(findButton("Save")!)); assert.ok(isDisabled(findButton("Defaults…")!));
     await held; click("Read again");

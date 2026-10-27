@@ -22,7 +22,7 @@ import {
   type DefaultsGroup,
   type SettingsKey,
 } from "../protocol";
-import { isGateBusy } from "../protocol/commandGate";
+import { isGateBusy, isGateNotSent } from "../protocol";
 
 export { DEFAULTS_RESULT_UNKNOWN };
 
@@ -46,29 +46,44 @@ type DefaultsHost = Pick<BobFlightHost, "getSetting" | "getConnectionStatus"> & 
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-class GateStillBusy extends Error {}
+/** Nothing reached the FC: the gate refused (busy) past the bounded retry, or it dropped the command
+ * (queue timeout, cancel, disconnect, session change). `cause` is the gate's own error. */
+class GateStillBusy extends Error {
+  constructor(readonly cause: unknown) { super(cause instanceof Error ? cause.message : String(cause)); }
+}
 
-/** Runs `fn`, retrying only the gate's refusal until `DEFAULTS_GATE_WAIT_MS` passed. */
+/**
+ * Runs `fn`. Matched on the gate's error code, never its text: a busy refusal
+ * (isGateBusy) is retried until `waitMs` passed; any other "not sent" gate
+ * error (isGateNotSent: queue timeout, cancel, disconnect, session change) is
+ * not retried. Both throw GateStillBusy. FC replies and transport errors
+ * (the command may have gone out) are rethrown as they are.
+ */
 async function gatedOnce<T>(fn: () => Promise<T>, waitMs = DEFAULTS_GATE_WAIT_MS): Promise<T> {
   const deadline = Date.now() + waitMs;
   for (;;) {
     try {
       return await fn();
     } catch (e) {
-      if (!isGateBusy(e)) throw e;
-      if (Date.now() + DEFAULTS_GATE_STEP_MS > deadline) throw new GateStillBusy((e as Error).message);
+      if (!isGateNotSent(e)) throw e;
+      if (!isGateBusy(e) || Date.now() + DEFAULTS_GATE_STEP_MS > deadline) throw new GateStillBusy(e);
     }
     await sleep(DEFAULTS_GATE_STEP_MS);
   }
 }
 
 /**
- * Runs a page read, retrying only the gate's own refusal (nothing was sent)
- * for up to DEFAULTS_GATE_WAIT_MS; then rethrows the gate's error. FC replies
- * and transport errors are never retried.
+ * Runs a page read, retrying only a busy gate refusal for up to
+ * DEFAULTS_GATE_WAIT_MS; then rethrows the gate's own error (so callers can
+ * still test it with isGateBusy / isGateNotSent). FC replies and transport
+ * errors are never retried.
  */
 export async function retryWhileGateBusy<T>(fn: () => Promise<T>, waitMs = DEFAULTS_GATE_WAIT_MS): Promise<T> {
-  return gatedOnce(fn, waitMs);
+  try {
+    return await gatedOnce(fn, waitMs);
+  } catch (e) {
+    throw e instanceof GateStillBusy ? e.cause : e;
+  }
 }
 
 export type CurrentValues = Record<string, string>;
