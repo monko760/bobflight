@@ -63,6 +63,8 @@ function shown(id: string): string | null {
   return visibleText(el);
 }
 const pageText = () => visibleText(container);
+/** A page's first read was refused / not sent (raw gate text or the plain "nothing sent" wording). */
+const refusedText = () => /request not queued|nothing was sent|Another command was using the connection/i.test(pageText());
 const isDisabled = (e: FakeElement) => e.disabled || e.hasAttribute("disabled");
 function button(text: string): FakeElement {
   const b = container.findAll((e) => e.tagName === "BUTTON" && visibleText(e).trim() === text)[0];
@@ -637,7 +639,7 @@ async function main() {
     r.fw.markDirty();
     r.render(page);
     assert.ok(await waitFor(() => loaded() && ready(), 6000), `${name}: page and panel loaded (${storageStatus()})`);
-    assert.ok(!pageText().includes("request not queued"), `${name}: the page's own first read was not refused by the panel`);
+    assert.ok(!refusedText(), `${name}: the page's own first read was not refused by the panel`);
     await sleep(300);
     const loads = r.fw.count("storage"), text = storageStatus();
     assert.ok(!isDisabled(button("Save to controller")), `${name}: Save enabled before the poll errors`);
@@ -704,7 +706,7 @@ async function main() {
       const save = container.findAll((e) => e.tagName === "BUTTON" && visibleText(e).trim() === "Save to controller")[0];
       assert.ok(save);
       assert.ok(await waitFor(() => !isDisabled(save), 3000), `${name}: Save to controller becomes available; page: ${pageText().slice(600, 1600)}`);
-      assert.ok(!pageText().includes("request not queued"), `${name}: the page's own first read was not refused by the panel`);
+      assert.ok(!refusedText(), `${name}: the page's own first read was not refused by the panel`);
       click("Save to controller");
       assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(shown("storage-message") ?? "") || !!storageError(), 4000), `${name}: save result shown; log tail: ${r.fw.log.slice(-12).join(", ")}; status ${storageStatus()}`);
       assert.equal(storageError(), null);
@@ -723,7 +725,8 @@ async function main() {
     await held;
     assert.ok(await waitFor(loaded, 6000), `panel loaded (${storageStatus()} / ${storageError()})`);
     await sleep(300);
-    assert.ok(!pageText().includes("request not queued"), `the page's first read was retried, not failed: ${pageText().slice(0, 600)}`);
+    assert.ok(!refusedText(), `the page's first read was retried, not failed: ${pageText().slice(0, 600)}`);
+    assert.ok(pageText().includes("CRSF receiver UART"), "the ports snapshot loaded");
     await r.done();
   });
 
