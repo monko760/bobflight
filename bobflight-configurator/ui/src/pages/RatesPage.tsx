@@ -1,12 +1,20 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
-import {parseStorage,canSaveStorage,type StorageSnapshot} from '../protocol';
+import {parseStorage,canSaveStorage,isGateNotSent,StorageFreshInstallError,type StorageSnapshot} from '../protocol';
 import {RATES_DEFAULTS,getRates,type RatesConfig} from '../tuning/mockTuningStore';
 import {mockSettingsApi,type RateKey} from '../tuning/mockSettingsApi';
 import {AXES,rateAtStick,rateDraftValid,rateSaveEntries,readRateSettings} from '../tuning/actualRates';
 import {ScopedDefaults} from '../components/ScopedDefaults';
 import {AccelCalSavedNote} from '../components/AccelCalSavedNote';
 const errorText=(e:unknown)=>e instanceof Error?e.message:String(e);
+/** Why the `storage` capability read gave no usable snapshot. "Fresh install required" only for a well-formed
+ * older schema (<13) that was actually read; an unreadable / scope-mismatched / newer reply, a gate rejection
+ * (nothing sent) or a client error leaves capability unverified with the reason. */
+export function ratesCapabilityError(e:unknown):string{
+ if(e instanceof StorageFreshInstallError)return `${e.message}. Actual rates need storage schema 13.`;
+ const reason=isGateNotSent(e)?'another command was using the connection, so storage status was not read (nothing was sent)':errorText(e);
+ return `Storage capability unverified: ${reason}. Saving is disabled. Reload controller to try again.`;
+}
 export function RatesPage(){
  const {host,connectionStatus,postFlashGate}=useHost();
  const [values,setValues]=useState<RatesConfig>({...RATES_DEFAULTS});
@@ -23,11 +31,13 @@ export function RatesPage(){
   setBusy(true);
   try{
    const all=await host.getAllSettings();if(token!==epoch.current)return;
-   const read=readRateSettings(all);let capability:StorageSnapshot|null=null;
-   try{const raw=await host.sendCommand('storage');capability=parseStorage(raw);if(token===epoch.current)setStorageRaw(raw);}catch(e){if(token===epoch.current)setError(`Storage capability unverified: ${errorText(e)}. Saving is disabled.`);}
+   const read=readRateSettings(all);let capability:StorageSnapshot;let raw:string;
+   try{raw=await host.sendCommand('storage');capability=parseStorage(raw);}catch(e){if(token!==epoch.current)return;throw Error(ratesCapabilityError(e));}
    if(token!==epoch.current)return;
-   const actual=!!capability&&capability.schema===13&&capability.lastError!=='fresh_install_required'&&capability.lastError!=='invalid_record';
-   if(!actual)throw Error('Fresh install required: Actual rates need schema13 with initialized configuration storage.');
+   setStorageRaw(raw);
+   // A readable schema-13 reply whose own last_error says the configuration record needs a fresh install.
+   const actual=capability.schema===13&&capability.lastError!=='fresh_install_required'&&capability.lastError!=='invalid_record';
+   if(!actual)throw Error(`Fresh install required: the controller reports storage last_error ${capability.lastError}. Actual rates need schema 13 with initialized configuration storage.`);
    setValues(read.values);loadedRef.current=read.values;setStorage(capability);setSupported(actual);setReady(true);
   }catch(e){if(token===epoch.current){setError(errorText(e));setReady(false);}}
   finally{if(token===epoch.current)setBusy(false);}

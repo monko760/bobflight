@@ -80,6 +80,12 @@ export function parseCliInput(raw: string): CliCommand | null {
   return (ALLOWED_CLI_COMMANDS as readonly string[]).includes(cmd) ? cmd as CliCommand : null;
 }
 
+/** Lines a StoragePanel storage sequence may send (load, save, export). */
+export type StorageSequenceCommand = "storage" | "save" | "diff all" | "dump all";
+export function isStorageSequenceCommand(cmd: string): cmd is StorageSequenceCommand {
+  return cmd === "storage" || cmd === "save" || cmd === "diff all" || cmd === "dump all";
+}
+
 export function isBootloaderCommand(cmd: CliCommand): boolean {
   return cmd === "bl" || cmd === "bl discard";
 }
@@ -120,6 +126,15 @@ export interface BobFlightHost {
    * Optional: hosts without it report no storage activity.
    */
   storageActionPending?(): boolean;
+  /**
+   * Runs one StoragePanel storage sequence (load, save or export) holding the
+   * shared CommandGate for the WHOLE sequence, not per command. With the P1
+   * FIFO gate it waits in the queue like any command (save: write priority)
+   * and rejects with the gate's busy refusal (queue full), queue timeout or
+   * cancel before anything is sent. Optional: hosts without it run the lines
+   * one by one.
+   */
+  runStorageSequence?<T>(work: (send: (cmd: StorageSequenceCommand) => Promise<string>) => Promise<T>, opts?: HostCallOptions & { priority?: "write" | "normal" }): Promise<T>;
   /** Called when `storageActionPending()` may have changed; returns an unsubscribe. */
   onStorageActivity?(cb: () => void): () => void;
 
