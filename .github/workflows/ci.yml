@@ -47,13 +47,15 @@ jobs:
   firmware-kakute:
     name: Firmware — Kakute F7 HDV cross build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: bobflight-firmware
     steps:
       - uses: actions/checkout@v4
       - name: Install ARM toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+        timeout-minutes: 10
+        run: sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gcc-arm-none-eabi libnewlib-arm-none-eabi
       - name: Configure
         run: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/stm32f745.cmake -DBOBFLIGHT_BOARD=kakute_f7_hdv -DBOBFLIGHT_HOST_SMOKE=OFF
       - name: Build
@@ -70,14 +72,16 @@ jobs:
   firmware-matek:
     name: Matek F722-PX firmware and storage model
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: bobflight-firmware
     steps:
       - uses: actions/checkout@v4
       - name: Install tools
+        timeout-minutes: 10
         run: |
-          sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+          sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gcc-arm-none-eabi libnewlib-arm-none-eabi
           python3 -m pip install unicorn pyelftools
       - name: ARM storage execution model
         run: python3 tests/test_f722_flash.py
@@ -273,14 +277,15 @@ jobs:
   firmware-f4-components:
     name: F4 components (compile, link and reset model)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: bobflight-firmware
     steps:
       - uses: actions/checkout@v4
       - name: Install ARM toolchain
-        timeout-minutes: 5
-        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+        timeout-minutes: 10
+        run: sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gcc-arm-none-eabi libnewlib-arm-none-eabi
       - name: Compile isolated components, not a firmware image
         run: |
           mkdir -p build-f4-components
