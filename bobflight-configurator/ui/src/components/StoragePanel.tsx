@@ -11,24 +11,26 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
  const [state,setState]=useState<StorageSnapshot|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
  const [storageRaw,setStorageRaw]=useState('');/* D1 accel_cal_saved line */
  const epoch=useRef(0),busy=useRef(false);
+ /** Aborted on unmount / revision change: drops this panel's commands still waiting in the shared CommandGate queue. */
+ const abort=useRef<AbortController|null>(null);
  const live=(id:number)=>id===epoch.current&&host.getConnectionStatus()==='connected';
  async function run(action:'refresh'|'save'|'diff'|'dump'){
   if(!connected||busy.current||blocked)return;
-  const id=epoch.current;busy.current=true;setPending(true);setError('');setMessage('');
+  const id=epoch.current,o={signal:abort.current?.signal};busy.current=true;setPending(true);setError('');setMessage('');
   try{
    if(action==='save'){
-    const before=parseStorage(await host.sendCommand('storage'));if(!live(id))return;
+    const before=parseStorage(await host.sendCommand('storage',o));if(!live(id))return;
     if(!canSaveStorage(before,true,false)||(requiredScope&&!before.scope.split(",").includes(requiredScope)))throw Error('Flash save unavailable: disarm, stop motors, and connect supported firmware.');
-    await host.saveSettings();if(!live(id))return;
+    await host.saveSettings(o);if(!live(id))return;
    }
    if(action==='diff'||action==='dump'){
-    const raw=await host.sendCommand(action==='diff'?'diff all':'dump all');if(!live(id))return;
+    const raw=await host.sendCommand(action==='diff'?'diff all':'dump all',o);if(!live(id))return;
     const data=parseConfigurationExport(raw,action);
     const url=URL.createObjectURL(new Blob([data.raw],{type:'text/plain'}));
     try{const a=document.createElement('a');a.href=url;a.download=`bobflight-${data.board}-${data.firmware}-${action}-config.txt`;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
     setMessage('Exported runtime configuration. Calibration metadata cannot be replayed; retain controller flash or recalibrate if it is lost. Export does not save to the controller.');
    }
-   const nextRaw=await host.sendCommand('storage'),next=parseStorage(nextRaw);if(!live(id))return;setStorageRaw(nextRaw);
+   const nextRaw=await host.sendCommand('storage',o),next=parseStorage(nextRaw);if(!live(id))return;setStorageRaw(nextRaw);
    if(action==='save'&&(next.backend!=='flash'||next.state!=='saved'||next.dirty))throw Error('Save readback was not verified.');
    setState(next);if(action==='save')setMessage('Saved to controller flash and verified. Confirm once with a complete power-cycle test.');
   }catch(e){if(live(id)){setState(null);setError(String(e));}}
@@ -36,7 +38,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
  }
  useEffect(()=>{onPending?.(pending);},[pending,onPending]);
  useEffect(()=>()=>{onPending?.(false);},[onPending]);
- useEffect(()=>{++epoch.current;busy.current=false;setState(null);setError('');setMessage('');setPending(false);if(connected&&!blocked)void run('refresh');return()=>{++epoch.current;};},[host,connected,revision,blocked]);
+ useEffect(()=>{++epoch.current;abort.current=new AbortController();busy.current=false;setState(null);setError('');setMessage('');setPending(false);if(connected&&!blocked)void run('refresh');const mine=abort.current;return()=>{++epoch.current;mine.abort();};},[host,connected,revision,blocked]);
  const supported=!requiredScope||!!state?.scope.split(",").includes(requiredScope);
  const canSave=supported&&canSaveStorage(state,connected,pending||blocked);
  return <section aria-label="Controller storage" className="panel">

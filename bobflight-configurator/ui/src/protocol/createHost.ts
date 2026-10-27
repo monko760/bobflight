@@ -23,10 +23,11 @@ import {
   type PortInfo,
   type SdReadResult,
   type SettingsKey,
+  type TransportFactory,
   type WebSerialRequestPortOptions,
 } from "@bobflight/protocol";
-import type { BobFlightHost } from "./types";
-import { CommandGate } from "./commandGate";
+import type { BobFlightHost, HostCallOptions } from "./types";
+import { CommandGate, commandGateOptions, GATE_DISCONNECTED_MESSAGE } from "./commandGate";
 import { StorageActivity, isStorageCommand } from "./storageActivity";
 
 export type ProtocolMode = "mock" | "serial";
@@ -105,14 +106,17 @@ class ProtocolHostAdapter implements BobFlightHost {
   private connectionAttempt = 0;
   readonly mode: ProtocolMode;
 
-  constructor(mode: ProtocolMode) {
+  constructor(mode: ProtocolMode, transportFactory?: TransportFactory) {
     this.mode = mode;
     // Auto supports mock://, webserial:, and native serialport paths.
-    this.client = new BobFlightCliClient(new AutoTransportFactory());
+    // `transportFactory` is a test seam only (simulated FC with USB latency); the app never passes it.
+    this.client = new BobFlightCliClient(transportFactory ?? new AutoTransportFactory());
     this.client.onStatus((s) => {
       this.sessionGeneration++;
       if (s !== "connected") {
         this.isLiveTransport = false;
+        // Nothing queued in this USB session may be sent in another one.
+        this.commands.drain(GATE_DISCONNECTED_MESSAGE);
       }
     });
   }
@@ -249,9 +253,9 @@ class ProtocolHostAdapter implements BobFlightHost {
     await this.client.disconnect();
   }
 
-  async sendCommand(cmd: CliCommand): Promise<string> {
+  async sendCommand(cmd: CliCommand, opts?: HostCallOptions): Promise<string> {
     try {
-      const run = () => this.commands.run(() => this.client.sendCommand(cmd), cmd === "motor_test 0");
+      const run = () => this.commands.run(() => this.client.sendCommand(cmd), { ...commandGateOptions(cmd), signal: opts?.signal });
       return await (isStorageCommand(cmd) ? this.storage.track(run) : run());
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
@@ -276,18 +280,18 @@ class ProtocolHostAdapter implements BobFlightHost {
     }
   }
 
-  async getVersion(): Promise<string> {
+  async getVersion(opts?: HostCallOptions): Promise<string> {
     try {
-      return await this.commands.run(() => this.client.getVersion());
+      return await this.commands.run(() => this.client.getVersion(), { signal: opts?.signal });
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
     }
   }
 
-  async getStatus(): Promise<ParsedStatus> {
+  async getStatus(opts?: HostCallOptions): Promise<ParsedStatus> {
     try {
-      return await this.commands.run(() => this.client.getStatus());
+      return await this.commands.run(() => this.client.getStatus(), { signal: opts?.signal });
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -296,9 +300,10 @@ class ProtocolHostAdapter implements BobFlightHost {
 
   async getSetting(
     key: SettingsKey,
+    opts?: HostCallOptions,
   ): Promise<{ key: SettingsKey; value: string }> {
     try {
-      return await this.commands.run(() => this.client.getSetting(key));
+      return await this.commands.run(() => this.client.getSetting(key), { signal: opts?.signal });
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -308,45 +313,47 @@ class ProtocolHostAdapter implements BobFlightHost {
   async setSetting(
     key: SettingsKey,
     value: string,
+    opts?: HostCallOptions,
   ): Promise<{ key: SettingsKey; value: string }> {
     try {
-      return await this.commands.run(() => this.client.setSetting(key, value));
+      return await this.commands.run(() => this.client.setSetting(key, value), { priority: "write", signal: opts?.signal });
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
     }
   }
 
-  async saveSettings(): Promise<void> {
+  async saveSettings(opts?: HostCallOptions): Promise<void> {
     try {
-      await this.storage.track(() => this.commands.run(() => this.client.saveSettings()));
+      await this.storage.track(() => this.commands.run((y) => this.client.saveSettings({ beforeSend: y }), { priority: "write", signal: opts?.signal }));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
     }
   }
 
-  async restoreDefaults(): Promise<Record<SettingsKey, string>> {
+  async restoreDefaults(opts?: HostCallOptions): Promise<Record<SettingsKey, string>> {
     try {
-      return await this.storage.track(() => this.commands.run(() => this.client.restoreDefaults()));
+      return await this.storage.track(() => this.commands.run((y) => this.client.restoreDefaults({ beforeSend: y }), { priority: "write", signal: opts?.signal }));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
     }
   }
 
-  async restoreDefaultsGroup(group: DefaultsGroup): Promise<DefaultsGroupResult> {
+  async restoreDefaultsGroup(group: DefaultsGroup, opts?: HostCallOptions): Promise<DefaultsGroupResult> {
     try {
-      return await this.storage.track(() => this.commands.run(() => this.client.restoreDefaultsGroup(group)));
+      // Write class (state-changing; a later save can never overtake it); the caller's signal cancels it while queued.
+      return await this.storage.track(() => this.commands.run((y) => this.client.restoreDefaultsGroup(group, { beforeSend: y }), { priority: "write", signal: opts?.signal }));
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
     }
   }
 
-  async getAllSettings(): Promise<Record<SettingsKey, string>> {
+  async getAllSettings(opts?: HostCallOptions): Promise<Record<SettingsKey, string>> {
     try {
-      return await this.commands.run(() => this.client.getAllSettings());
+      return await this.commands.run((y) => this.client.getAllSettings({ beforeSend: y }), { signal: opts?.signal });
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       throw err;
@@ -354,18 +361,18 @@ class ProtocolHostAdapter implements BobFlightHost {
   }
 }
 
-export function createHost(mode?: ProtocolMode): BobFlightHost {
+export function createHost(mode?: ProtocolMode, testTransportFactory?: TransportFactory): BobFlightHost {
   const envMode = (import.meta.env.VITE_PROTOCOL_MODE ?? "mock").toLowerCase();
   const resolved: ProtocolMode =
     mode ?? (envMode === "serial" ? "serial" : "mock");
 
-  if (resolved === "serial") {
+  if (resolved === "serial" && !testTransportFactory) {
     console.warn(
       "[bobflight-ui] serial uses AutoTransportFactory; native serialport may be unavailable in browser — prefer mock or Web Serial",
     );
   }
 
-  return new ProtocolHostAdapter(resolved);
+  return new ProtocolHostAdapter(resolved, testTransportFactory);
 }
 
 export function getDefaultBaudRates(): number[] {

@@ -8,7 +8,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { FlasherPage } from "../src/pages/FlasherPage";
-import { CommandGate } from "../src/protocol/commandGate";
+import { CommandGate, GATE_QUEUE_LIMIT } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { readBoardIdentity, identityView, identityGate } from "../src/flasher/boardIdentity";
 import { BOARD_OPTIONS } from "../src/flasher/types";
@@ -24,10 +24,10 @@ const kakute = BOARD_OPTIONS.find((b) => b.boardId === "kakute_f7_hdv")!;
 const matek = BOARD_OPTIONS.find((b) => b.boardId === "matek_f722_px")!;
 
 /** A real gate in front of the real mock host, as createHost wires it. */
-async function gatedMock(scenario: BoardIdMockScenario | undefined) {
+async function gatedMock(scenario: BoardIdMockScenario | undefined, queueLimit = GATE_QUEUE_LIMIT) {
   const mock = new MockBobFlightHost({ connectDelayMs: 0, boardIdScenario: scenario });
   await mock.connect({ path: "mock://bobflight", baudRate: 115200 } as never);
-  const gate = new CommandGate(() => 1);
+  const gate = new CommandGate(() => 1, queueLimit);
   let sends = 0;
   const host = { sendCommand: (c: "version") => gate.run(() => { sends++; return mock.sendCommand(c); }) };
   return { host, gate, sends: () => sends };
@@ -117,7 +117,8 @@ console.log("PASS six mocks through the real gate: old firmware, match, unknown 
 // ---------- 3. busy gate: bounded retry, then unknown (never "older firmware") ----------
 {
   assert.equal(RPM_GATE_ATTEMPTS, 30); assert.equal(RPM_GATE_DELAY_MS, 100);
-  const { host, gate, sends } = await gatedMock("match");
+  // P1: queue bound 0 reproduces the gate's overflow busy refusal (the retry path this section covers).
+  const { host, gate, sends } = await gatedMock("match", 0);
   let release!: () => void; const held = gate.run(() => new Promise<void>((r) => { release = r; }));
   const t0 = Date.now(); const r = await readBoardIdentity(host); const took = Date.now() - t0;
   assert.equal(r.kind, "busy"); assert.equal(sends(), 0, "nothing reached the FC while busy");

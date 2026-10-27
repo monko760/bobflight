@@ -336,6 +336,7 @@ export class BobFlightCliClient {
    * Does not widen CliCommand; dedicated settings methods prefer this.
    */
   async sendRaw(line: string, opts?: SendCommandOptions): Promise<string> {
+    if (opts?.beforeSend) await opts.beforeSend();
     if (this.lateDrain && !this.collector) await this.lateDrain.done;
     if (!this.port?.isOpen || this.status !== "connected") {
       throw new Error("not connected");

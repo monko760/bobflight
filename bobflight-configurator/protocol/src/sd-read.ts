@@ -214,7 +214,9 @@ export type SdReadSend = (cmd: `sd read ${number}`, opts: { timeoutMs: number; m
 
 /** Raised (not a result) when the gate refused the request: nothing was sent, a retry is safe. */
 export class SdGateBusyError extends Error {
-  constructor(message: string) { super(message); this.name = "SdGateBusyError"; }
+  /** Same stable shape as the UI gate's errors (`gate` + `code`), so its isGateBusy() stays true. */
+  readonly gate = true as const;
+  constructor(message: string, readonly code: "GATE_QUEUE_FULL" | "GATE_BUSY_START" = "GATE_QUEUE_FULL") { super(message); this.name = "SdGateBusyError"; }
 }
 
 /**
@@ -253,7 +255,10 @@ export class SdSectorReader {
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (/request not queued/.test(msg)) throw new SdGateBusyError(msg);
+      const code = (e as { code?: unknown } | null)?.code;
+      if (code === "GATE_QUEUE_FULL" || code === "GATE_BUSY_START") throw new SdGateBusyError(msg, code);
+      // Other gate rejections (queue timeout, cancel, disconnect) keep their own code: rethrown as is.
+      if (code === undefined && /request not queued/.test(msg)) throw new SdGateBusyError(msg);
       throw e;
     } finally {
       this.inFlight = false;

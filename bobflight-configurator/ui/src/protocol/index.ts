@@ -57,3 +57,13 @@ export {
 export type { MotorDirectionOption, MotorDirectionGetResult, MixerReport, MotorDirectionView, MotorDirectionMockScenario } from "@bobflight/protocol";
 export { DEFAULTS_GROUPS, DEFAULTS_GROUP_KEYS, DEFAULTS_ERROR_CODES, DEFAULTS_ERROR_PREFIX, DEFAULTS_RESULT_UNKNOWN, DEFAULTS_NOT_TOUCHED, isDefaultsGroup, parseDefaultsGroupReply } from "@bobflight/protocol";
 export type { DefaultsGroup, DefaultsGroupResult, DefaultsKeyLine } from "@bobflight/protocol";
+
+// CommandGate (P1): stable error types, codes and predicates. Match on these, never on message text.
+export {
+  CommandGate, commandGateOptions, isReadOnlyCliCommand, isMotorStartCommand,
+  GateError, GateBusyError, GateQueueTimeoutError, GateCancelledError, GateDisconnectedError, GateSessionChangedError,
+  gateErrorCode, isGateBusy, isGateNotSent, GATE_ERROR_CODES,
+  GATE_BUSY_MESSAGE, GATE_START_BUSY_MESSAGE, GATE_DISCONNECTED_MESSAGE, GATE_CANCELLED_MESSAGE, GATE_SESSION_CHANGED_MESSAGE,
+  GATE_QUEUE_LIMIT, GATE_QUEUE_TIMEOUT_MS,
+} from "./commandGate";
+export type { GateErrorCode, GatePriority, GateRunOptions, YieldToUrgent } from "./commandGate";

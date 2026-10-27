@@ -614,7 +614,10 @@ async function main() {
    * command completes (e.g. after the set, before the panel's `get`). */
   async function gatedHost(scenario: MotorDirectionMockScenario, o: RigOpts & { latencyMs?: number; grabAfter?: { cmd: string; ms: number } } = {}) {
     const h = await mockHost(scenario, o);
-    const gate = new CommandGate(() => 1);
+    // P1: queue bound 0 = every command that meets a busy gate gets the gate's overflow busy error
+    // (GATE_BUSY_MESSAGE). These QA #60 rigs exercise the busy/retry path, still reachable on overflow;
+    // the default bounded FIFO is covered by test-gate-fifo.tsx.
+    const gate = new CommandGate(() => 1, 0);
     const refused: string[] = [];
     const inner = h.host;
     const g = <T,>(label: string, work: () => Promise<T>, stop = false): Promise<T> =>

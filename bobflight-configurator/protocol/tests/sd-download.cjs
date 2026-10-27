@@ -113,9 +113,15 @@ async function probeDone(r) {
     await sleep(15);
     assert.equal(r.fw.readInFlight, true, 'FW began the read and printed nothing inline');
     assert.equal(r.reader.busy, true);
-    await assert.rejects(() => r.gate.run(async () => 'status'), /request not queued/, 'no other command can interleave');
+    // P1 FIFO: another command now waits in the gate queue; it must not interleave (runs only after sd_data_end).
+    let interleaved = null;
+    const queued = r.gate.run(async () => { interleaved = r.fw.readInFlight; return 'status'; });
+    await sleep(5);
+    assert.equal(interleaved, null, 'no other command can interleave while the sd read holds the gate');
     await assert.rejects(() => r.reader.read(1), /already in flight/, 'a second read is refused, never pipelined');
     const got = await pending;
+    assert.equal(await queued, 'status');
+    assert.equal(interleaved, false, 'the queued command ran only after the sd read completed');
     assert.equal(got.kind, 'data');
     assert.deepEqual(Buffer.from(got.bytes), Buffer.from(r.fw.card.readSector(0)));
     assert.deepEqual(r.wire.cmds.map((c) => c.cmd), ['sd read 0']);

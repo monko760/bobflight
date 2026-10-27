@@ -60,7 +60,8 @@ export function MotorsPage() {
   const readiness = state.status?.motor_output && / ready$/.test(state.status.motor_output) ? "Ready (driver reports)" : "Unavailable / unknown";
   const rate = state.rate ? `DShot${state.rate}` : "Unknown";
   return <section className="panel motor-bench" aria-labelledby="motor-title">
-    <StoragePanel requiredScope="dshot" revision={state.rate??0} blocked={storageBlocked(state)} onPending={setStoragePending}/>
+    {/* M4: keyed on confirmed rate changes only, never on `rate` (which goes null on a failed readback). */}
+    <StoragePanel requiredScope="dshot" revision={state.rateRevision} blocked={storageBlocked(state)} onPending={setStoragePending}/>
     <div className="motor-heading">
       <div><p className="motor-eyebrow">PROPS-OFF WORKBENCH</p><h2 id="motor-title">Motor tests</h2><p className="muted">Verify wiring and rotation, one motor at a time. These controls do not arm the aircraft.</p></div>
       <button className="danger motor-stop" disabled={!state.connected} onClick={() => void controller.stop()}>{state.stopping ? "Stop requested…" : "Stop all motor tests"}</button>

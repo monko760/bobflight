@@ -13,7 +13,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { savedFiles } from "./fixtures/saveBlobStub";
 import { BlackboxPage } from "../src/pages/BlackboxPage";
-import { CommandGate } from "../src/protocol/commandGate";
+import { CommandGate, GATE_BUSY_MESSAGE, GATE_QUEUE_LIMIT } from "../src/protocol/commandGate";
 import { SdDownloadController, RECORDER_STATE_UNKNOWN, ARM_STATE_UNKNOWN, GATE_BUSY_TEXT, GATE_BUSY_MID_READ_TEXT } from "../src/blackbox/sdDownload";
 import { StorageActivity, isStorageCommand, STORAGE_ACTIVITY_HOLD_MS } from "../src/protocol/storageActivity";
 import { createHost } from "../src/protocol/createHost";
@@ -99,7 +99,8 @@ const FILES = [
 const MOCK_IDLE = MOCK_BLACKBOX_IDLE_STATUS;
 const RECORDING_STATUS = "blackbox_api: 2\r\nblackbox_state: recording\r\nblackbox_reason: recording\r\nblackbox_file: BFL00004.BBL\r\nblackbox_bytes: 1024\r\nblackbox_frames: 10\r\nblackbox_rate_hz: 500\r\nblackbox_dropped: 0\r\nblackbox_missed: 0\r\nblackbox_invalid: 0\r\nblackbox_queue: 0\r\nblackbox_active: 1\r\nblackbox_rate_requested_hz: 500\r\nblackbox_rate_reason: default\r\nblackbox_drop_pct: 0.0\r\nblackbox_end: 1\r\n";
 
-async function rig(fwOpts: MockSdFirmwareOptions = {}, readTimeoutMs = 4000): Promise<Rig> {
+/** `gateLimit`: the real gate's queue bound. 0 reproduces the gate's overflow busy refusal for the busy-path tests (P1). */
+async function rig(fwOpts: MockSdFirmwareOptions = {}, readTimeoutMs = 4000, gateLimit = GATE_QUEUE_LIMIT): Promise<Rig> {
   savedFiles().length = 0;
   const card = fwOpts.card ?? new SparseFat32Card({ files: FILES });
   const fw = new MockSdCliFirmware({ ...fwOpts, card });
@@ -108,7 +109,7 @@ async function rig(fwOpts: MockSdFirmwareOptions = {}, readTimeoutMs = 4000): Pr
   await client.connect({ path: "sim://bobflight-sd", transport: "serial" });
   await sleep(5);
   let generation = 0;
-  const gate = new CommandGate(() => generation);
+  const gate = new CommandGate(() => generation, gateLimit);
   const hostReads = { current: 0, max: 0 };
   const wireReads = { current: 0, max: 0 };
   const reader = new SdSectorReader(gate, async (cmd, opts) => {
@@ -567,14 +568,15 @@ async function main() {
   });
 
   // ---- real CommandGate contention (adapted from the Lead's gate harness) --------------------
-  /** Controller over the real client + real CommandGate + SdSectorReader, no page. */
-  async function lowRig(fwOpts: MockSdFirmwareOptions = {}) {
+  /** Controller over the real client + real CommandGate + SdSectorReader, no page. These contention tests
+   * cover the busy path, so the gate's queue bound defaults to 0 (overflow busy refusal, P1). */
+  async function lowRig(fwOpts: MockSdFirmwareOptions = {}, gateLimit = 0) {
     const fw = new MockSdCliFirmware({ card: new SparseFat32Card({ files: FILES }), ...fwOpts });
     const client = new BobFlightCliClient(new SdSimTransportFactory(fw));
     await client.connect({ path: "sim://bobflight-sd", transport: "serial" });
     await sleep(5);
     let generation = 0; client.onStatus(() => generation++);
-    const gate = new CommandGate(() => generation);
+    const gate = new CommandGate(() => generation, gateLimit);
     const reader = new SdSectorReader(gate, (cmd, o) => client.sendCommand(cmd, o));
     const link = {
       getConnectionStatus: () => client.getConnectionStatus(),
@@ -588,20 +590,20 @@ async function main() {
   }
 
   await test("real gate held 3 s when List is pressed: plain 'another command' text + visible raw detail; no SD command went out, so no sd cancel is sent or claimed", async () => {
-    const r = await rig();
+    const r = await rig({}, 4000, 0);
     const m = r.mark();
     void r.holdGate(3000);
     click("Probe card and list logs");
     assert.ok(await waitFor(() => shown("bb-download-phase") === IDLE && !!shown("bb-download-message"), 8000));
     assert.equal(shown("bb-download-message"), GATE_BUSY_TEXT, "plain wording, nothing claimed about sd cancel");
-    assert.match(shown("bb-download-detail") ?? "", /^Detail: another UI command is in flight; request not queued$/, "raw line kept in a small visible detail");
+    assert.equal(shown("bb-download-detail") ?? "", `Detail: ${GATE_BUSY_MESSAGE}`, "raw line kept in a small visible detail");
     assert.ok(!pageText().includes("Sent sd cancel"));
     assert.deepEqual(r.sdSince(m), [], "no SD command reached the FC (nothing to cancel)");
     await r.done();
   });
 
   await test("real gate held 3 s at the pre-read `blackbox status` while the FC is recording: visible abort, the re-read never counts as 'state unknown', zero sd reads", async () => {
-    const r = await rig();
+    const r = await rig({}, 4000, 0);
     const host = r.ctx.host as { sendCommand(c: CliCommand): Promise<string> };
     const send = host.sendCommand;
     let armHold = false;
@@ -740,7 +742,7 @@ async function main() {
   });
 
   await test("Cancel while the gate stays held > 2.5 s: the closing sd cancel gives up after ~2.5 s, 'sd cancel could not be sent' is visible and no sd cancel reaches the FC", async () => {
-    const r = await rig();
+    const r = await rig({}, 4000, 0);
     const host = r.ctx.host as { sendCommand(c: CliCommand): Promise<string> };
     const send = host.sendCommand;
     let armHold = false; let heldUntil = 0;

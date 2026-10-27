@@ -207,6 +207,8 @@ jobs:
         run: npm --prefix ui run test:motors
       - name: Storage panel refresh guard and Motors flicker lock tests
         run: npm --prefix ui run test:storage
+      - name: CommandGate bounded priority FIFO (P1) on the real gate + adapter + client; Motors M1 race repro
+        run: npm --prefix ui run test:gate-fifo
       - name: Setup loop-rate readout and 1k/4k/8k selector (poll, mocks, wiring) tests
         run: npm --prefix ui run test:loop-rate
       - name: Setup loop-rate poll starts after an in-flight command (SetupPage render test)

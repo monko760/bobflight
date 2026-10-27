@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { BenchController, benchBlockReason, parseBenchHelp, parseDshot, assertBenchAck, MOTOR_POSITIONS, MAX_PULSE_PERCENT } from "../src/motors/benchController";
 import type { CliCommand, ConnectionStatus, ParsedStatus } from "../src/protocol/types";
-import { CommandGate } from "../src/protocol/commandGate";
+import { CommandGate, commandGateOptions, GateBusyError, GateQueueTimeoutError, GATE_BUSY_MESSAGE } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 
 import { DEFAULT_MOTOR_POLES, MOTOR_POLES_KEY, readMotorPoles, storeMotorPoles, validMotorPoles } from "../src/motors/motorPoles";
@@ -38,13 +38,23 @@ class FakeHost {
     return ack;
   }
 }
-async function setup() {
-  const host = new FakeHost(); let now = 100;
+/** FakeHost behind the REAL CommandGate, exactly as the app adapter routes every bench command. */
+class GatedFakeHost extends FakeHost {
+  gate = new CommandGate(() => 1);
+  /** Lines in the order the gate put them on the "wire". */
+  wire: string[] = [];
+  override getStatus(o?: { signal?: AbortSignal }) { return this.gate.run(() => { this.wire.push("status"); return super.getStatus(); }, { signal: o?.signal }); }
+  override sendCommand(cmd: CliCommand, o?: { signal?: AbortSignal }) { return this.gate.run(() => { this.wire.push(cmd); return super.sendCommand(cmd); }, { ...commandGateOptions(cmd), signal: o?.signal }); }
+}
+async function setup(gated = false) {
+  const host = gated ? new GatedFakeHost() : new FakeHost(); let now = 100;
   const c = new BenchController(host, () => now);
   c.connection(true); await c.poll(); c.confirmProps(true); c.confirmStationary(true);
   host.commands = [];
+  if (host instanceof GatedFakeHost) host.wire = [];
   return { host, c, advance: (ms: number) => { now += ms; }, now: () => now };
 }
+async function setupGated() { const r = await setup(true); return { ...r, host: r.host as GatedFakeHost }; }
 async function main() {
   await test("capabilities are exact help-line tokens; old firmware stays unsupported", () => {
     assert.deepEqual(parseBenchHelp("  motor_test <0..4>\n mention motor_seq"), { individual: true, pulse: false, sequence: false, dshot: false });
@@ -173,21 +183,58 @@ async function main() {
     assert.deepEqual(host.commands,["status","motor_test 0"]);
     assert.equal(c.state.stationary,false); assert.equal(c.state.busy,false);
   });
-  await test("Stop during a sent test waits for reply then sends stop; repeated Stop is coalesced", async () => {
-    const { c, host } = await setup(); const d=deferred<string>(); host.commandWait=d.promise;
-    const start=c.start(3); for(let i=0;i<8;i++) await Promise.resolve();
+  await test("Stop during a sent test goes on the wire right after that reply (gate); repeated Stop is coalesced", async () => {
+    const { c, host } = await setupGated(); const d=deferred<string>(); host.commandWait=d.promise;
+    const start=c.start(3); for(let i=0;i<12;i++) await Promise.resolve();
     assert.ok(host.commands.includes("motor_test 3"));
     const stop=c.stop(); const again=c.stop();
-    assert.ok(!host.commands.includes("motor_test 0"));
+    assert.equal(host.gate.queued, 1, "Stop is enqueued at once (urgent), behind the start on the wire");
+    assert.ok(!host.commands.includes("motor_test 0"), "one command on the wire: the start's reply comes first");
     d.resolve(ack); await Promise.all([start,stop,again]);
+    assert.deepEqual(host.wire,["status","motor_test 3","motor_test 0"]);
     assert.equal(host.commands.filter(x=>x==="motor_test 0").length,1);
   });
+  await test("Stop never waits for the poll: its queued read is cancelled and motor_test 0 is next on the wire", async () => {
+    const { c, host } = await setupGated();
+    // Another page's command is on the wire; the poll's status read waits behind it, then another page's read.
+    const hold=deferred<string>(); const other=host.gate.run(async()=>{ host.wire.push("other page"); return hold.promise; });
+    for(let i=0;i<4;i++) await Promise.resolve();
+    const poll=c.poll(); for(let i=0;i<4;i++) await Promise.resolve(); const storage=host.sendCommand("storage");
+    assert.equal(host.gate.queued, 2, "poll status + storage waiting");
+    const stop=c.stop();
+    assert.equal(host.gate.queued, 2, "the poll's queued status was dropped; motor_test 0 enqueued at once (urgent)");
+    hold.resolve("x"); await Promise.all([other, poll, stop, storage]);
+    assert.deepEqual(host.wire, ["other page", "motor_test 0", "storage"], "Stop right after the reply on the wire; the poll sent nothing");
+    assert.match(c.state.reply, /Stop acknowledged/); assert.equal(c.state.error, "");
+  });
+  await test("a connection change drops this page's reads still queued (even without the adapter's drain)", async () => {
+    const { c, host } = await setupGated();
+    const hold=deferred<string>(); const other=host.gate.run(async()=>{ host.wire.push("other page"); return hold.promise; });
+    for(let i=0;i<4;i++) await Promise.resolve();
+    const poll=c.poll(); for(let i=0;i<4;i++) await Promise.resolve();
+    assert.equal(host.gate.queued, 1, "the poll's status read waits");
+    c.connection(false);
+    assert.equal(host.gate.queued, 0, "dropped at once by the controller itself");
+    hold.resolve("x"); await Promise.all([other, poll]);
+    assert.deepEqual(host.wire, ["other page"]);
+  });
+  await test("Stop while the poll's read is on the wire: next line is motor_test 0, the poll sends nothing more", async () => {
+    const { c, host } = await setupGated(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
+    const poll=c.poll(); for(let i=0;i<6;i++) await Promise.resolve();
+    assert.deepEqual(host.wire, ["status"]);
+    const reads=[host.sendCommand("storage"), host.sendCommand("get motor_poles")];
+    const stop=c.stop();
+    host.statusWait=null; d.resolve({ ...ready }); await Promise.all([poll, stop, ...reads]);
+    assert.deepEqual(host.wire, ["status", "motor_test 0", "storage", "get motor_poles"]);
+  });
   await test("disconnect/reconnect discards pending starts and stops, resets confirmations and rate", async () => {
-    const { c, host }=await setup(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
-    const start=c.start(1); await Promise.resolve(); const stop=c.stop();
-    host.connection="disconnected";c.connection(false);host.connection="connected";c.connection(true);
+    // Gated like the app: Stop is enqueued at once behind the preflight on the wire; the disconnect
+    // drains it (the adapter drains the gate on any non-connected status), so nothing crosses sessions.
+    const { c, host }=await setupGated(); const d=deferred<ParsedStatus>(); host.statusWait=d.promise;
+    const start=c.start(1); for(let i=0;i<4;i++) await Promise.resolve(); const stop=c.stop();
+    host.connection="disconnected";host.gate.drain();c.connection(false);host.connection="connected";c.connection(true);
     d.resolve({ ...ready }); await Promise.all([start,stop]);
-    assert.deepEqual(host.commands,["status"]);assert.equal(c.state.propsOff,false);assert.equal(c.state.rate,null);assert.equal(c.state.status,null);
+    assert.deepEqual(host.commands,["status"]);assert.deepEqual(host.wire,["status"]);assert.equal(c.state.propsOff,false);assert.equal(c.state.rate,null);assert.equal(c.state.status,null);
   });
   await test("fresh preflight becoming armed prevents the write", async () => {
     const { c, host }=await setup();host.status.arm="armed";await c.start(1);
@@ -233,14 +280,85 @@ async function main() {
     assert.match(await host.sendCommand("motor_test 1"),/refused/);
     assertBenchAck("motor_test 0",await host.sendCommand("motor_test 0"));await host.disconnect();
   });
-  await test("shared page command gate gives Stop priority without queuing starts", async () => {
+  await test("shared page command gate gives Stop priority over queued reads and never queues starts", async () => {
     const gate=new CommandGate(()=>1);const d=deferred<string>();const seen:string[]=[];
     const polling=gate.run(async()=>{seen.push("poll");return d.promise;});
     await Promise.resolve();await Promise.resolve();
-    await assert.rejects(gate.run(async()=>{seen.push("start");return "start";}),/not queued/);
+    // Motor starts are exclusive: refused (busy error) while anything is on the wire, never queued.
+    await assert.rejects(gate.run(async()=>{seen.push("start");return "start";},commandGateOptions("motor_test 1")),/not queued/);
+    await assert.rejects(gate.run(async()=>{seen.push("pulse");return "pulse";},commandGateOptions("motor_pulse 1 20")),/not queued/);
+    // A later read now waits in the FIFO; Stop (urgent) jumps ahead of it.
+    const newPoll=gate.run(async()=>{seen.push("new poll");return "new poll";});
     const stop=gate.run(async()=>{seen.push("stop");return "stop";},true);
-    await assert.rejects(gate.run(async()=>"new poll"),/not queued/);
-    d.resolve("done");await Promise.all([polling,stop]);assert.deepEqual(seen,["poll","stop"]);
+    d.resolve("done");await Promise.all([polling,stop,newPoll]);assert.deepEqual(seen,["poll","stop","new poll"]);
+  });
+  await test("M2: a gate refusal on the poll never clears status, rate, props-off, stationary or sliders", async () => {
+    const { c, host } = await setup();
+    assert.equal(c.setPulsePercent(1, 20), true);
+    const before = { status: c.state.status, rate: c.state.rate, statusAt: c.state.statusAt };
+    assert.ok(before.status && before.rate === 300);
+    for (const err of [new GateBusyError(), new GateQueueTimeoutError(5000)]) {
+      const orig = host.getStatus.bind(host);
+      host.getStatus = async () => { throw err; };
+      await c.poll();
+      host.getStatus = orig;
+      assert.equal(c.state.status, before.status, `${err.name}: status kept`);
+      assert.equal(c.state.statusAt, before.statusAt, `${err.name}: freshness not faked (ages out honestly)`);
+      assert.equal(c.state.rate, 300, `${err.name}: rate kept`);
+      assert.equal(c.state.propsOff, true, `${err.name}: props-off kept`);
+      assert.equal(c.state.stationary, true, `${err.name}: stationary kept`);
+      assert.equal(c.state.pulsePercent[1], 20, `${err.name}: slider kept`);
+      assert.equal(c.state.error, "", `${err.name}: a background poll refusal is not shown as an error`);
+    }
+    // A refused `dshot` readback keeps the last confirmed rate (no null flip feeding the Save box, M4).
+    const send = host.sendCommand.bind(host);
+    host.sendCommand = async (cmd: CliCommand) => { if (cmd === "dshot") throw new GateBusyError(); return send(cmd); };
+    await c.poll(); host.sendCommand = send;
+    assert.equal(c.state.rate, 300, "gate-refused dshot readback keeps rate");
+    // A real FC/transport error still fails closed exactly as before.
+    host.getStatus = async () => { throw new Error("CLI command timed out with empty response"); };
+    await c.poll();
+    assert.equal(c.state.status, null); assert.equal(c.state.rate, null);
+    assert.equal(c.state.propsOff, false); assert.equal(c.state.stationary, false);
+    assert.equal(c.state.pulsePercent[1], 0);
+  });
+  await test("M2: a gate refusal on a clicked action is reported, confirmations kept", async () => {
+    const { c, host } = await setup();
+    const orig = host.getStatus.bind(host);
+    host.getStatus = async () => { throw new GateBusyError(); };
+    await c.setRate(600);
+    host.getStatus = orig;
+    assert.equal(c.state.error, GATE_BUSY_MESSAGE, "the user sees why nothing happened");
+    assert.equal(c.state.propsOff, true); assert.equal(c.state.stationary, true);
+    assert.ok(c.state.status, "status kept");
+  });
+  await test("M4: StoragePanel revision (rateRevision) changes only on a confirmed rate change, never when rate goes unknown", async () => {
+    const { c, host } = await setup();
+    assert.equal(c.state.rateRevision, 0);
+    host.sendCommand = (orig => async (cmd: CliCommand) => cmd === "dshot" ? "dshot readback refused" : orig(cmd))(host.sendCommand.bind(host));
+    await c.poll();
+    assert.equal(c.state.rate, null, "a failed readback makes the rate unknown");
+    assert.equal(c.state.rateRevision, 0, "…but does not bump the StoragePanel revision");
+    const h2 = await setup();
+    await h2.c.setRate(600);
+    assert.equal(h2.c.state.rate, 600); assert.equal(h2.c.state.rateRevision, 1, "confirmed change bumps it once");
+  });
+  await test("leave() aborts this page's reads still waiting in the gate queue", async () => {
+    const gate = new CommandGate(() => 1); const hold = deferred<string>();
+    const held = gate.run(() => hold.promise);
+    const seen: string[] = [];
+    const host = { getConnectionStatus: () => "connected" as ConnectionStatus,
+      getStatus: (o?: { signal?: AbortSignal }) => gate.run(async () => { seen.push("status"); return { ...ready }; }, { signal: o?.signal }),
+      sendCommand: (cmd: CliCommand, o?: { signal?: AbortSignal }) => gate.run(async () => { seen.push(cmd); return ack; }, { ...commandGateOptions(cmd), signal: o?.signal }) };
+    const c = new BenchController(host, () => 100);
+    c.connection(true);
+    const poll = c.poll();
+    await Promise.resolve();
+    assert.equal(gate.queued, 1, "the poll's status read waits behind the held command");
+    await c.leave();
+    assert.equal(gate.queued, 0, "dropped from the queue on leave");
+    hold.resolve("x"); await held; await poll;
+    assert.deepEqual(seen, [], "nothing from the left page reached the FC");
   });
   await test("shared page command gate cancels waiting Stops across reconnect", async () => {
     let session=1;const gate=new CommandGate(()=>session);const d=deferred<string>();let stopped=false;
