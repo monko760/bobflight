@@ -5,6 +5,8 @@ import {isGateBusy,isGateNotSent,type CliCommand} from '../protocol';
 import {STORAGE_BUSY_RETRIES,STORAGE_BUSY_RETRY_MS} from '../components/storageSequence';
 /** Shown when the shared gate rejected a load/apply before it reached the FC (busy after the retries, queue timeout, cancel, disconnect drain, session change). */
 export const SNAPSHOT_NOT_SENT_TEXT='Another command was using the connection, so nothing was sent. Try again.';
+/** Shown when an apply WAS sent but the gate rejected the read-back: the change may be in effect, its result is unknown. */
+export const SNAPSHOT_READBACK_NOT_SENT_TEXT='The change was sent to the controller, but reading it back failed because another command was using the connection. Refresh to see the controller\u2019s current settings.';
 export function useConfigSnapshot<T>(query:CliCommand,parse:(s:string)=>T){
  const {host,connectionStatus,postFlashGate}=useHost();const connected=connectionStatus==='connected'&&!postFlashGate;
  const [snapshot,setSnapshot]=useState<T|null>(null),[error,setError]=useState(''),[pending,setPending]=useState(false),[loadedAt,setLoadedAt]=useState(0);
@@ -15,7 +17,8 @@ export function useConfigSnapshot<T>(query:CliCommand,parse:(s:string)=>T){
   * message text; a gate that is merely in use queues the read instead). Any other gate rejection (isGateNotSent:
   * queue timeout, cancel, drain, session change) is shown as "nothing sent", not retried. A controller reply or any
   * other error (even one whose text says "busy") is never retried; the read-back is never retried (and once the
-  * first line went out, a gate rejection of the read-back is never shown as "nothing sent").
+  * first line went out, a gate rejection of the read-back says the apply was sent but the read-back failed). The
+  * gate's own message (e.g. "request not sent") is never shown.
   */
  async function sendFirst(command:CliCommand,id:number):Promise<string>{
   for(let attempt=0;;attempt++){
@@ -32,7 +35,7 @@ export function useConfigSnapshot<T>(query:CliCommand,parse:(s:string)=>T){
    const raw=command===query||query==='modes'?response:await host.sendCommand(query);
    if(id!==epoch.current||host.getConnectionStatus()!=='connected')return null;
    const v=parse(raw);verify?.(v);setSnapshot(v);setLoadedAt(Date.now());return v;
-  }catch(e){if(id===epoch.current){setSnapshot(null);setLoadedAt(0);setError(!firstSent&&isGateNotSent(e)?`${SNAPSHOT_NOT_SENT_TEXT} (${e instanceof Error?e.message:String(e)})`:String(e));}return null;}
+  }catch(e){if(id===epoch.current){setSnapshot(null);setLoadedAt(0);setError(!firstSent&&isGateNotSent(e)?SNAPSHOT_NOT_SENT_TEXT:isGateNotSent(e)?SNAPSHOT_READBACK_NOT_SENT_TEXT:String(e));}return null;}
   finally{if(id===epoch.current){busy.current=false;setPending(false);}}
  }
  useEffect(()=>{++epoch.current;busy.current=false;setSnapshot(null);setLoadedAt(0);setError('');setPending(false);if(connected)void execute();return()=>{++epoch.current;};},[host,connected]);

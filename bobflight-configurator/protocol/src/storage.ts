@@ -26,6 +26,14 @@ export interface StorageSnapshot {backend:'flash'|'host_sim'|'unsupported';schem
 export class StorageReplyError extends Error {
  constructor(readonly reason:string,readonly raw:string){super(`Storage reply could not be read: ${reason}`);this.name='StorageReplyError';}
 }
+/**
+ * A well-formed `storage` reply from an OLDER storage schema (below 13): the
+ * controller really needs a fresh install of current firmware. This is the only
+ * case a storage read may be shown as "Fresh install required".
+ */
+export class StorageFreshInstallError extends Error {
+ constructor(readonly schema:number,readonly raw:string){super(`Fresh install required: the controller reports storage schema ${schema}; this Configurator needs storage schema 13`);this.name='StorageFreshInstallError';}
+}
 /** Storage schema this Configurator reads. */
 export const STORAGE_SCHEMA=13;
 export function parseStorage(raw:string):StorageSnapshot {
@@ -36,7 +44,7 @@ export function parseStorage(raw:string):StorageSnapshot {
  const get=(k:string)=>{const v=f.get(k);if(v===undefined)bad(`missing ${k}`);return v as string;};
  const schema=get('schema');
  // An older, well-formed schema really does need a fresh install of current firmware.
- if(/^(?:0|[1-9]\d{0,3})$/.test(schema)&&Number(schema)<STORAGE_SCHEMA)throw Error(`Fresh install required: the controller reports storage schema ${schema}; this Configurator needs storage schema ${STORAGE_SCHEMA}`);
+ if(/^(?:0|[1-9]\d{0,3})$/.test(schema)&&Number(schema)<STORAGE_SCHEMA)throw new StorageFreshInstallError(Number(schema),raw);
  if(schema!==String(STORAGE_SCHEMA))bad(`storage schema "${schema}" is not schema ${STORAGE_SCHEMA}`);
  const backend=get('backend'),state=get('state');
  if(!['flash','host_sim','unsupported'].includes(backend))bad(`unknown backend "${backend}"`);

@@ -13,13 +13,14 @@ import { createRoot, type Root } from "react-dom/client";
 import type { ReactElement } from "react";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { StoragePanel } from "../src/components/StoragePanel";
-import { STORAGE_BUSY_TEXT, STORAGE_BUSY_RETRIES, STORAGE_BUSY_RETRY_MS, runStorageGated, StorageBusyError, StorageCancelledError, describeStorageError } from "../src/components/storageSequence";
+import { STORAGE_BUSY_TEXT, STORAGE_BUSY_RETRIES, STORAGE_BUSY_RETRY_MS, STORAGE_SAVE_OUTCOME_UNKNOWN_TEXT, runStorageGated, StorageBusyError, StorageCancelledError, describeStorageError } from "../src/components/storageSequence";
 import { ReceiverPage } from "../src/pages/ReceiverPage";
 import { PowerBatteryPage } from "../src/pages/PowerBatteryPage";
 import { SensorsPage } from "../src/pages/SensorsPage";
 import { ModesPage } from "../src/pages/ModesPage";
 import { PortsPage } from "../src/pages/PortsPage";
-import { SNAPSHOT_NOT_SENT_TEXT } from "../src/pages/useConfigSnapshot";
+import { SNAPSHOT_NOT_SENT_TEXT, SNAPSHOT_READBACK_NOT_SENT_TEXT, useConfigSnapshot } from "../src/pages/useConfigSnapshot";
+import { RatesPage } from "../src/pages/RatesPage";
 import { MotorsPage } from "../src/pages/MotorsPage";
 import { createHostWithTransport } from "../src/protocol/createHost";
 import {
@@ -491,6 +492,15 @@ async function main() {
     assert.ok(partial instanceof StorageBusyError);
     assert.equal(calls, 2, "storage then a refused save; the sequence is not replayed");
     assert.equal(describeStorageError(partial).detail, `The rest of the sequence was not sent. Connection reply: ${GATE_BUSY_MESSAGE}`);
+    // Lines already went out: the headline never claims "nothing was saved"; the outcome is unknown, re-read.
+    assert.equal((partial as Error).message, STORAGE_SAVE_OUTCOME_UNKNOWN_TEXT);
+    assert.ok(!/nothing was saved/i.test(describeStorageError(partial).text));
+    assert.equal(describeStorageError(partial).kind, "unknown", "not 'busy': the panel does not keep the old status as verified");
+    // S3: a gate refusal of the FIRST line on a line-by-line host is not counted as sent, so it is retried.
+    calls = 0;
+    const firstRefused = { sendCommand: async () => { calls++; if (calls <= 2) throw new GateBusyError(); return "x"; } };
+    assert.equal(await runStorageGated(firstRefused as never, "refresh", async (send) => send("storage"), { sleep: async () => {} }), "x");
+    assert.equal(calls, 3, "two refusals of the first line, then sent");
   });
 
   await test("Stop preempts the held storage run: an urgent `motor_test 0` queued during a Save goes on the wire before the next line; the Save still verifies", async () => {
@@ -722,9 +732,204 @@ async function main() {
     const held = r.holdGate(GATE_QUEUE_TIMEOUT_MS + 400);
     r.render(<PortsPage />);
     assert.ok(await waitFor(() => pageText().includes(SNAPSHOT_NOT_SENT_TEXT), GATE_QUEUE_TIMEOUT_MS + 300), pageText().slice(0, 600));
-    assert.ok(pageText().includes(`${SNAPSHOT_NOT_SENT_TEXT} (timed out after ${GATE_QUEUE_TIMEOUT_MS} ms waiting in the command queue; request not sent)`));
+    assert.ok(!/request not sent|timed out after/.test(pageText()), "the gate's raw text is never shown");
     await held; await sleep(100);
     assert.equal(r.fw.count("ports"), 0, "the timed-out read was not retried");
+    await r.done();
+  });
+
+  // ---- #100 review round 2 -------------------------------------------------------------
+  await test("S8: Save runs at WRITE priority: a Save clicked after a normal read is already waiting goes on the wire first", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded));
+    r.fw.markDirty();
+    const held = r.holdGate(250);
+    const mark = r.fw.log.length;
+    const read = r.host.sendCommand("status");
+    assert.equal(r.commands.queued, 1, "the read is waiting");
+    click("Save to controller");
+    assert.ok(await waitFor(() => r.commands.queued === 2, 1000), "the Save is waiting too");
+    assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(shown("storage-message") ?? "") || !!storageError(), 4000));
+    await read; await held;
+    assert.equal(storageError(), null);
+    assert.deepEqual(r.fw.log.slice(mark), ["storage", "save", "storage", "status"], "write class overtakes the waiting normal read");
+    await r.done();
+  });
+
+  await test("S12: a USB session change in the middle of a Save stops it: `save` never goes out on the new connection", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded));
+    r.fw.markDirty();
+    const client = (r.host as unknown as { client: { sendCommand(c: string, o?: unknown): Promise<string> } }).client;
+    const orig = client.sendCommand.bind(client);
+    let arm = true, reconnected = false;
+    // The FC's reply to the Save's first `storage` arrives, then the USB link drops and comes back before the next line.
+    client.sendCommand = async (c: string, o?: unknown) => {
+      const res = await orig(c, o);
+      if (c === "storage" && arm) {
+        arm = false;
+        await r.host.disconnect();
+        await r.host.connect({ path: "sim://bobflight-storage", transport: "serial" });
+        reconnected = r.host.getConnectionStatus() === "connected";
+      }
+      return res;
+    };
+    const mark = r.fw.log.length;
+    click("Save to controller");
+    assert.ok(await waitFor(() => reconnected, 3000), "the link came back");
+    await sleep(400);
+    client.sendCommand = orig;
+    assert.equal(r.fw.log.slice(mark).filter((l) => l === "save").length, 0, `no save on the new connection: ${r.fw.log.slice(mark).join(", ")}`);
+    assert.equal(r.fw.state, "dirty", "the FC never saved");
+    await r.done();
+  });
+
+  /** Renders useConfigSnapshot alone over a scripted host (the hook's own error text). */
+  function Probe({ sink }: { sink: (q: ReturnType<typeof useConfigSnapshot<string>>) => void }) {
+    const q = useConfigSnapshot<string>("ports", (x) => x);
+    sink(q);
+    return <p data-testid="probe-error">{q.error}</p>;
+  }
+  await test("S16: an apply that went out, then a gate-rejected read-back: says the apply was sent but the read-back failed (never 'nothing sent', never raw gate text)", async () => {
+    const r = await rig();
+    let readbacks = 0;
+    const fake = {
+      getConnectionStatus: () => "connected",
+      sendCommand: async (c: string) => {
+        if (c === "ports") { if (readbacks++ === 0) return "ports-initial"; throw new GateQueueTimeoutError(GATE_QUEUE_TIMEOUT_MS); }
+        if (c === "receiver_uart 2") return "receiver_uart: 2";
+        throw new Error(`unexpected ${c}`);
+      },
+    };
+    const realHost = r.ctx.host;
+    r.ctx.host = fake;
+    let q: ReturnType<typeof useConfigSnapshot<string>> | null = null;
+    r.render(<Probe sink={(x) => { q = x; }} />);
+    assert.ok(await waitFor(() => q?.snapshot === "ports-initial", 2000), "initial load");
+    await q!.execute("receiver_uart 2" as CliCommand);
+    await sleep(20); r.render(<Probe sink={(x) => { q = x; }} />);
+    assert.equal(shown("probe-error"), SNAPSHOT_READBACK_NOT_SENT_TEXT);
+    assert.ok(!/nothing was sent|request not sent|timed out/i.test(shown("probe-error") ?? ""));
+    // And when the FIRST line was rejected, it is "nothing sent" (no raw text either).
+    fake.sendCommand = async () => { throw new GateDisconnectedError(); };
+    await q!.execute("receiver_uart 2" as CliCommand);
+    await sleep(20); r.render(<Probe sink={(x) => { q = x; }} />);
+    assert.equal(shown("probe-error"), SNAPSHOT_NOT_SENT_TEXT);
+    r.unmount(); r.ctx.host = realHost;
+    await r.done();
+  });
+
+  await test("S22/F5 panel: a NEWER schema (14) is 'could not be read' with the raw reply, never 'Fresh install'; a well-formed schema 12 is 'Fresh install required'", async () => {
+    {
+      const r = await rig();
+      r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 14")]);
+      r.render(<StoragePanel requiredScope="receiver_map" />);
+      assert.ok(await waitFor(() => !!storageError()));
+      assert.equal(storageError(), "The controller’s storage reply could not be read, so storage status is unknown.");
+      assert.ok((shown("storage-error-detail") ?? "").includes("schema: 14"));
+      assert.ok(!/Fresh install/i.test(pageText()));
+      await r.done();
+    }
+    {
+      const r = await rig();
+      r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 12")]);
+      r.render(<StoragePanel requiredScope="receiver_map" />);
+      assert.ok(await waitFor(() => !!storageError()));
+      assert.match(storageError() ?? "", /^Fresh install required: the controller reports storage schema 12/);
+      await r.done();
+    }
+  });
+
+  // F5 Rates tab: any failed `storage` read leaves capability unverified with the reason.
+  const ratesCases: Array<[string, (r: Rig) => void, RegExp]> = [
+    ["scope mismatch", (r) => r.fw.replyOnce.set("storage", [r.fw.storageReply().replace(/scope: [^\r]+/, "scope: pid_rates,receiver_uart")]), /^Storage capability unverified: Storage reply could not be read: scope does not match storage schema 13\. Saving is disabled\./],
+    ["garbled reply", (r) => r.fw.replyOnce.set("storage", ["storage_api: 1\r\nb@ckend fl#sh\r\nstorage_end: 1\r\n"]), /^Storage capability unverified: Storage reply could not be read: .+\. Saving is disabled\./],
+    ["newer schema 14", (r) => r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 14")]), /^Storage capability unverified: Storage reply could not be read: storage schema "14" is not schema 13\. Saving is disabled\./],
+    ["queue timeout", (r) => { let armed = true; r.fw.onLine = (l) => { if (armed && l.startsWith("get ")) { armed = false; void r.holdGate(GATE_QUEUE_TIMEOUT_MS + 400); } }; },
+      /^Storage capability unverified: another command was using the connection, so storage status was not read \(nothing was sent\)\. Saving is disabled\./],
+  ];
+  for (const [name, inject, want] of ratesCases) {
+    await test(`F5 Rates tab: storage ${name} -> 'Storage capability unverified' + reason, never 'Fresh install required'; Save disabled`, async () => {
+      const r = await rig();
+      inject(r);
+      r.render(<RatesPage />);
+      const alert = () => container.findAll((e) => e.getAttribute("role") === "alert").map(visibleText).join(" | ");
+      assert.ok(await waitFor(() => !!alert(), GATE_QUEUE_TIMEOUT_MS + 3000), `an alert is shown: ${pageText().slice(0, 300)}`);
+      assert.match(alert(), want);
+      assert.ok(!/Fresh install/i.test(pageText()), pageText().slice(0, 400));
+      assert.ok(!/request not sent/.test(pageText()));
+      assert.ok(isDisabled(button("Save to controller")));
+      r.fw.onLine = null;
+      await sleep(GATE_QUEUE_TIMEOUT_MS > 0 && name === "queue timeout" ? 600 : 0);
+      await r.done();
+    });
+  }
+  await test("F5 Rates tab: a well-formed OLDER schema (12) read from the FC is the one case that says 'Fresh install required'", async () => {
+    const r = await rig();
+    r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 12")]);
+    r.render(<RatesPage />);
+    assert.ok(await waitFor(() => /Fresh install required/.test(pageText()), 4000), pageText().slice(0, 300));
+    assert.match(pageText(), /Fresh install required: the controller reports storage schema 12; this Configurator needs storage schema 13\. Actual rates need storage schema 13\./);
+    assert.ok(!/unverified/i.test(pageText()));
+    await r.done();
+  });
+  await test("F5 Rates tab: a good schema-13 reply loads (no unverified / Fresh install text)", async () => {
+    const r = await rig();
+    r.render(<RatesPage />);
+    await sleep(800);
+    assert.ok(!/unverified|Fresh install|could not be read/i.test(pageText()), pageText().slice(0, 400));
+    await r.done();
+  });
+
+  await test("S24: a quiet re-read (page unblocked) that stays busy shows NO error and keeps the shown status", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" blocked={false} />);
+    assert.ok(await waitFor(loaded));
+    const text = storageStatus();
+    r.render(<StoragePanel requiredScope="receiver_map" blocked={true} />);
+    await sleep(20);
+    const held = r.holdGate(4500, true);
+    const before = r.gate.refused;
+    r.render(<StoragePanel requiredScope="receiver_map" blocked={false} />);
+    assert.ok(await waitFor(() => r.gate.refused - before > STORAGE_BUSY_RETRIES, 4400), "the quiet re-read really ran out of busy retries");
+    await sleep(60);
+    assert.equal(storageError(), null, "busy on a quiet re-read is silent");
+    assert.equal(storageStatus(), text, "the shown status stands");
+    await held; await r.done();
+  });
+
+  for (const [what, set] of [["armed", (fw: MockStorageFirmware) => { fw.armed = true; }], ["bench active", (fw: MockStorageFirmware) => { fw.benchActive = true; }],
+    ["calibrating", (fw: MockStorageFirmware) => { fw.calibrationActive = true; }]] as const) {
+    await test(`S27 (safety): the Save's own pre-save storage read refuses to save while the FC is ${what} (state changed after the panel loaded): no save line`, async () => {
+      const r = await rig();
+      r.render(<StoragePanel requiredScope="receiver_map" />);
+      assert.ok(await waitFor(loaded));
+      r.fw.markDirty();
+      r.render(<StoragePanel requiredScope="receiver_map" revision={0} />);
+      assert.ok(!isDisabled(button("Save to controller")), "Save enabled from the last (disarmed) read");
+      set(r.fw);
+      const mark = r.fw.log.length;
+      click("Save to controller");
+      assert.ok(await waitFor(() => !!storageError(), 3000));
+      assert.match(storageError() ?? "", /^Flash save unavailable: disarm, stop motors and calibration/);
+      assert.ok(!r.fw.log.slice(mark).includes("save"), `no save line: ${r.fw.log.slice(mark).join(", ")}`);
+      assert.equal(r.fw.state, "dirty");
+      await r.done();
+    });
+  }
+
+  await test("S5: a Save the FC answers 'verified' but whose read-back is not saved is an error (not shown as saved)", async () => {
+    const r = await rig();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded));
+    r.fw.markDirty();
+    r.fw.afterReply = (l) => { if (l === "save") { r.fw.afterReply = null; r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("state: saved", "state: dirty").replace("dirty: 0", "dirty: 1")]); } };
+    click("Save to controller");
+    assert.ok(await waitFor(() => !!storageError() || /Saved to controller/.test(shown("storage-message") ?? ""), 3000));
+    assert.equal(storageError(), "The controller replied “saved” but its storage status does not read back as saved.");
+    assert.ok(!/Saved to controller flash and verified/.test(pageText()));
     await r.done();
   });
 

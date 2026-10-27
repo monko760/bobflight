@@ -44,7 +44,8 @@ export interface StorageSequenceHost {
  * timeout, disconnect drain, session change); nothing reached the FC. `code`: the gate's error code. */
 export class StorageBusyError extends Error {
   constructor(readonly action: StorageAction, readonly detail: string, readonly attempts: number, readonly code: string | null = null, readonly linesSent = 0) {
-    super(STORAGE_BUSY_TEXT[action]);
+    // Lines of a Save already went out: "nothing was saved" would not be known to be true.
+    super(action === "save" && linesSent > 0 ? STORAGE_SAVE_OUTCOME_UNKNOWN_TEXT : STORAGE_BUSY_TEXT[action]);
     this.name = "StorageBusyError";
   }
 }
@@ -63,6 +64,9 @@ export const STORAGE_BUSY_TEXT: Record<StorageAction, string> = {
   diff: "Another command was using the connection, so nothing was exported. Try again.",
   dump: "Another command was using the connection, so nothing was exported. Try again.",
 };
+
+/** A Save stopped by the gate after some of its lines were already sent: the outcome is not known. */
+export const STORAGE_SAVE_OUTCOME_UNKNOWN_TEXT = "The save was interrupted after part of it was sent, so the save outcome is unknown. Refresh storage to re-read the controller's status before saving again.";
 
 export interface StorageResult {
   snapshot: StorageSnapshot;
@@ -142,9 +146,10 @@ export async function runStorageGated<T>(host: StorageSequenceHost, action: Stor
 }
 
 /** What the panel shows for a failure: plain text, plus the raw controller/gate line as a visible detail. */
-export interface StorageProblem { kind: "busy" | "controller" | "reply" | "other"; text: string; detail?: string }
+/** `unknown`: a Save was cut off after some lines went out (outcome unknown; the shown status is no longer verified). */
+export interface StorageProblem { kind: "busy" | "unknown" | "controller" | "reply" | "other"; text: string; detail?: string }
 export function describeStorageError(e: unknown): StorageProblem {
-  if (e instanceof StorageBusyError) return { kind: "busy", text: e.message, detail: `${e.linesSent === 0 ? "Nothing was sent to the controller." : "The rest of the sequence was not sent."} Connection reply: ${e.detail}` };
+  if (e instanceof StorageBusyError) return { kind: e.action === "save" && e.linesSent > 0 ? "unknown" : "busy", text: e.message, detail: `${e.linesSent === 0 ? "Nothing was sent to the controller." : "The rest of the sequence was not sent."} Connection reply: ${e.detail}` };
   if (e instanceof StorageControllerError) return { kind: "controller", text: e.message, detail: `Controller reply: ${e.reply}` };
   if (e instanceof StorageReplyError) return { kind: "reply", text: "The controller’s storage reply could not be read, so storage status is unknown.", detail: `${e.message}. Controller reply: ${e.raw.trim() || "(empty)"}` };
   return { kind: "other", text: e instanceof Error ? e.message : String(e) };
