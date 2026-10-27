@@ -25,6 +25,7 @@ import { RatesPage } from "../src/pages/RatesPage";
 import { FiltersPage } from "../src/pages/FiltersPage";
 import { SetupPage } from "../src/pages/SetupPage";
 import { StoragePanel } from "../src/components/StoragePanel";
+import { readStorage, saveSequence } from "../src/components/storageSequence";
 import { ACCEL_CAL_NOT_SAVED_NOTE } from "../src/components/AccelCalSavedNote";
 import { GATE_BUSY_MESSAGE, GATE_QUEUE_TIMEOUT_MS, GateBusyError, GateQueueTimeoutError, GateCancelledError, GateDisconnectedError, GateSessionChangedError, commandGateOptions, isReadOnlyCliCommand } from "../src/protocol";
 import { createHost } from "../src/protocol/createHost";
@@ -449,6 +450,47 @@ async function main() {
     await r.host.setSetting("pid_roll_p", "0.009"); await openTab(r, "pid"); r.swallow.add("storage");
     await openDialog(); await confirm("pid");
     assert.ok(await waitFor(() => shown("defaults-unsaved") === DEFAULTS_MAYBE_UNSAVED_TEXT, 8000), `maybe: ${shown("defaults-unsaved")}`);
+    await r.done();
+  });
+
+  await test("merge #100 (a): the raw storage reply rides StorageResult; StoragePanel shows a real yes/no bare after load and after Save, never 'unknown (line missing)'", async () => {
+    // Sequence level: every StorageResult carries the exact bytes its snapshot was parsed from.
+    const reply = storageReply(false, "accel_cal_saved: yes"), dirtyReply = storageReply(true, "accel_cal_saved: yes");
+    const sent: string[] = []; let n = 0;
+    const send = async (c: string) => { sent.push(c); if (c === "storage") return n++ === 0 ? dirtyReply : reply; if (c === "save") return "saved: flash verified\r\n"; return "# diff all\r\n# board: test\r\n# firmware: test\r\n# end\r\n"; };
+    assert.equal((await readStorage(async () => reply)).raw, reply, "readStorage raw");
+    const saved = await saveSequence(send); assert.equal(saved.raw, reply, "saveSequence: raw of the read-back after save"); assert.deepEqual(sent, ["storage", "save", "storage"]);
+    for (const line of ["accel_cal_saved: yes", "accel_cal_saved: no"]) {
+      const r = await rig(); r.accel.line = line; render(r, "storage");
+      assert.ok(await waitFor(() => shown("accel-cal-saved-line") !== null), `panel loaded: ${pageText().slice(0, 300)}`);
+      assert.equal(shown("accel-cal-saved-line"), line, `${line}: bare after load`);
+      assert.ok(!/line missing/.test(shown("accel-cal-saved") ?? ""), `${line}: not 'unknown (line missing)' after load`);
+      await r.host.setSetting("pid_roll_p", "0.009");
+      click("Refresh storage"); await sleep(300); await quiet(r);
+      assert.ok(await waitFor(() => !!findButton("Save to controller") && !isDisabled(findButton("Save to controller")!)), "Save enabled");
+      click("Save to controller");
+      assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(pageText())), `saved: ${pageText().slice(-300)}`);
+      assert.equal(shown("accel-cal-saved-line"), line, `${line}: bare after Save`);
+      assert.ok(!/line missing/.test(shown("accel-cal-saved") ?? ""), `${line}: not 'unknown (line missing)' after Save`);
+      await r.done();
+    }
+  });
+
+  await test("merge #100 (b): Rates with a failed or garbled storage read -> 'Storage capability unverified', never 'Fresh install required'; Save disabled", async () => {
+    const garbled = ["storage_api: 1\r\nbackend: fl@sh\r\nstorage_end: 1\r\n", "storage_api: 1\r\nbackend: flash\r\nschema: 13\r\n", "garbage\r\n"];
+    for (const raw of garbled) {
+      const r = await rig(); r.accel.storageRaw = raw; render(r, "rates");
+      assert.ok(await waitFor(() => /Storage capability unverified|Fresh install required/.test(pageText()), 12000), `rates settled (${JSON.stringify(raw)}): ${pageText().slice(0, 400)}`);
+      assert.match(pageText(), /Storage capability unverified/, `garbled ${JSON.stringify(raw)}`);
+      assert.ok(!/Fresh install required/.test(pageText()), `garbled ${JSON.stringify(raw)} is not a fresh install`);
+      assert.ok(isDisabled(findButton("Save to controller")!), "Save disabled");
+      await r.done();
+    }
+    // A read that never answers (client timeout).
+    const r = await rig(); r.swallow.add("storage"); render(r, "rates");
+    assert.ok(await waitFor(() => /Storage capability unverified|Fresh install required/.test(pageText()), 15000), `rates settled (no reply): ${pageText().slice(0, 400)}`);
+    assert.match(pageText(), /Storage capability unverified/); assert.ok(!/Fresh install required/.test(pageText()), "failed read is not a fresh install");
+    assert.ok(isDisabled(findButton("Save to controller")!), "Save disabled");
     await r.done();
   });
 
