@@ -201,6 +201,8 @@ jobs:
         run: npm --prefix ui run test:storage
       - name: CommandGate bounded priority FIFO (P1) on the real gate + adapter + client; Motors M1 race repro
         run: npm --prefix ui run test:gate-fifo
+      - name: StoragePanel gated load/save on the real gate (20 mount+save cycles next to 200 ms and 50 ms pollers, busy-only bounded retry, verbatim FW errors, F5 unreadable reply, G3 poll errors on Receiver/Power/Sensors, Modes/Ports/Motors)
+        run: npm --prefix ui run test:storage-gated
       - name: Setup loop-rate readout and 1k/4k/8k selector (poll, mocks, wiring) tests
         run: npm --prefix ui run test:loop-rate
       - name: Setup loop-rate poll starts after an in-flight command (SetupPage render test)

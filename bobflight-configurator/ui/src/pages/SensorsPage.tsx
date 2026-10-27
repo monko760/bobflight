@@ -2,7 +2,7 @@ import {AircraftAttitudeView} from "../components/AircraftAttitudeView";
 import {BoardOrientationPanel} from "../components/BoardOrientationPanel";
 import {StoragePanel} from "../components/StoragePanel";
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSensorTelemetry } from "../hooks/useSensorTelemetry";
 import {
   AXIS_FACES,
@@ -35,6 +35,10 @@ export function SensorsPage() {
   const [copyResult,setCopyResult]=useState("");
   const [storagePending,setStoragePending]=useState(false);
   const [mountDraftDirty,setMountDraftDirty]=useState(false);
+  // G3: the StoragePanel reloads when calibration/mounting really changes, never because a failed
+  // sensor poll cleared the snapshot (the last known values are kept for the revision).
+  const storageRevision=useRef("");
+  if(snapshot)storageRevision.current=[snapshot.cal_state,snapshot.accel_calibrated,...(snapshot.board_align_configured??[])].join(":");
   useEffect(()=>{
     if(snapshot?.cal_apply_detail && !snapshot.accel_calibrated)setShowDiagnostics(true);
   },[snapshot?.cal_apply_detail,snapshot?.accel_calibrated]);
@@ -90,7 +94,7 @@ export function SensorsPage() {
   return (
     <div className="panel">
       <h2>Live Sensors & Calibration</h2>
-      <StoragePanel requiredScope="accel_calibration" onPending={setStoragePending} blocked={pending||!fresh||snapshot?.cal_manual===true||mountDraftDirty} revision={[snapshot?.cal_state,snapshot?.accel_calibrated,...(snapshot?.board_align_configured??[])].join(":")}/>
+      <StoragePanel requiredScope="accel_calibration" onPending={setStoragePending} blocked={pending||!fresh||snapshot?.cal_manual===true||mountDraftDirty} revision={storageRevision.current}/>
       <p>
         Move the quad gently. Gyro measures rotation speed; acceleration includes gravity.
       </p>

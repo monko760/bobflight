@@ -4,7 +4,8 @@ const {loadUiTs}=require('./load-ui-ts.cjs');
 function storage(schema=13,scope=p.STORAGE_SCOPE_V13){return `storage_api: 1\nbackend: flash\nschema: ${schema}\nstate: saved\ndirty: 0\ngeneration: 2\nlast_error: none\nscope: ${scope}\narmed: 0\nbench_active: 0\ncalibration_active: 0\nflight_enabled: 0\nstorage_end: 1\n`;}
 const current=p.parseStorage(storage());assert.equal(current.schema,13);assert.equal(p.STORAGE_PAYLOAD_BYTES_V13,256);assert(p.canSaveStorage(current,true,false));
 for(let v=1;v<13;v++)assert.throws(()=>p.parseStorage(storage(v)),/Fresh install/);
-assert.throws(()=>p.parseStorage(storage(14)),/Fresh install/);
+// F5: a newer schema or a scope/parse mismatch is an unreadable reply (raw kept), never 'Fresh install required'.
+for(const bad of [storage(14),storage(13,'pid_rates'),storage(13).replace('backend: flash','backend: eeprom'),storage(13).replace('storage_end: 1\n',''),'garbage\n']){let err;try{p.parseStorage(bad);}catch(e){err=e;}assert(err instanceof p.StorageReplyError,String(err));assert.match(err.message,/^Storage reply could not be read: /);assert.doesNotMatch(err.message,/Fresh install/i);assert.equal(err.raw,bad);}
 for(const flag of ['armed','benchActive','calibrationActive'])assert(!p.canSaveStorage({...current,[flag]:true},true,false));
 assert(!p.canSaveStorage({...current,lastError:'fresh_install_required',state:'error'},true,false));assert(!p.canSaveStorage({...current,backend:'host_sim'},true,false));assert(!p.canSaveStorage(current,false,false));assert(!p.canSaveStorage(current,true,true));
 const dump=`# bobflight_config: 1\n# schema: 13\n# board: matek_f722_px\n# firmware: test-actual\n# kind: dump\n# mode_count: 4\n# scope: ${p.STORAGE_SCOPE_V13}\n# excludes: gyro_calibration\n# accel_calibrated: no\n# accel_bias: 0 0 0\n# accel_scale: 1 1 1\n# accel_storage: not-calibrated\n# calibration_restore: metadata-only-recalibrate-if-flash-lost\npower_config 11 0 0 0 3.5 3.3 0\ndshot 300\nset rate_max_roll 670\nset rate_center_roll 200\nset rate_expo_roll 0.5\nset motor_direction props-in\nset align_board_roll 180\nset loop_rate_hz 1000\nset gyro_notch1_cutoff_hz 100\nset gyro_notch1_hz 200\nset rpm_filter_harmonics 2\nset motor_poles 14\n# config_end: 1\n`;
@@ -19,7 +20,8 @@ function nodes(t){return Array.isArray(t)?t.flatMap(nodes):t&&typeof t==='object
 function text(t){return Array.isArray(t)?t.map(text).join(''):t&&typeof t==='object'?text(t.props?.children):String(t??'');}
 (async()=>{
  for(const blocked of [false,true]){
-  let saves=0;const host={getConnectionStatus:()=> 'connected',sendCommand:async()=>storage(),saveSettings:async()=>{saves++;}};
+  // PR 2: the panel sends `save` inside its storage sequence (one gated run on hosts that offer it) and requires the FW's verified reply.
+  let saves=0;const host={getConnectionStatus:()=> 'connected',sendCommand:async(c)=>{if(c==='save'){saves++;return 'saved: flash verified\r\n';}return storage();},saveSettings:async()=>{throw Error('StoragePanel must not use saveSettings()');}};
   const react={...require('react'),useEffect:()=>{},useRef:v=>({current:v}),useState:v=>[v===null?current:v,()=>{}]};
   const {StoragePanel}=loadUiTs(path.resolve(__dirname,'../../ui/src/components/StoragePanel.tsx'),{react,'../protocol':p,'../hooks/useHost':{useHost:()=>({host,connectionStatus:'connected',postFlashGate:false})}});
   const b=nodes(StoragePanel({requiredScope:'power',blocked})).find(n=>n.type==='button'&&text(n)==='Save to controller');assert.equal(b.props.disabled,blocked);await b.props.onClick();await new Promise(r=>setImmediate(r));assert.equal(saves,blocked?0:1);
