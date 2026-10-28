@@ -43,6 +43,7 @@ static void cli_write_str(const char *s)
 
 #include "drivers/sensor_cli.h"
 #include "drivers/timing_cli.h"
+#include "drivers/timing_profile_cli.h"
 #include "drivers/loop_status_cli.h"
 #include "drivers/ports_modes_cli.h"
 #include "drivers/storage_cli.h"
@@ -102,6 +103,7 @@ static void cmd_help(void)
         "  disarm   - disarm\r\n"
         "  pid_diag [status|start|start rx|stop] - 60s zero-output rate/PID diagnostic\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
+        "  timing_profile [start|stop] - optional 3s disarmed stage capture\r\n"
         "  loop_rate - loop-rate policy: setting, pending reboot, active gyro/denom and fallback reason\r\n"
         "  filters  - gyro notch runtime state (active, reason) at the actual filter rate\r\n"
         "  rpm_filter - RPM notch state: reason, harmonics active, per-motor Hz from bidir eRPM\r\n"
@@ -463,6 +465,10 @@ static void handle_line(char *line)
         /* Diagnostic response is framed and never sends motor output. */
     } else if (cmd_ports_modes_command(line)) {
         /* Handled ports, modes, mode_range, or receiver_uart */
+    } else if (strcmp(line, "timing_profile") == 0) {
+        cmd_timing_profile("");
+    } else if (strncmp(line, "timing_profile ",15) == 0) {
+        cmd_timing_profile(line+15);
     } else if (strcmp(line, "timing") == 0) {
         cmd_timing();
     } else if (strcmp(line, "loop_rate") == 0) {

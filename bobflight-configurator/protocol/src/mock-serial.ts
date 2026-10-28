@@ -247,6 +247,10 @@ export class MockSerial extends EventEmitter {
     {const bb=this.blackbox.handle(line,this.armed);if(bb!==null){this.emitData(bb);return;}}
     if(line.startsWith("sd read")){this.emitData("sd_data_error: unavailable-mock\r\nsd_data_end: 1\r\n");return;}
     if(line === "sd probe" || line === "sd status" || line === "sd cancel"){this.emitData("sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n");return;}
+    if(line === "timing_profile" || line === "timing_profile start" || line === "timing_profile stop"){
+      const reply="timing_profile_available: no\r\ntiming_profile_refused: mock-no-hardware\r\ntiming_profile_end: 1\r\n";
+      this.emitData(reply);return;
+    }
     if(line === "timing"){this.emitData("timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n");return;}
     {const lr=this.loopRateSetting.handle(line,this.armed);if(lr!==null){this.emitData(lr);return;}}
     {const gn=this.gyroNotch.handle(line,this.armed);if(gn!==null){this.emitData(gn);return;}}
