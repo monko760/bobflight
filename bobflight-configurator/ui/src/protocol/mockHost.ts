@@ -355,6 +355,10 @@ export class MockBobFlightHost implements BobFlightHost {
     {const bb=this.blackbox.handle(cmd,this.armed);if(bb!==null)return bb;}
     if(cmd.startsWith("sd read"))return "sd_data_error: unavailable-mock\r\nsd_data_end: 1\r\n";
     if(cmd === "sd probe" || cmd === "sd status" || cmd === "sd cancel")return "sd_state: unavailable-mock\r\nsd_write_enabled: no\r\nsd_end: 1\r\n";
+    if(cmd === "timing_profile" || cmd === "timing_profile start" || cmd === "timing_profile stop"){
+      const reply="timing_profile_available: no\r\ntiming_profile_refused: mock-no-hardware\r\ntiming_profile_end: 1\r\n";
+      return reply;
+    }
     if(cmd === "timing")return "timing_available: no\r\ntimebase: mock-no-hardware\r\ntiming_end: 1\r\n";
     {const lr=this.loopRateSetting.handle(cmd,this.armed);if(lr!==null)return lr;}
     {const gn=this.gyroNotch.handle(cmd,this.armed);if(gn!==null)return gn;}

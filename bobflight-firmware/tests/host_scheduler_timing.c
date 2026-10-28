@@ -1,9 +1,13 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 #include "sched/scheduler.h"
+#include "flight/arming.h"
 #include <stdio.h>
 static uint64_t now;static unsigned gyro,pid,mix,filter,rx,fs,cli;
 static uint32_t gyro_cost,filter_cost,pid_cost,mix_cost;
 uint64_t hal_micros(void){return now;}
+bool hal_time_high_resolution(void){return true;}
+arm_state_t arming_state(void){return ARM_DISARMED;}
+bool bench_motor_active(void){return false;}
 void loop_gyro(void){gyro++;now+=gyro_cost;}
 void loop_filter(void){filter++;now+=filter_cost;}
 void loop_pid(void){pid++;now+=pid_cost;}

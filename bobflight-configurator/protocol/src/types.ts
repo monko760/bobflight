@@ -40,6 +40,9 @@ export type CliCommand =
   | "pid_diag" | "pid_diag status" | "pid_diag start" | "pid_diag start rx" | "pid_diag stop"
   | "blackbox start" | "blackbox stop" | "blackbox status"
   | "sd probe" | "sd status" | "sd cancel" | `sd read ${number}`
+  | "timing_profile"
+  | "timing_profile start"
+  | "timing_profile stop"
   | "timing"
   | "power"
   | `power_config ${number} ${number} ${number} ${number} ${number} ${number} ${number}`

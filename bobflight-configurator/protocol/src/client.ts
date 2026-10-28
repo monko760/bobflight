@@ -58,7 +58,7 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "receiver_map AETR",
   "receiver_map TAER",
   "pid_diag", "pid_diag status", "pid_diag start", "pid_diag start rx", "pid_diag stop",
-  "timing",
+  "timing", "timing_profile", "timing_profile start", "timing_profile stop",
   "power",
   "arm", "bench_switch", "bench_stop", "bench_status",
   "disarm",
@@ -316,11 +316,11 @@ export class BobFlightCliClient {
           this.collector = null;
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
-          if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "barometer" || line === "storage" || line === "flash_info" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
+          if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "barometer" || line === "storage" || line === "flash_info" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "timing_profile" || line.startsWith("timing_profile ") || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
           reject(err);
         },
         { idleMs, timeoutMs, maxChars: opts?.maxResponseChars,
-          endMarker: line === "barometer" ? "barometer_end: 1" : line === "flash_info" ? "flash_info_end: 1" : line.startsWith("sd read") ? "sd_data_end: 1" : line.startsWith("blackbox ") ? "blackbox_end: 1" : line.startsWith("sd ") ? "sd_end: 1" : (line === "pid_diag" || line.startsWith("pid_diag ")) ? "pid_diag_end: 1" : line === "storage" ? "storage_end: 1" : (line === "diff all" || line === "dump all") ? "# config_end: 1" : line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "loop_rate" ? "loop_rate_end: 1" : line === "mixer" ? "mixer_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
+          endMarker: (line === "timing_profile" || line.startsWith("timing_profile ")) ? "timing_profile_end: 1" : line === "barometer" ? "barometer_end: 1" : line === "flash_info" ? "flash_info_end: 1" : line.startsWith("sd read") ? "sd_data_end: 1" : line.startsWith("blackbox ") ? "blackbox_end: 1" : line.startsWith("sd ") ? "sd_end: 1" : (line === "pid_diag" || line.startsWith("pid_diag ")) ? "pid_diag_end: 1" : line === "storage" ? "storage_end: 1" : (line === "diff all" || line === "dump all") ? "# config_end: 1" : line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "loop_rate" ? "loop_rate_end: 1" : line === "mixer" ? "mixer_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
 

@@ -222,3 +222,6 @@ int main(void){
  puts("PASS loop rate: loop_rate_hz parse/support, default 4000 = 8000/2 at 250 us, 8000 = 8000/1 at 125 us with 4-step guard ladder, 1000 on Kakute, pending reboot, rolling 1 s loop_actual_hz (unavailable, drops, stall), overrun counter, guard 4k->2k->1k, bidir keeps 4000 (8000 capped to 8000/2, capture failure -> 1000/1), timebase/gyro fallbacks, frozen status lines");
  return 0;
 }
+
+/* Profiling is off in loop-rate policy tests. */
+bool bench_motor_active(void){return false;}

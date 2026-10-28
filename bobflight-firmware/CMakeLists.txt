@@ -218,7 +218,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/drivers/rx.c src/drivers/crsf.c src/drivers/dshot.c
     src/flight/arming.c src/flight/failsafe.c src/flight/attitude.c
     src/flight/config.c src/flight/pid.c src/flight/filter.c src/flight/rates.c
-    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c)
+    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c tests/scheduler_profile_hal_stub.c)
   target_compile_definitions(bobflight_failsafe_integration_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_failsafe_integration_test m)
   foreach(fs_case boot drop drop-wrap bad-traffic repeated-valid land-throttle
@@ -235,7 +235,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_pid_diag_task_test tests/host_pid_diag_task.c
     src/sched/scheduler.c src/sched/tasks.c src/flight/pid_diag.c src/flight/pid_diag_core.c src/flight/pid.c src/flight/filter.c
     src/flight/mixer.c src/flight/attitude.c src/flight/config.c src/flight/rates.c
-    src/flight/mode_range.c src/flight/horizon.c)
+    src/flight/mode_range.c src/flight/horizon.c tests/scheduler_profile_hal_stub.c)
   target_compile_definitions(bobflight_pid_diag_task_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_pid_diag_task_test m)
   add_test(NAME pid_diag_task COMMAND bobflight_pid_diag_task_test)
@@ -296,7 +296,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/drivers/rx.c src/drivers/crsf.c src/drivers/dshot.c
     src/flight/arming.c src/flight/failsafe.c src/flight/attitude.c
     src/flight/config.c src/flight/pid.c src/flight/filter.c src/flight/rates.c
-    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c)
+    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c tests/scheduler_profile_hal_stub.c)
   target_compile_definitions(bobflight_noise_saturation_test PRIVATE BOBFLIGHT_HOST=1)
   target_link_libraries(bobflight_noise_saturation_test m)
   add_test(NAME noise_saturation COMMAND bobflight_noise_saturation_test --table)
@@ -308,7 +308,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     src/drivers/rx.c src/drivers/crsf.c src/drivers/dshot.c
     src/flight/arming.c src/flight/failsafe.c src/flight/attitude.c
     src/flight/config.c src/flight/pid.c src/flight/filter.c src/flight/rates.c
-    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c)
+    src/flight/horizon.c src/flight/mode_range.c src/flight/mixer.c tests/scheduler_profile_hal_stub.c)
   target_compile_definitions(bobflight_gyro_post_filter_chain_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_HOST_GYRO_CHAIN=1)
   target_link_libraries(bobflight_gyro_post_filter_chain_test m)
   add_test(NAME gyro_post_filter_chain COMMAND bobflight_gyro_post_filter_chain_test)
@@ -331,12 +331,12 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_mode_range_test src/flight/mode_range.c tests/host_mode_range.c)
   target_link_libraries(bobflight_mode_range_test m)
   add_test(NAME mode_range COMMAND bobflight_mode_range_test)
-  add_executable(bobflight_pid_elapsed_test src/sched/scheduler.c src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c)
+  add_executable(bobflight_pid_elapsed_test src/sched/scheduler.c src/sched/tasks.c src/flight/attitude.c tests/host_pid_elapsed.c tests/scheduler_profile_hal_stub.c)
   target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/rates.c src/flight/config.c)
   target_sources(bobflight_pid_elapsed_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_pid_elapsed_test m)
   add_test(NAME pid_elapsed COMMAND bobflight_pid_elapsed_test)
-  add_executable(bobflight_loop_dt_test src/sched/scheduler.c src/sched/tasks.c src/flight/attitude.c tests/host_loop_dt.c)
+  add_executable(bobflight_loop_dt_test src/sched/scheduler.c src/sched/tasks.c src/flight/attitude.c tests/host_loop_dt.c tests/scheduler_profile_hal_stub.c)
   target_sources(bobflight_loop_dt_test PRIVATE src/flight/rates.c src/flight/config.c)
   target_sources(bobflight_loop_dt_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_loop_dt_test m)
@@ -346,6 +346,10 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_f7_clock_test src/hal/stm32f7/hal_clock.c tests/host_f7_clock.c)
   target_compile_options(bobflight_f7_clock_test PRIVATE -include ${CMAKE_SOURCE_DIR}/tests/clock_hw_mock.h)
   add_test(NAME f7_clock_register_mock COMMAND bobflight_f7_clock_test)
+  add_executable(bobflight_timing_profile_test src/sched/scheduler.c tests/host_timing_profile.c)
+  add_test(NAME timing_profile COMMAND bobflight_timing_profile_test)
+  add_test(NAME timing_profile_cli COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/host_timing_profile_cli.py $<TARGET_FILE:bobflight_host>)
   add_executable(bobflight_scheduler_timing_test src/sched/scheduler.c tests/host_scheduler_timing.c)
   add_test(NAME scheduler_timing COMMAND bobflight_scheduler_timing_test)
   add_executable(bobflight_loop_rate_test src/sched/scheduler.c src/sched/loop_rate.c src/sched/loop_rate_setting.c tests/host_loop_rate.c)
@@ -587,7 +591,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME mpu6000_relaxed COMMAND bobflight_mpu6000_relaxed_test)
   add_executable(bobflight_bench_safety_test
     src/sched/scheduler.c src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/mixer.c
-    src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c)
+    src/flight/attitude.c src/flight/config.c tests/host_bench_safety.c tests/scheduler_profile_hal_stub.c)
   target_compile_definitions(bobflight_bench_safety_test PRIVATE BOBFLIGHT_HOST=1)
   target_sources(bobflight_bench_safety_test PRIVATE src/flight/rates.c)
   target_sources(bobflight_bench_safety_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
@@ -612,7 +616,7 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
     ${CMAKE_SOURCE_DIR}/tests/host_flight_modes_cli.py $<TARGET_FILE:bobflight_host>)
   add_executable(bobflight_control_mode_test
     src/sched/scheduler.c src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/attitude.c
-    src/flight/rates.c src/flight/config.c tests/host_control_mode.c)
+    src/flight/rates.c src/flight/config.c tests/host_control_mode.c tests/scheduler_profile_hal_stub.c)
   target_compile_definitions(bobflight_control_mode_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_FLIGHT_ENABLE=1)
   target_sources(bobflight_control_mode_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_control_mode_test m)
