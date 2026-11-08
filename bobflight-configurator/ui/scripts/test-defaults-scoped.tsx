@@ -21,7 +21,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
 import { PidPage } from "../src/pages/PidPage";
-import { RatesPage } from "../src/pages/RatesPage";
+import { RatesPage, ratesCapabilityError } from "../src/pages/RatesPage";
 import { FiltersPage } from "../src/pages/FiltersPage";
 import { SetupPage } from "../src/pages/SetupPage";
 import { StoragePanel } from "../src/components/StoragePanel";
@@ -29,7 +29,7 @@ import { readStorage, saveSequence } from "../src/components/storageSequence";
 import { ACCEL_CAL_NOT_SAVED_NOTE } from "../src/components/AccelCalSavedNote";
 import { GATE_BUSY_MESSAGE, GATE_QUEUE_TIMEOUT_MS, GateBusyError, GateQueueTimeoutError, GateCancelledError, GateDisconnectedError, GateSessionChangedError, commandGateOptions, isReadOnlyCliCommand } from "../src/protocol";
 import { createHost } from "../src/protocol/createHost";
-import type { BobFlightHost } from "../src/protocol/types";
+import { ALLOWED_CLI_COMMANDS, parseCliInput, type BobFlightHost } from "../src/protocol/types";
 import { DEFAULTS_BUSY_TEXT, DEFAULTS_UNSAVED_TEXT, DEFAULTS_CLEAN_TEXT, DEFAULTS_MAYBE_UNSAVED_TEXT, DEFAULTS_UNSUPPORTED_TEXT, DEFAULTS_GATE_WAIT_MS, runGroupDefaults, retryWhileGateBusy } from "../src/tuning/scopedDefaults";
 import {
   DEFAULTS_GROUP_KEYS,
@@ -684,6 +684,36 @@ async function main() {
     for (const g of ["pid", "rates", "filters"] as const) { await openTab(r, g); await openDialog(); await confirm(g); }
     const sent = r.client.getSentCommands().filter((c) => c.startsWith("defaults"));
     assert.deepEqual(sent, ["defaults", "defaults pid", "defaults rates", "defaults filters"]);
+    await r.done();
+  });
+
+  await test("ratesCapabilityError is still the Rates storage-failure wording", async () => {
+    assert.equal(ratesCapabilityError(new Error("storage timed out")), "Storage capability unverified: storage timed out. Saving is disabled. Reload controller to try again.");
+    assert.equal(
+      ratesCapabilityError(new GateQueueTimeoutError(GATE_QUEUE_TIMEOUT_MS)),
+      "Storage capability unverified: another command was using the connection, so storage status was not read (nothing was sent). Saving is disabled. Reload controller to try again.",
+    );
+  });
+
+  await test("CLI input allowlist does not accept defaults or defaults <group>", async () => {
+    for (const c of ["defaults", "defaults pid", "defaults rates", "defaults filters", "defaults all"]) {
+      assert.equal(parseCliInput(c), null, c);
+      assert.equal((ALLOWED_CLI_COMMANDS as readonly string[]).includes(c), false, c);
+    }
+  });
+
+  await test("Cancel aborts the dialog read's AbortSignal and sends no defaults command", async () => {
+    const r = await rig(); await openTab(r, "pid");
+    const signals: AbortSignal[] = [];
+    const orig = r.host.getSetting.bind(r.host);
+    r.host.getSetting = ((key, opts) => { if (opts?.signal) signals.push(opts.signal); return orig(key, opts); }) as typeof r.host.getSetting;
+    await openDialog();
+    assert.ok(signals.length >= 1 && signals.every((s) => s === signals[0] && !s.aborted), "one live AbortSignal for the dialog read");
+    const m = r.mark();
+    click("Cancel");
+    assert.equal(signals[0].aborted, true, "Cancel aborts that signal");
+    await sleep(300);
+    assert.deepEqual(r.since(m), [], "Cancel sent nothing");
     await r.done();
   });
 

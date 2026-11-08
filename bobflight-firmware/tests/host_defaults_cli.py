@@ -1,12 +1,14 @@
 # Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0
 """Actual host firmware CLI: D1 scoped `defaults pid|rates|filters` per board.
 Each defaults_key line equals the real `get <key>` reply, the end count equals
-the key lines, only that group moves (props-in, align yaw 90, loop rate,
-motor_poles, DShot, receiver map survive defaults + save + reboot), refusals
-are exact and leave `storage` (incl. dirty) and every setting unchanged, and
-`storage` carries the additive accel_cal_saved line. The host has no IMU, so
-the armed/bench/calibration refusals and the calibration-survives case run in
-host_defaults_scoped.c against the same handler."""
+the key lines, only that group moves (props-in, align roll 180 / pitch -90 /
+yaw 90, loop rate, motor_poles, DShot, receiver map survive defaults + save +
+reboot), refusals are exact and leave `storage` (incl. dirty) and every setting
+unchanged, and `storage` carries the additive accel_cal_saved line. The host
+has no IMU, so accel_cal_saved stays no: that is not calibration-survival
+evidence. Armed/bench/calibration refusals and the calibration-survives case
+run in host_defaults_scoped.c against the same handler. This process uses the
+host flash simulator (backend host_sim), not a physical flight-controller flash."""
 import os,subprocess,sys
 exe,board=sys.argv[1],sys.argv[2]
 FAST=board=='kakute_f7_hdv'
@@ -19,9 +21,10 @@ TUNE=['set pid_roll_p 0.004','set pid_yaw_d 0.0004','set min_throttle 0.1','set 
       'set rate_center_roll 150','set rate_max_yaw 700','set rate_expo_pitch 0.6',
       'set gyro_lpf_hz 250','set dterm_lpf_hz 90','set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200','set rpm_filter_harmonics 2']
 TUNED={c.split()[1]:c.split()[2] for c in TUNE}
-KEEP=['set motor_direction props-in','set align_board_yaw 90','set motor_poles 12','dshot 600','receiver_map TAER']+(['set loop_rate_hz 1000'] if FAST else [])
+KEEP=['set motor_direction props-in','set align_board_roll 180','set align_board_pitch -90','set align_board_yaw 90','set motor_poles 12','dshot 600','receiver_map TAER']+(['set loop_rate_hz 1000'] if FAST else [])
 ALL=[k for g in GROUPS.values() for k in g]
-OTHER=['motor_direction','align_board_yaw','motor_poles','loop_rate_hz']
+OTHER=['motor_direction','align_board_roll','align_board_pitch','align_board_yaw','motor_poles','loop_rate_hz']
+EVIDENCE='bobflight_host_sim_flash'
 PAD=' '*64
 def run(cmds,reinit=False):
     env=dict(os.environ)
@@ -38,7 +41,10 @@ def storages(lines):
     return out
 def getmap(lines):
     return dict(l.split('=',1) for l in lines if '=' in l and l.split('=',1)[0] in ALL+OTHER)
+def matrix(group,item,outcome):
+    print(f'MATRIX group={group} item={item} outcome={outcome} evidence={EVIDENCE}')
 
+print('MATRIX_NOTE evidence=bobflight_host_sim_flash real bobflight_host on hal flash backend host_sim. Not a hardware flash. Host has no IMU: accel_cal_saved no is NOT calibration-survival evidence (see host_defaults_scoped.c).')
 # 1. Reply shape: group line, one key line per key in `get` format, end count == key lines.
 for g,keys in GROUPS.items():
     lines=run(TUNE+[f'defaults {g}']+[f'get {k}' for k in keys])
@@ -56,7 +62,7 @@ for g,keys in GROUPS.items():
     assert 'dirty: 0' in st[0] and 'dirty: 1' in st[1] and 'state: saved' in st[2],st  # no auto-save
     assert all(s[-2]=='accel_cal_saved: no' for s in st),st  # host: no IMU, so never a calibration
     v=getmap(lines[lines.index(st[2][-1]):])
-    assert v['motor_direction']=='props-in' and v['align_board_yaw']=='90' and v['motor_poles']=='12',v
+    assert v['motor_direction']=='props-in' and v['align_board_roll']=='180' and v['align_board_pitch']=='-90' and v['align_board_yaw']=='90' and v['motor_poles']=='12',v
     assert v['loop_rate_hz']=='1000',v  # Kakute default is 4000: the saved 1000 survives
     d=run([f'get {k}' for k in ALL]);dv=getmap(d)
     for k in ALL:
@@ -65,6 +71,16 @@ for g,keys in GROUPS.items():
     assert 'dshot 600' in run(KEEP+['diff all'])  # sanity: diff carries it
     after=run(KEEP+TUNE+['save','reboot',PAD,f'defaults {g}','save','reboot',PAD,'diff all'],reinit=True)
     assert 'dshot 600' in after and 'receiver_map TAER' in after and 'set motor_direction props-in' in after,(g,after)
+    assert 'set align_board_roll 180' in after and 'set align_board_pitch -90' in after and 'set align_board_yaw 90' in after,(g,after)
+    matrix(g,'accel_calibration','NOT_RUN_NO_IMU')
+    matrix(g,'accel_cal_saved','PRESENT_no_NOT_SURVIVAL_EVIDENCE')
+    matrix(g,'align_board_roll_pitch_yaw','KEPT')
+    matrix(g,'motor_direction','KEPT')
+    matrix(g,'motor_poles','KEPT')
+    matrix(g,'loop_rate_hz','KEPT_NONDEFAULT' if FAST else 'KEPT_EQUALS_BOARD_DEFAULT')
+    matrix(g,'dshot_receiver_map','KEPT')
+    matrix(g,'other_tab_tuned_keys','KEPT')
+    matrix(g,'this_group_keys','RESET_TO_DEFAULT')
 
 # 3. Refusals: exact single line, storage and every setting unchanged (dirty and clean).
 REF=[('defaults','defaults_error: group_required pid|rates|filters'),('defaults bogus','defaults_error: unknown_group'),
@@ -83,4 +99,4 @@ assert 'rate_center_roll=123.456' in lines and 'pid_roll_p=0.0123456' in lines,l
 
 # 5. help documents the scoped form.
 assert any(l.startswith('  defaults pid|rates|filters - ') for l in run(['help'])),'help'
-print(f'PASS {board}: defaults pid|rates|filters replies == get, end count == key lines, only the group resets (props-in, align 90, loop, poles, DShot, map survive save+reboot), refusals exact and storage/dirty unchanged, accel_cal_saved present')
+print(f'PASS {board}: defaults pid|rates|filters replies == get, end count == key lines, only the group resets (props-in, align roll 180 pitch -90 yaw 90, loop, poles, DShot, map survive save+reboot), refusals exact and storage/dirty unchanged, accel_cal_saved present (no IMU, so not a calibration survival proof)')

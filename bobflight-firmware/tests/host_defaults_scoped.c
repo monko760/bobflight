@@ -4,10 +4,13 @@
  *
  * D1 scoped defaults: the real `defaults <group>` CLI handler (defaults_cli.h)
  * against the real config.c, loop-rate setting and persist.c encode/decode.
- * Setup: props-in, align yaw 90 (saved + reloaded, active), loop 1000, valid
- * accel calibration. Each group: defaults <g> + save + reload keeps all four,
+ * Setup: props-in, align roll 180 / pitch -90 / yaw 90 (saved + reloaded,
+ * active), loop 1000, motor_poles 12, valid accel calibration, power cells 4,
+ * HORIZON on AUX3. Each group: defaults <g> + save + reload keeps those,
  * accel_cal_saved stays yes, group keys equal defaults, reply lines exact.
  * Refusals: byte-identical state and dirty flag, in the frozen order.
+ * Evidence is this process's in-memory config_store stub plus a stubbed gyro.
+ * It is not bobflight_host and it is not a hardware flash.
  */
 #include <assert.h>
 #include <stdio.h>
@@ -124,17 +127,27 @@ static void key_lines_match_count(const char *reply,const char *g){
  char end[64];snprintf(end,sizeof end,"defaults_end: %s %u\r\n",g,lines);
  CHECK(strstr(reply,end)!=NULL,"end count != %u key lines in %s",lines,reply);
 }
+/* Readable preservation matrix. outcome is what this run observed. */
+static void matrix_out(const char *group,const char *item,const char *outcome){
+ printf("MATRIX group=%s item=%s outcome=%s evidence=persist_unit_inmemory_store\n",group,item,outcome);
+}
 
 int main(void){
+ puts("MATRIX_NOTE evidence=persist_unit_inmemory_store real defaults_cli.h+config.c+persist.c; config_store is the in-memory stub in this file; gyro calibration is stubbed. Not bobflight_host. Not a hardware flash.");
  power_init();persist_init();
- /* Setup: props-in, yaw 90, loop 1000, valid accel cal; save + reload so 90 is active. */
- CHECK(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN),"dir");CHECK(config_set_key("align_board_yaw",90),"yaw");CHECK(loop_rate_setting_set(1000),"loop");
+ /* Setup: props-in, roll 180 / pitch -90 / yaw 90, loop 1000, valid accel cal; save + reload so the mount is active. */
+ CHECK(config_set_motor_direction(MOTOR_DIRECTION_PROPS_IN),"dir");
+ CHECK(config_set_key("align_board_roll",180)&&config_set_key("align_board_pitch",-90)&&config_set_key("align_board_yaw",90),"align");
+ CHECK(loop_rate_setting_set(1000),"loop");
  CHECK(crsf_set_map("TAER"),"map");board.rx_uart=2;speed=600;
+ {power_config_t pc=*power_config();pc.cells=4;pc.capacity_mah=1500;CHECK(power_configure(&pc),"power");}
+ CHECK(mode_range_set(MODE_HORIZON,true,3,1300,1700),"horizon mode");
  cal.accel_valid=true;for(unsigned i=0;i<3;i++){cal.accel_bias[i]=.01f*(i+1);cal.accel_scale[i]=1.f+.001f*i;}
  CHECK(persist_save(),"setup save: %s",persist_last_error());
- /* yaw 90 is requested but not active yet: this first save deliberately drops the old-frame cal. */
+ /* Mount is requested but not active yet: this first save deliberately drops the old-frame cal. */
  CHECK(!persist_accel_calibration_saved(),"pending alignment must exclude cal");
- reboot();CHECK(config_board_alignment_active()[2]==90,"yaw active");
+ reboot();
+ CHECK(config_board_alignment_active()[0]==180&&config_board_alignment_active()[1]==-90&&config_board_alignment_active()[2]==90,"align active");
  cal.accel_valid=true;for(unsigned i=0;i<3;i++){cal.accel_bias[i]=.01f*(i+1);cal.accel_scale[i]=1.f+.001f*i;} /* recalibrate in the new frame */
  CHECK(persist_save()&&persist_accel_calibration_saved(),"cal save");reboot();
  CHECK(cal.accel_valid&&persist_accel_calibration_saved(),"cal restored after reload");
@@ -151,17 +164,42 @@ int main(void){
   CHECK(persist_save(),"%s save: %s",GROUPS[g],persist_last_error());
   CHECK(persist_accel_calibration_saved(),"%s: accel_cal_saved must stay yes",GROUPS[g]);
   reboot();
-  CHECK(config_motor_direction()==MOTOR_DIRECTION_PROPS_IN,"%s: props-in lost",GROUPS[g]);
-  CHECK(config_get()->align_board_yaw==90&&config_board_alignment_active()[2]==90,"%s: align yaw lost",GROUPS[g]);
-  CHECK(loop_rate_setting_get()==1000,"%s: loop rate lost",GROUPS[g]);
-  CHECK(cal.accel_valid&&cal.accel_bias[2]==.03f&&cal.accel_scale[1]==1.001f,"%s: accel cal lost",GROUPS[g]);
-  CHECK(persist_accel_calibration_saved(),"%s: accel_cal_saved after reload",GROUPS[g]);
-  CHECK(speed==600&&!strcmp(crsf_map(),"TAER")&&board.rx_uart==2,"%s: dshot/map/uart changed",GROUPS[g]);
-  float v;CHECK(config_get_key("motor_poles",&v)&&v==12,"%s: motor_poles reset",GROUPS[g]);
+  const int dir_ok=config_motor_direction()==MOTOR_DIRECTION_PROPS_IN;
+  CHECK(dir_ok,"%s: props-in lost",GROUPS[g]);
+  const float *active=config_board_alignment_active();
+  const int align_ok=config_get()->align_board_roll==180&&config_get()->align_board_pitch==-90&&config_get()->align_board_yaw==90&&active[0]==180&&active[1]==-90&&active[2]==90;
+  CHECK(align_ok,"%s: board alignment lost (requested %g %g %g active %g %g %g)",GROUPS[g],config_get()->align_board_roll,config_get()->align_board_pitch,config_get()->align_board_yaw,active[0],active[1],active[2]);
+  const int loop_ok=loop_rate_setting_get()==1000;
+  CHECK(loop_ok,"%s: loop rate lost",GROUPS[g]);
+  const int cal_ok=cal.accel_valid&&cal.accel_bias[0]==.01f&&cal.accel_bias[1]==.02f&&cal.accel_bias[2]==.03f&&cal.accel_scale[0]==1.f&&cal.accel_scale[1]==1.001f&&cal.accel_scale[2]==1.002f;
+  CHECK(cal_ok,"%s: accel cal lost",GROUPS[g]);
+  const int cal_saved_ok=persist_accel_calibration_saved();
+  CHECK(cal_saved_ok,"%s: accel_cal_saved after reload",GROUPS[g]);
+  const int unrelated_ok=speed==600&&!strcmp(crsf_map(),"TAER")&&board.rx_uart==2;
+  CHECK(unrelated_ok,"%s: dshot/map/uart changed",GROUPS[g]);
+  const mode_config_t *hz=mode_range_get(MODE_HORIZON);
+  const int mode_ok=hz&&hz->enabled&&hz->aux_channel==3&&hz->min_us==1300&&hz->max_us==1700;
+  CHECK(mode_ok,"%s: horizon mode lost",GROUPS[g]);
+  const int power_ok=power_config()->cells==4&&power_config()->capacity_mah==1500;
+  CHECK(power_ok,"%s: power lost",GROUPS[g]);
+  float v;const int poles_ok=config_get_key("motor_poles",&v)&&v==12;
+  CHECK(poles_ok,"%s: motor_poles reset",GROUPS[g]);
+  int group_reset=1,others_kept=1;
   for(size_t i=0;i<sizeof TUNED/sizeof TUNED[0];i++){float d;CHECK(config_get_key(TUNED[i].k,&v),"get");
-   if(in_group(GROUPS[g],TUNED[i].k)){CHECK(config_get_default_key(TUNED[i].k,&d)&&v==d,"%s: %s=%g not default",GROUPS[g],TUNED[i].k,v);}
-   else CHECK(v==tuned(TUNED[i].k),"%s touched %s (%g)",GROUPS[g],TUNED[i].k,v);}
+   if(in_group(GROUPS[g],TUNED[i].k)){const int ok=config_get_default_key(TUNED[i].k,&d)&&v==d;CHECK(ok,"%s: %s=%g not default",GROUPS[g],TUNED[i].k,v);if(!ok)group_reset=0;}
+   else{const int ok=v==tuned(TUNED[i].k);CHECK(ok,"%s touched %s (%g)",GROUPS[g],TUNED[i].k,v);if(!ok)others_kept=0;}}
   for(size_t i=0;i<4;i++)CHECK(!in_group(GROUPS[g],NON_GROUP_KEYS[i]),"%s lists %s",GROUPS[g],NON_GROUP_KEYS[i]);
+  matrix_out(GROUPS[g],"accel_calibration",cal_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"accel_cal_saved",cal_saved_ok?"KEPT_yes":"LOST");
+  matrix_out(GROUPS[g],"align_board_roll_pitch_yaw",align_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"motor_direction",dir_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"motor_poles",poles_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"loop_rate_hz",loop_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"dshot_map_uart",unrelated_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"mode_horizon_aux3",mode_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"power_cells_capacity",power_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"other_tab_tuned_keys",others_kept?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"this_group_keys",group_reset?"RESET_TO_DEFAULT":"NOT_RESET");
  }
 
  /* Refusals: exact line, nothing changes (config, cal, saved record, dirty flag). Make state dirty first. */
@@ -202,6 +240,6 @@ int main(void){
   setting_format_line(a,sizeof a,"","rate_center_roll",123.456f);CHECK(!strcmp(a,"rate_center_roll=123.456\r\n"),"%s",a);
   setting_format_line(a,sizeof a,"","pid_roll_p",.0123456f);CHECK(!strcmp(a,"pid_roll_p=0.0123456\r\n"),"%s",a);}
  if(failures){fprintf(stderr,"%d failure(s)\n",failures);return 1;}
- puts("PASS D1 scoped defaults: pid 11 / rates 9 / filters 9 reset only their keys; props-in, align yaw 90 (active), loop 1000, accel cal, motor_poles, DShot, map, UART survive defaults+save+reload; accel_cal_saved stays yes; exact replies and end counts; refusals byte-identical incl. dirty, in order; config_defaults() == config_get_default_key() for all 33 config keys (29 grouped)");
+ puts("PASS D1 scoped defaults: pid 11 / rates 9 / filters 9 reset only their keys; props-in, align roll 180 pitch -90 yaw 90 (active), loop 1000, accel cal, motor_poles, DShot, map, UART, HORIZON AUX3, power cells 4 survive defaults+save+reload; accel_cal_saved stays yes; exact replies and end counts; refusals byte-identical incl. dirty, in order; config_defaults() == config_get_default_key() for all 33 config keys (29 grouped)");
  return 0;
 }
