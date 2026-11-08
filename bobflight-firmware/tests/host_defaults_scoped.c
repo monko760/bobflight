@@ -5,8 +5,10 @@
  * D1 scoped defaults: the real `defaults <group>` CLI handler (defaults_cli.h)
  * against the real config.c, loop-rate setting and persist.c encode/decode.
  * Setup: props-in, align roll 180 / pitch -90 / yaw 90 (saved + reloaded,
- * active), loop 1000, motor_poles 12, valid accel calibration, power cells 4,
- * HORIZON on AUX3. Each group: defaults <g> + save + reload keeps those,
+ * active), loop 1000, motor_poles 12, valid accel calibration, every power
+ * field off its power_init default (voltage_scale 12.5, not only cells and
+ * capacity), and all four mode ranges off their mode_range_reset defaults.
+ * Each group: defaults <g> + save + reload keeps those,
  * accel_cal_saved stays yes, group keys equal defaults, reply lines exact.
  * Refusals: byte-identical state and dirty flag, in the frozen order.
  * Evidence is this process's in-memory config_store stub plus a stubbed gyro.
@@ -131,6 +133,27 @@ static void key_lines_match_count(const char *reply,const char *g){
 static void matrix_out(const char *group,const char *item,const char *outcome){
  printf("MATRIX group=%s item=%s outcome=%s evidence=persist_unit_inmemory_store\n",group,item,outcome);
 }
+/* Taken after the setup save/reload, before any defaults <group>. */
+static power_config_t expect_power;
+static mode_config_t expect_modes[MODE_COUNT];
+static void capture_power_modes(void){
+ expect_power=*power_config();
+ for(int i=0;i<MODE_COUNT;i++) expect_modes[i]=*mode_range_get((mode_id_t)i);
+}
+static int power_same(void){
+ const power_config_t *p=power_config();
+ return p->voltage_scale==expect_power.voltage_scale&&p->current_mv_per_amp==expect_power.current_mv_per_amp
+  &&p->current_offset_mv==expect_power.current_offset_mv&&p->cells==expect_power.cells
+  &&p->warning_cell_v==expect_power.warning_cell_v&&p->critical_cell_v==expect_power.critical_cell_v
+  &&p->capacity_mah==expect_power.capacity_mah;
+}
+static int modes_same(void){
+ for(int i=0;i<MODE_COUNT;i++){
+  const mode_config_t *m=mode_range_get((mode_id_t)i);const mode_config_t *e=&expect_modes[i];
+  if(!m||m->enabled!=e->enabled||m->aux_channel!=e->aux_channel||m->min_us!=e->min_us||m->max_us!=e->max_us) return 0;
+ }
+ return 1;
+}
 
 int main(void){
  puts("MATRIX_NOTE evidence=persist_unit_inmemory_store real defaults_cli.h+config.c+persist.c; config_store is the in-memory stub in this file; gyro calibration is stubbed. Not bobflight_host. Not a hardware flash.");
@@ -140,7 +163,13 @@ int main(void){
  CHECK(config_set_key("align_board_roll",180)&&config_set_key("align_board_pitch",-90)&&config_set_key("align_board_yaw",90),"align");
  CHECK(loop_rate_setting_set(1000),"loop");
  CHECK(crsf_set_map("TAER"),"map");board.rx_uart=2;speed=600;
- {power_config_t pc=*power_config();pc.cells=4;pc.capacity_mah=1500;CHECK(power_configure(&pc),"power");}
+ {power_config_t pc=*power_config();
+  pc.voltage_scale=12.5f;pc.current_mv_per_amp=40.f;pc.current_offset_mv=100.f;pc.cells=4;
+  pc.warning_cell_v=3.6f;pc.critical_cell_v=3.2f;pc.capacity_mah=1500;
+  CHECK(power_configure(&pc),"power");}
+ CHECK(mode_range_set(MODE_ARM,true,4,1600,2000),"arm mode");
+ CHECK(mode_range_set(MODE_ANGLE,true,5,1100,1800),"angle mode");
+ CHECK(mode_range_set(MODE_ACRO,true,6,1400,1900),"acro mode");
  CHECK(mode_range_set(MODE_HORIZON,true,3,1300,1700),"horizon mode");
  cal.accel_valid=true;for(unsigned i=0;i<3;i++){cal.accel_bias[i]=.01f*(i+1);cal.accel_scale[i]=1.f+.001f*i;}
  CHECK(persist_save(),"setup save: %s",persist_last_error());
@@ -151,6 +180,9 @@ int main(void){
  cal.accel_valid=true;for(unsigned i=0;i<3;i++){cal.accel_bias[i]=.01f*(i+1);cal.accel_scale[i]=1.f+.001f*i;} /* recalibrate in the new frame */
  CHECK(persist_save()&&persist_accel_calibration_saved(),"cal save");reboot();
  CHECK(cal.accel_valid&&persist_accel_calibration_saved(),"cal restored after reload");
+ capture_power_modes();
+ CHECK(expect_power.voltage_scale==12.5f&&expect_power.cells==4&&expect_power.capacity_mah==1500,"power did not reload");
+ CHECK(expect_modes[MODE_ARM].aux_channel==4&&expect_modes[MODE_ACRO].enabled&&expect_modes[MODE_HORIZON].aux_channel==3,"modes did not reload");
 
  for(unsigned g=0;g<3;g++){
   tune();CHECK(persist_save()&&!persist_dirty(),"save tuned");reboot();
@@ -177,11 +209,12 @@ int main(void){
   CHECK(cal_saved_ok,"%s: accel_cal_saved after reload",GROUPS[g]);
   const int unrelated_ok=speed==600&&!strcmp(crsf_map(),"TAER")&&board.rx_uart==2;
   CHECK(unrelated_ok,"%s: dshot/map/uart changed",GROUPS[g]);
-  const mode_config_t *hz=mode_range_get(MODE_HORIZON);
-  const int mode_ok=hz&&hz->enabled&&hz->aux_channel==3&&hz->min_us==1300&&hz->max_us==1700;
-  CHECK(mode_ok,"%s: horizon mode lost",GROUPS[g]);
-  const int power_ok=power_config()->cells==4&&power_config()->capacity_mah==1500;
-  CHECK(power_ok,"%s: power lost",GROUPS[g]);
+  const int mode_ok=modes_same();
+  CHECK(mode_ok,"%s: mode range lost arm_aux=%u acro=%d horizon_aux=%u",GROUPS[g],
+   mode_range_get(MODE_ARM)->aux_channel,mode_range_get(MODE_ACRO)->enabled,mode_range_get(MODE_HORIZON)->aux_channel);
+  const int power_ok=power_same();
+  CHECK(power_ok,"%s: power lost scale=%g (want %g) cells=%u cap=%u",GROUPS[g],
+   power_config()->voltage_scale,expect_power.voltage_scale,power_config()->cells,power_config()->capacity_mah);
   float v;const int poles_ok=config_get_key("motor_poles",&v)&&v==12;
   CHECK(poles_ok,"%s: motor_poles reset",GROUPS[g]);
   int group_reset=1,others_kept=1;
@@ -196,8 +229,8 @@ int main(void){
   matrix_out(GROUPS[g],"motor_poles",poles_ok?"KEPT":"LOST");
   matrix_out(GROUPS[g],"loop_rate_hz",loop_ok?"KEPT":"LOST");
   matrix_out(GROUPS[g],"dshot_map_uart",unrelated_ok?"KEPT":"LOST");
-  matrix_out(GROUPS[g],"mode_horizon_aux3",mode_ok?"KEPT":"LOST");
-  matrix_out(GROUPS[g],"power_cells_capacity",power_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"mode_ranges",mode_ok?"KEPT":"LOST");
+  matrix_out(GROUPS[g],"power_config",power_ok?"KEPT":"LOST");
   matrix_out(GROUPS[g],"other_tab_tuned_keys",others_kept?"KEPT":"LOST");
   matrix_out(GROUPS[g],"this_group_keys",group_reset?"RESET_TO_DEFAULT":"NOT_RESET");
  }
@@ -240,6 +273,6 @@ int main(void){
   setting_format_line(a,sizeof a,"","rate_center_roll",123.456f);CHECK(!strcmp(a,"rate_center_roll=123.456\r\n"),"%s",a);
   setting_format_line(a,sizeof a,"","pid_roll_p",.0123456f);CHECK(!strcmp(a,"pid_roll_p=0.0123456\r\n"),"%s",a);}
  if(failures){fprintf(stderr,"%d failure(s)\n",failures);return 1;}
- puts("PASS D1 scoped defaults: pid 11 / rates 9 / filters 9 reset only their keys; props-in, align roll 180 pitch -90 yaw 90 (active), loop 1000, accel cal, motor_poles, DShot, map, UART, HORIZON AUX3, power cells 4 survive defaults+save+reload; accel_cal_saved stays yes; exact replies and end counts; refusals byte-identical incl. dirty, in order; config_defaults() == config_get_default_key() for all 33 config keys (29 grouped)");
+ puts("PASS D1 scoped defaults: pid 11 / rates 9 / filters 9 reset only their keys; props-in, align roll 180 pitch -90 yaw 90 (active), loop 1000, accel cal, motor_poles, DShot, map, UART, all four mode ranges, and the full power config (voltage_scale 12.5) survive defaults+save+reload; accel_cal_saved stays yes; exact replies and end counts; refusals byte-identical incl. dirty, in order; config_defaults() == config_get_default_key() for all 33 config keys (29 grouped)");
  return 0;
 }

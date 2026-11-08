@@ -229,6 +229,14 @@ else{
     const yes=real.replace('accel_cal_saved: no','accel_cal_saved: yes');assert.deepEqual(P.readAccelCalSaved(yes),{value:'yes',line:'accel_cal_saved: yes'});
     const missing=real.replace('accel_cal_saved: no\r\n','');assert.deepEqual(P.readAccelCalSaved(missing),{value:'unknown',line:null,reason:'missing'});
     assert.deepEqual(P.readAccelCalSaved(real.replace(/\r\n/g,'\n')),{value:'no',line:'accel_cal_saved: no'},'LF too');
+    assert.deepEqual(P.readAccelCalSaved(yes.replace(/\r\n/g,'\n')),{value:'yes',line:'accel_cal_saved: yes'},'LF yes too');
+    // A leftover CR is not a line ending. Stripping it would classify these as exact yes/no.
+    for(const word of ['yes','no']){
+      const bare=`accel_cal_saved: ${word}\r`;
+      assert.deepEqual(P.readAccelCalSaved(bare),{value:'unknown',line:bare,reason:'unrecognised'},JSON.stringify(bare));
+      const doubled=real.replace(`accel_cal_saved: no\r\n`,`accel_cal_saved: ${word}\r\r\n`);
+      assert.deepEqual(P.readAccelCalSaved(doubled),{value:'unknown',line:`accel_cal_saved: ${word}\r`,reason:'unrecognised'},`${word} CR CR LF`);
+    }
     assert.deepEqual(P.readAccelCalSaved(real.replace('accel_cal_saved: no','accel_cal_saved: pending')),{value:'unknown',line:'accel_cal_saved: pending',reason:'unrecognised'},'unknown value: line verbatim, value unknown');
     // B1: only a byte-exact yes/no is known; look-alikes are unrecognised (never yes).
     for(const v of ['yes ','yes\t','y\u200bes','y\u0435s','Yes',' yes','no ','n\u043e']){const line=`accel_cal_saved: ${v}`;

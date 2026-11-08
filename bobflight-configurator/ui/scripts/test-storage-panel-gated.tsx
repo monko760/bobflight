@@ -869,6 +869,19 @@ async function main() {
       await r.done();
     });
   }
+  await test("F5 Rates tab: schema 13 last_error invalid_record or fresh_install_required is unverified with the token, not a fresh-install headline; Save disabled", async () => {
+    for (const token of ["invalid_record", "fresh_install_required"]) {
+      const r = await rig();
+      r.fw.state = "dirty";
+      r.fw.lastError = token;
+      r.render(<RatesPage />);
+      const want = `Storage capability unverified: the controller reports storage last_error ${token}. Saving is disabled. Reload controller to try again.`;
+      assert.ok(await waitFor(() => pageText().includes(want), 8000), `${token}: ${pageText().slice(0, 500)}`);
+      assert.ok(!/Fresh install required/.test(pageText()), pageText().slice(0, 400));
+      assert.ok(isDisabled(button("Save to controller")));
+      await r.done();
+    }
+  });
   await test("F5 Rates tab: a well-formed OLDER schema (12) read from the FC is the one case that says 'Fresh install required'", async () => {
     const r = await rig();
     r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 12")]);

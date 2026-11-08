@@ -21,9 +21,13 @@ export interface AccelCalSaved {
   reason?: "missing" | "repeated" | "unrecognised";
 }
 
-/** Reads `accel_cal_saved:` from a raw `storage` reply; lines after `storage_end` do not count. Never throws. */
+/**
+ * Reads `accel_cal_saved:` from a raw `storage` reply; lines after `storage_end` do not count. Never throws.
+ * A CRLF or LF split already drops a real line ending. A leftover CR (`yes\r`, `yes\r\r\n`) is not a line
+ * ending and must stay on the line so it cannot compare equal to `yes` or `no`.
+ */
 export function readAccelCalSaved(raw: string): AccelCalSaved {
-  const all = raw.split(/\r?\n/).map((l) => l.replace(/\r$/, ""));
+  const all = raw.split(/\r?\n/);
   const end = all.findIndex((l) => /^storage_end:/.test(l));
   const lines = (end >= 0 ? all.slice(0, end) : all).filter((l) => l.startsWith(ACCEL_CAL_SAVED_PREFIX));
   if (lines.length === 0) return { value: ACCEL_CAL_SAVED_UNKNOWN, line: null, reason: "missing" };

@@ -35,9 +35,11 @@ export function RatesPage(){
    try{raw=await host.sendCommand('storage');capability=parseStorage(raw);}catch(e){if(token!==epoch.current)return;throw Error(ratesCapabilityError(e));}
    if(token!==epoch.current)return;
    setStorageRaw(raw);
-   // A readable schema-13 reply whose own last_error says the configuration record needs a fresh install.
+   // A readable schema-13 reply whose last_error is invalid_record or fresh_install_required is not a
+   // reason to erase and reinstall. Only a well-formed older schema (StorageFreshInstallError, caught above)
+   // uses that headline. The token itself stays in the unverified wording.
    const actual=capability.schema===13&&capability.lastError!=='fresh_install_required'&&capability.lastError!=='invalid_record';
-   if(!actual)throw Error(`Fresh install required: the controller reports storage last_error ${capability.lastError}. Actual rates need schema 13 with initialized configuration storage.`);
+   if(!actual)throw Error(ratesCapabilityError(new Error(`the controller reports storage last_error ${capability.lastError}`)));
    setValues(read.values);loadedRef.current=read.values;setStorage(capability);setSupported(actual);setReady(true);
   }catch(e){if(token===epoch.current){setError(errorText(e));setReady(false);}}
   finally{if(token===epoch.current)setBusy(false);}

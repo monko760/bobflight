@@ -520,6 +520,26 @@ async function main() {
     await r.done();
   });
 
+  await test("Rates schema 13 last_error invalid_record or fresh_install_required is Storage capability unverified with the token, not a fresh-install headline; Save disabled", async () => {
+    for (const token of ["invalid_record", "fresh_install_required"]) {
+      const r = await rig();
+      r.accel.storageRaw = storageReply(true, "accel_cal_saved: no").replace("last_error: none", `last_error: ${token}`);
+      render(r, "rates");
+      const want = `Storage capability unverified: the controller reports storage last_error ${token}. Saving is disabled. Reload controller to try again.`;
+      assert.ok(await waitFor(() => pageText().includes(want), 12000), `${token}: ${pageText().slice(0, 500)}`);
+      assert.ok(!/Fresh install required/.test(pageText()), `${token} must not say Fresh install required`);
+      assert.ok(isDisabled(findButton("Save to controller")!), "Save disabled");
+      await r.done();
+    }
+    const older = await rig();
+    older.accel.storageRaw = storageReply(false, "accel_cal_saved: no").replace("schema: 13", "schema: 12");
+    render(older, "rates");
+    assert.ok(await waitFor(() => /Fresh install required: the controller reports storage schema 12/.test(pageText()), 12000), pageText().slice(0, 400));
+    assert.ok(!/Storage capability unverified/.test(pageText()), "schema 12 stays the fresh-install case");
+    assert.ok(isDisabled(findButton("Save to controller")!));
+    await older.done();
+  });
+
   await test("StoragePanel: accel_cal_saved shown verbatim next to Save: yes, no (+ recalibrate note), missing -> unknown; real host storage reply; a save that drops it shows no", async () => {
     const accelText = () => shown("accel-cal-saved-line");
     for (const [line, want, note] of [["accel_cal_saved: yes", "accel_cal_saved: yes", false], ["accel_cal_saved: no", "accel_cal_saved: no", true], [null, "accel_cal_saved: unknown", false]] as [string | null, string, boolean][]) {
@@ -644,6 +664,29 @@ async function main() {
       }
     });
   }
+
+  await test("accel_cal_saved B1: a leftover CR is not yes or no; CRLF and LF stay exact; no recalibrate note for a CR-tailed no", async () => {
+    for (const word of ["yes", "no"] as const) {
+      const line = `accel_cal_saved: ${word}\r`;
+      const r = await rig();
+      r.accel.storageRaw = storageReply(false, line);
+      render(r, "pid");
+      const want = `unknown (FC sent: ${JSON.stringify(line)})`;
+      assert.ok(await waitFor(() => shown("accel-cal-saved-line") === want, 8000), `${JSON.stringify(line)} -> ${shown("accel-cal-saved-line")}`);
+      assert.notEqual(shown("accel-cal-saved-line"), `accel_cal_saved: ${word}`);
+      assert.equal(shown("accel-cal-not-saved"), null, `${word} with a leftover CR shows no recalibrate note`);
+      await r.done();
+    }
+    for (const [ending, word, note] of [["\r\n", "yes", false], ["\n", "yes", false], ["\r\n", "no", true], ["\n", "no", true]] as const) {
+      const r = await rig();
+      const body = storageReply(false, `accel_cal_saved: ${word}`).replace(/\r\n/g, ending);
+      r.accel.storageRaw = body;
+      render(r, "storage");
+      assert.ok(await waitFor(() => shown("accel-cal-saved-line") === `accel_cal_saved: ${word}`, 8000), `${JSON.stringify(ending)} ${word}: ${shown("accel-cal-saved-line")}`);
+      assert.equal(shown("accel-cal-not-saved"), note ? ACCEL_CAL_NOT_SAVED_NOTE : null);
+      await r.done();
+    }
+  });
 
   await test("accel_cal_saved B1: only byte-exact yes/no shown bare; trailing space, tab, ZWSP, Cyrillic е -> unknown (FC sent: \"...\"), no note; a line after storage_end does not count", async () => {
     for (const line of ["accel_cal_saved: yes ", "accel_cal_saved: yes\t", "accel_cal_saved: y\u200bes", "accel_cal_saved: y\u0435s", "accel_cal_saved: n\u043e"]) {
