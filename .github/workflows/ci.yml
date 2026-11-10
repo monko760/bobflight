@@ -172,6 +172,14 @@ jobs:
           node ../.github/scripts/ports-modes-contract.cjs
       - name: Firmware to configurator persistent storage and exports
         run: node ../.github/scripts/storage-contract.cjs
+      - name: Firmware D1 scoped defaults pid|rates|filters and storage accel_cal_saved to Configurator parsers
+        run: |
+          npm --prefix protocol run test:storage-accel-cal-saved
+          node ../.github/scripts/defaults-contract.cjs
+      - name: Scoped defaults (D1) parser, allowlist and mock FC scenarios checked against the real host firmware replies
+        run: npm --prefix protocol run test:defaults-scoped
+      - name: Per-tab Defaults render test (PID/Rates/Filters on the real gate, confirm dialog, verbatim FW lines, unknown on missing end/count/group, no Save, Setup Reset gone) and StoragePanel accel_cal_saved verbatim
+        run: npm --prefix ui run test:defaults-scoped
       - name: Actual firmware PID diagnostic framing and config isolation
         run: node ../.github/scripts/pid-diagnostics-contract.cjs
       - name: Firmware to configurator Blackbox status api 2 (SD throughput model)
@@ -232,6 +240,8 @@ jobs:
         run: npm --prefix ui run test:gyro-notch
       - name: Filters tab render test (FiltersPage cells per mock, Save order, refused set verbatim)
         run: npm --prefix ui run test:filters-page
+      - name: PID and Filters save honesty (empty is not zero, Save only when dirty, mid-save reload)
+        run: npm --prefix ui run test:pid-filters-honesty
       - name: RPM filter parsers, view, Q x100, SETTINGS_KEYS and mock scenarios
         run: npm --prefix protocol run test:rpm-filter
       - name: RPM filter render test (Filters section per mock, Save order, refused set verbatim, Motors tab motor_poles)

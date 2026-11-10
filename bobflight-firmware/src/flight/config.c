@@ -79,7 +79,8 @@ bool config_get_default_key(const char *key,float *out){
  if(!strcmp(key,"airmode")){*out=(float)DEF_AIRMODE;return true;}
  if(!strcmp(key,"gyro_lpf_hz")){*out=DEF_GYRO_LPF;return true;}
  if(!strcmp(key,"dterm_lpf_hz")){*out=DEF_DTERM_LPF;return true;}
- if(!strcmp(key,"gyro_notch1_hz")||!strcmp(key,"gyro_notch1_cutoff_hz")||!strcmp(key,"gyro_notch2_hz")||!strcmp(key,"gyro_notch2_cutoff_hz")){*out=0.f;return true;}
+ if(!strcmp(key,"gyro_notch1_hz")||!strcmp(key,"gyro_notch2_hz")){*out=DEF_GYRO_NOTCH;return true;}
+ if(!strcmp(key,"gyro_notch1_cutoff_hz")||!strcmp(key,"gyro_notch2_cutoff_hz")){*out=DEF_GYRO_NOTCH_CUTOFF;return true;}
  if(!strcmp(key,"rpm_filter_harmonics")){*out=DEF_RPM_HARMONICS;return true;}
  if(!strcmp(key,"rpm_filter_min_hz")){*out=DEF_RPM_MIN_HZ;return true;}
  if(!strcmp(key,"rpm_filter_q_x100")){*out=DEF_RPM_Q_X100;return true;}
@@ -91,6 +92,37 @@ bool config_get_default_key(const char *key,float *out){
 }
 
 bool config_get_default(const char *key,float *out){return config_get_default_key(key,out);}
+
+/* D1: per-tab groups. Exactly the PID, Rates and Filters tab keys; the reply
+ * lists them in this order. */
+static const char *const g_group_pid[]={
+ "pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d",
+ "pid_yaw_p","pid_yaw_i","pid_yaw_d","min_throttle","airmode"};
+static const char *const g_group_rates[]={
+ "rate_center_roll","rate_center_pitch","rate_center_yaw","rate_max_roll","rate_max_pitch","rate_max_yaw",
+ "rate_expo_roll","rate_expo_pitch","rate_expo_yaw"};
+static const char *const g_group_filters[]={
+ "gyro_lpf_hz","dterm_lpf_hz","gyro_notch1_hz","gyro_notch1_cutoff_hz","gyro_notch2_hz","gyro_notch2_cutoff_hz",
+ "rpm_filter_harmonics","rpm_filter_min_hz","rpm_filter_q_x100"};
+const char *const *config_defaults_group_keys(const char *group,size_t *count){
+ size_t n=0;const char *const *k=NULL;
+ if(group&&!strcmp(group,"pid")){k=g_group_pid;n=sizeof g_group_pid/sizeof g_group_pid[0];}
+ else if(group&&!strcmp(group,"rates")){k=g_group_rates;n=sizeof g_group_rates/sizeof g_group_rates[0];}
+ else if(group&&!strcmp(group,"filters")){k=g_group_filters;n=sizeof g_group_filters/sizeof g_group_filters[0];}
+ if(count)*count=n;
+ return k;
+}
+static float *slot_for(const char *key);
+bool config_defaults_group(const char *group){
+ size_t n;const char *const *k=config_defaults_group_keys(group,&n);
+ if(!k)return false;
+ /* Validate the whole group first so a bad table can never half-apply. */
+ for(size_t i=0;i<n;i++){float v;if(!config_get_default_key(k[i],&v)||(strcmp(k[i],"airmode")&&!slot_for(k[i])))return false;}
+ /* Direct writes: each default is valid as a set (notch pairs reset together). */
+ for(size_t i=0;i<n;i++){float v;(void)config_get_default_key(k[i],&v);
+  if(!strcmp(k[i],"airmode"))g_cfg.airmode=(uint8_t)v;else *slot_for(k[i])=v;}
+ return true;
+}
 
 motor_direction_t config_motor_direction(void){return g_motor_direction;}
 bool config_set_motor_direction(motor_direction_t d){if(d!=MOTOR_DIRECTION_PROPS_OUT&&d!=MOTOR_DIRECTION_PROPS_IN)return false;g_motor_direction=d;return true;}

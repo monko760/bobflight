@@ -202,6 +202,8 @@ const char *persist_state(void){
  return persist_dirty()?"dirty":"saved";
 }
 
+bool persist_accel_calibration_saved(void){return have_saved&&saved[112]!=0;}
+
 const char *persist_accel_storage(void){
  if(!config_store_supported())return "ram-only";
  if(load_error)return "error";

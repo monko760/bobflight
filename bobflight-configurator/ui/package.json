@@ -20,6 +20,7 @@
     "test:loop-rate": "esbuild scripts/test-loop-rate.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-loop-rate.bundle.mjs && node scripts/test-loop-rate.bundle.mjs",
     "test:setup-poll": "node scripts/run-setup-loop-poll.mjs",
     "test:filters-page": "node scripts/run-filters-page.mjs",
+    "test:pid-filters-honesty": "node scripts/run-pid-filters-honesty.mjs",
     "test:rpm-filter-page": "node scripts/run-rpm-filter-page.mjs",
     "test:motor-direction": "node scripts/run-motor-direction.mjs",
     "test:sd": "node scripts/test-sd-card.cjs && node scripts/test-sd-probe.cjs",
@@ -37,6 +38,7 @@
     "test:diagnostic-console": "esbuild scripts/test-diagnostic-console.tsx --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-diagnostic-console.bundle.mjs && node scripts/test-diagnostic-console.bundle.mjs",
     "test:hex-builder": "esbuild scripts/test-hex-builder.tsx --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-hex-builder.bundle.mjs --jsx=automatic && node scripts/test-hex-builder.bundle.mjs",
     "test:board-identity": "node scripts/run-board-identity.mjs",
+    "test:defaults-scoped": "node scripts/run-defaults-scoped.mjs",
     "test:gate-fifo": "node scripts/run-gate-fifo.mjs"
   },
   "dependencies": {

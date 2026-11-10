@@ -70,31 +70,39 @@ export const STORAGE_SAVE_OUTCOME_UNKNOWN_TEXT = "The save was interrupted after
 
 export interface StorageResult {
   snapshot: StorageSnapshot;
+  /** The `storage` reply exactly as received (D1: the accel note reads its `accel_cal_saved:` line). */
+  raw: string;
   export?: ReturnType<typeof parseConfigurationExport>;
 }
 
 /** `storage` -> snapshot (F5: an unreadable reply is a StorageReplyError with the raw reply). */
 export async function loadSequence(send: StorageSend): Promise<StorageSnapshot> {
-  return parseStorage(await send("storage"));
+  return (await readStorage(send)).snapshot;
+}
+
+/** `storage` -> snapshot plus the raw reply it was parsed from. */
+export async function readStorage(send: StorageSend): Promise<StorageResult> {
+  const raw = await send("storage");
+  return { snapshot: parseStorage(raw), raw };
 }
 
 /** `storage` (save allowed?) -> `save` (verified?) -> `storage` (saved, clean?). */
-export async function saveSequence(send: StorageSend, requiredScope?: string): Promise<StorageSnapshot> {
+export async function saveSequence(send: StorageSend, requiredScope?: string): Promise<StorageResult> {
   const before = await loadSequence(send);
   if (!canSaveStorage(before, true, false) || (requiredScope && !before.scope.split(",").includes(requiredScope)))
     throw Error("Flash save unavailable: disarm, stop motors and calibration, and connect firmware that reports controller flash storage. Nothing was saved.");
   const reply = await send("save");
   if (!isVerifiedFlashSave(reply)) throw new StorageControllerError("The controller did not confirm the save. Your settings may not be stored.", reply.trim());
-  const after = await loadSequence(send);
+  const read = await readStorage(send), after = read.snapshot;
   if (after.backend !== "flash" || after.state !== "saved" || after.dirty)
     throw new StorageControllerError("The controller replied “saved” but its storage status does not read back as saved.", `state: ${after.state} · dirty: ${after.dirty ? 1 : 0} · backend: ${after.backend}`);
-  return after;
+  return read;
 }
 
 export async function exportSequence(send: StorageSend, kind: "diff" | "dump"): Promise<StorageResult> {
   const raw = await send(kind === "diff" ? "diff all" : "dump all");
   const data = parseConfigurationExport(raw, kind);
-  return { export: data, snapshot: await loadSequence(send) };
+  return { export: data, ...(await readStorage(send)) };
 }
 
 export interface GatedOptions {

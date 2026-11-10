@@ -1,5 +1,7 @@
 # Persistent accelerometer calibration — bench acceptance
 
+> **Current storage (schema 13, fresh install, not migration):** the accelerometer calibration is stored at bytes 112..143 of the 256-byte schema 13 record and bound to the mounting angles at 244..255 ([SETTINGS-PERSISTENCE.md](bobflight-firmware/docs/SETTINGS-PERSISTENCE.md)). Schema 1/2 records are not loaded or migrated (`fresh_install_required`); recalibrate after a fresh install. `storage` reports `accel_cal_saved: yes|no`, and `defaults pid|rates|filters` never drops the calibration. The schema 2 record and migration text below is kept for history.
+>
 > **Current Kakute workflow:** [One main build: flash, configure, props-off PID check](MAIN-BUILD.md). Use `build-main.ps1` and `bobflight-kakute_f7_hdv-main.hex`. Any bench/development profile commands below are historical and retired; normal runtime guards still apply.
 
 ## Scope and current support
@@ -10,7 +12,7 @@ This increment adds explicit `save` and startup restoration of validated, **appl
 - **T-Motor F7 V2 / F722:** shared protocol/schema support, but the actual hardware storage backend is still unsupported. Version `0.2.0-prototype-tmotorf7v2-sensor2-bl1-calstore1` does NOT mean F722 flash or motors are implemented. Do not reflash it merely for this Holybro acceptance.
 - Other targets are not enabled by this change. Shared storage now obtains slot offsets/sizes and programming granularity from the HAL, not a hardcoded F745 stride. See [unified-target design](bobflight-firmware/docs/UNIFIED-TARGETS.md).
 
-## Record, migration and failure behavior
+## Record, migration and failure behavior (schema 2, historical)
 
 Schema 2 retains configuration bytes 0–95. Byte 96 indicates applied calibration; bytes 97–99 are zero; bytes 100–103 bind the correction model, detected sensor, configured range/alignment and sensor bus/CS resources; bytes 104–115 contain three LE binary32 biases and 116–127 three scales. Records remain board-ID-bound and CRC checked. Changing the sensor binding rejects restoration before any setting is mutated. No stored gyro-ready/arming/session flag is trusted. Gyro startup calibration still runs.
 
@@ -56,7 +58,7 @@ Use addressed-image flashing/readback verification; **do not mass erase** or era
 
 ## First boot and six-face calibration
 
-Reconnect normally and collect `version`, `status`, `storage`, `calibration`, `sensors`. Expect the exact Holybro version above, schema 2, backend `flash`, bench-only/disarmed, motors inactive, healthy/fresh supported IMU. Previous configuration should be restored; schema-1 migration may initially be dirty. An uncalibrated record must NOT become `accel_calibrated: yes` by migration.
+Reconnect normally and collect `version`, `status`, `storage`, `calibration`, `sensors`. Expect the version of the image you built, schema 13, backend `flash`, bench-only/disarmed, motors inactive, healthy/fresh supported IMU. A saved schema 13 configuration should be restored; after a fresh install storage starts at defaults. An uncalibrated record must NOT report `accel_calibrated: yes`.
 
 Use the Sensors page with props-off/stationary acknowledgments. Capture each of +X, -X, +Y, -Y, +Z, -Z using the **reported raw axes**, not an assumed airframe front. Let each stationary window finish; green captured cards alone are not calibration. Press Apply only after all six faces are captured. If Apply rejects, retain diagnostics and recapture the indicated poses; do not relax limits or manually overwrite coefficients.
 

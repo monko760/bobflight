@@ -25,6 +25,8 @@ import { isGyroNotchKey } from "./gyro-notch";
 import { MockRpmFilter, type RpmFilterMockScenario } from "./rpm-filter-mock";
 import { MockMotorDirection, type MotorDirectionMockScenario } from "./motor-direction-mock";
 import { isRpmFilterKey } from "./rpm-filter";
+import { DEFAULTS_GROUP_KEYS, isDefaultsGroup } from "./defaults-scoped";
+import { DEFAULTS_MOCK_ERROR_LINES, MOCK_BARE_DEFAULTS_REPLY, type DefaultsMockScenario } from "./defaults-scoped-mock";
 
 /** Path prefix for MockSerial ports (enumerate + connect). */
 export const MOCK_PORT_PATH = "mock://bobflight";
@@ -73,6 +75,8 @@ export interface MockSerialOptions {
   blackboxCard?: MockBlackboxCard;
   /** Manual gyro notches (schema 8): off (default) | ok | above-nyquist | invalid | old-fc. */
   gyroNotchScenario?: GyroNotchMockScenario;
+  /** Scoped defaults (D1) reply: "ok" (default, frozen FW shape) or a fixture error/malformed scenario. */
+  defaultsScenario?: DefaultsMockScenario;
   /** RPM notch filter (schema 9): off (default) | ok | bidir-off | erpm-unavailable | trimmed-1k | old-fc | off-erpm-live. */
   rpmFilterScenario?: RpmFilterMockScenario;
   /** motor_direction (schema 10): props-out (default) | props-in | refused-armed | refused-motor-test | unknown-token | old-fc. */
@@ -119,6 +123,8 @@ export class MockSerial extends EventEmitter {
   private readonly opts: Required<
     Pick<MockSerialOptions, "gyroHealthy" | "failsafeActive" | "boardId">
   >;
+  /** Scoped defaults scenario (tests may switch it between commands). */
+  defaultsScenario: DefaultsMockScenario;
 
   constructor(
     path: string = MOCK_PORT_PATH,
@@ -134,6 +140,7 @@ export class MockSerial extends EventEmitter {
       failsafeActive: opts.failsafeActive ?? false,
       boardId: opts.boardId ?? "mock-board",
     };
+    this.defaultsScenario = opts.defaultsScenario ?? "ok";
     this.telemByMotor = { ...(opts.dshotTelemByMotor ?? {}) };
     this.loopRateScenario = opts.loopRateScenario ?? "missing";
     this.gyroHealthScenario = opts.gyroHealthScenario ?? "missing";
@@ -220,6 +227,28 @@ export class MockSerial extends EventEmitter {
     return true;
   }
 
+  /** `defaults <group>`: resets only that group's keys (no save), then answers in the frozen FW shape. */
+  private scopedDefaults(group: string): string {
+    const scenario = this.defaultsScenario;
+    // Same order as FW cmd_defaults: armed, bench, calibration, then the group checks.
+    if (this.armed) return `${DEFAULTS_MOCK_ERROR_LINES.armed}\r\n`;
+    if (this.bench.active) return `${DEFAULTS_MOCK_ERROR_LINES.bench_active}\r\n`;
+    if (group === "") return MOCK_BARE_DEFAULTS_REPLY;
+    if (!isDefaultsGroup(group)) return `${DEFAULTS_MOCK_ERROR_LINES.unknown_group}\r\n`;
+    if (scenario === "unsupported") return "unknown — try help\r\n";
+    if (DEFAULTS_MOCK_ERROR_LINES[scenario] !== undefined) return `${DEFAULTS_MOCK_ERROR_LINES[scenario]}\r\n`;
+    const defaults = cloneDefaultSettingValues();
+    if (group === "filters") { this.gyroNotch.defaults(); this.rpmFilter.defaultsFilterKeys(); }
+    for (const k of DEFAULTS_GROUP_KEYS[group]) if (k in this.settings) this.settings[k] = defaults[k];
+    const value = (k: SettingsKey) => (isGyroNotchKey(k) || isRpmFilterKey(k)) ? formatFwFloat(defaults[k]) : formatFwFloat(this.settings[k]);
+    const keys = DEFAULTS_GROUP_KEYS[group].map((k) => `defaults_key: ${k}=${value(k)}\r\n`);
+    const head = `defaults_group: ${group}\r\n`;
+    if (scenario === "missing_end") return head + keys.join("");
+    if (scenario === "count_mismatch") return head + keys.slice(0, -1).join("") + `defaults_end: ${group} ${keys.length}\r\n`;
+    if (scenario === "group_mismatch") return `defaults_group: ${group === "pid" ? "rates" : "pid"}\r\n` + keys.join("") + `defaults_end: ${group} ${keys.length}\r\n`;
+    return head + keys.join("") + `defaults_end: ${group} ${keys.length}\r\n`;
+  }
+
   /** FW contract: any non-ok gyro_health also makes gyro_ok no (and refuses arm). */
   private gyroOk(): boolean {
     return this.opts.gyroHealthy && !mockGyroHealthForcesUnhealthy(this.gyroHealthScenario);
@@ -274,7 +303,7 @@ export class MockSerial extends EventEmitter {
           "  get      - get <key>\r\n" +
           "  set      - set <key> <value>\r\n" +
           "  save     - persist settings\r\n" +
-          "  defaults - restore defaults (not auto-saved)\r\n"
+          "  defaults pid|rates|filters - restore one group's defaults (not auto-saved)\r\n"
       );
     } else if (line === "version") {
       this.emitData(`${PRODUCT} ${VERSION}\r\n`);
@@ -318,14 +347,9 @@ export class MockSerial extends EventEmitter {
       // Mock always succeeds (in-memory ack). The loop-rate value booted next is the saved one.
       this.loopRateSetting.save();
       this.emitData("saved\r\n");
-    } else if (line === "defaults") {
-      this.modesPorts.reset();
-    this.settings = cloneDefaultSettingValues();
-      this.loopRateSetting.defaults();
-      this.gyroNotch.defaults();
-      this.rpmFilter.defaults();
-      this.motorDirection.defaults();
-      this.emitData("defaults restored\r\n");
+    } else if (line === "defaults" || line.startsWith("defaults ")) {
+      // D1 scoped defaults (frozen FW shape; see defaults-scoped.ts). Bare `defaults` -> group_required.
+      this.emitData(this.scopedDefaults(line === "defaults" ? "" : line.slice(9).trim()));
     } else if (line.startsWith("get ") || line === "get") {
       const key = line === "get" ? "" : line.slice(4).trim();
       // R0c: M1–M4 first-class (FW PR #52). Wire:

@@ -2,7 +2,7 @@
 # Copyright 2026 Robert Leclercq
 # SPDX-License-Identifier: Apache-2.0
 #
-# Host CLI get/set/save/defaults smoke for Configurator Rates/PID keys.
+# Host CLI get/set/save/defaults <group> smoke for Configurator Rates/PID keys.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -11,7 +11,7 @@ cmake -S . -B build-host -DBOBFLIGHT_BOARD=dummy >/tmp/bf-cli-cfg-cmake.log
 cmake --build build-host --target bobflight_host >/tmp/bf-cli-cfg-build.log
 BIN="$ROOT/build-host/bobflight_host"
 
-OUT="$(printf 'get loop_rate_hz\nset loop_rate_hz 4000\nset loop_rate_hz 3000\nset loop_rate_hz 1000\nset pid_roll_p 0.01\nget pid_roll_p\nset pid_yaw_d 0.0002\nget pid_yaw_d\nset pid_yaw_d 11\nset rate_max_yaw 600\nget rate_max_yaw\nset gyro_lpf_hz 400\nget gyro_lpf_hz\nset dterm_lpf_hz 100\nget dterm_lpf_hz\nset gyro_lpf_hz 5\nset dterm_lpf_hz 0\nget dterm_lpf_hz\nsave\ndefaults\nget pid_roll_p\nget pid_yaw_d\nget gyro_lpf_hz\nget dterm_lpf_hz\nget nope\nget dshot_bidir\nget erpm_m1\nget erpm_m2\nget erpm_m3\nget erpm_m4\nget dshot_telem_m1\nget dshot_telem_m2\nget dshot_telem_m3\nget dshot_telem_m4\nset dshot_bidir on\nget dshot_bidir\nset dshot_bidir maybe\nset dshot_bidir off\nget dshot_bidir\nget erpm_m1\nget erpm_m4\nstatus\nloop_rate\nget gyro_notch1_hz\nset gyro_notch1_hz 200\nset gyro_notch1_cutoff_hz 150\nset gyro_notch1_hz 200\nget gyro_notch1_hz\nget gyro_notch1_cutoff_hz\nset gyro_notch2_cutoff_hz 400\nset gyro_notch2_hz 600\nget gyro_notch2_hz\nset gyro_notch1_cutoff_hz 250\nset gyro_notch1_hz 1200\nfilters\ndiff\nsave\ndefaults\nget gyro_notch1_hz\nget gyro_notch1_cutoff_hz\nfilters\nget rpm_filter_harmonics\nset rpm_filter_harmonics 4\nset rpm_filter_harmonics 3\nset motor_poles 13\nset motor_poles 12\nrpm_filter\n' | "$BIN")"
+OUT="$(printf 'get loop_rate_hz\nset loop_rate_hz 4000\nset loop_rate_hz 3000\nset loop_rate_hz 1000\nset pid_roll_p 0.01\nget pid_roll_p\nset pid_yaw_d 0.0002\nget pid_yaw_d\nset pid_yaw_d 11\nset rate_max_yaw 600\nget rate_max_yaw\nset gyro_lpf_hz 400\nget gyro_lpf_hz\nset dterm_lpf_hz 100\nget dterm_lpf_hz\nset gyro_lpf_hz 5\nset dterm_lpf_hz 0\nget dterm_lpf_hz\nsave\ndefaults pid\ndefaults filters\nget pid_roll_p\nget pid_yaw_d\nget gyro_lpf_hz\nget dterm_lpf_hz\nget nope\nget dshot_bidir\nget erpm_m1\nget erpm_m2\nget erpm_m3\nget erpm_m4\nget dshot_telem_m1\nget dshot_telem_m2\nget dshot_telem_m3\nget dshot_telem_m4\nset dshot_bidir on\nget dshot_bidir\nset dshot_bidir maybe\nset dshot_bidir off\nget dshot_bidir\nget erpm_m1\nget erpm_m4\nstatus\nloop_rate\nget gyro_notch1_hz\nset gyro_notch1_hz 200\nset gyro_notch1_cutoff_hz 150\nset gyro_notch1_hz 200\nget gyro_notch1_hz\nget gyro_notch1_cutoff_hz\nset gyro_notch2_cutoff_hz 400\nset gyro_notch2_hz 600\nget gyro_notch2_hz\nset gyro_notch1_cutoff_hz 250\nset gyro_notch1_hz 1200\nfilters\ndiff\nsave\ndefaults filters\nget gyro_notch1_hz\nget gyro_notch1_cutoff_hz\nfilters\nget rpm_filter_harmonics\nset rpm_filter_harmonics 4\nset rpm_filter_harmonics 3\nset motor_poles 13\nset motor_poles 12\nrpm_filter\n' | "$BIN")"
 echo "$OUT"
 
 need() {
@@ -36,7 +36,8 @@ need "set failed"   # gyro_lpf_hz=5 out of range
 need "ok dterm_lpf_hz=0"
 need "dterm_lpf_hz=0"
 need "saved"
-need "defaults restored"
+need "defaults_end: pid 11"
+need "defaults_end: filters 9"
 need "pid_roll_p=0.002"
 need "pid_yaw_d=5e-05"
 need "gyro_lpf_hz=320"
@@ -78,7 +79,7 @@ need "loop_rate_setting_hz: 1000"
 need "loop_rate_pending_reboot: 0"
 need "loop_rate_end: 1"
 
-# Schema 8 manual gyro notches (dummy board runs 1000 Hz: 600 Hz is above Nyquist margin)
+# Manual gyro notches (schema 13) (dummy board runs 1000 Hz: 600 Hz is above Nyquist margin)
 need "gyro_notch1_hz=0"
 need "set failed: gyro_notch1_hz needs 0 < gyro_notch1_cutoff_hz < gyro_notch1_hz (set the cutoff first)"
 need "ok gyro_notch1_cutoff_hz=150"
@@ -100,10 +101,10 @@ need "filters_end: 1"
 need "set gyro_notch1_cutoff_hz 150"
 need "set gyro_notch1_hz 200"
 need "set gyro_notch2_cutoff_hz 400"
-need "# schema: 10"
+need "# schema: 13"
 need "gyro_notch1_reason: off"
 
-# Schema 9 RPM notch filter (host has no ESC: bidir off, no motor tracked)
+# RPM notch filter (schema 13) (host has no ESC: bidir off, no motor tracked)
 need "rpm_filter_harmonics=0"
 need "set failed: rpm_filter_harmonics must be 0..3"
 need "ok rpm_filter_harmonics=3"
@@ -113,4 +114,4 @@ need "rpm_filter_reason: bidir-off"
 need "rpm_filter_m1_hz: unavailable"
 if printf '%s\n' "$OUT" | tr -d '\r' | grep -q '^rpm_filter_harmonics: '; then echo "FAIL: rpm_filter report must not carry rpm_filter_harmonics (frozen format)"; exit 1; fi
 
-echo "PASS: CLI get/set/save/defaults (schema10 motor_direction + schema9 RPM filter + schema8 gyro notches + schema7 loop_rate_hz + schema6 pid_yaw_d + LPF + rates/PID + dshot R0c M1-M4) + status loop_target/actual/overruns"
+echo "PASS: CLI get/set/save/defaults <group> (schema 13: motor_direction, RPM filter, gyro notches, loop_rate_hz, pid_yaw_d, LPF, rates/PID; dshot R0c M1-M4) + status loop_target/actual/overruns"

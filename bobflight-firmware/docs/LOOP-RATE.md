@@ -9,7 +9,7 @@ no 4 kHz commit exists on any branch. This change is that follow-up, made
 user-selectable:
 
 - Persisted CLI setting **`loop_rate_hz`**, exactly `1000`, `4000` or `8000`
-  (`src/sched/loop_rate_setting.c`), stored in config **schema 7**.
+  (`src/sched/loop_rate_setting.c`), stored in config **schema 13** (bytes 192..195).
 - Mapping (`src/sched/loop_rate.c`):
 
   | `loop_rate_hz` | gyro task / pid_denom | MPU6000 |
@@ -36,8 +36,8 @@ Flash is held: this is verified with host and Kakute cross builds only.
 
 ## CLI setting `loop_rate_hz`
 
-It follows the existing `set`/`get`/`diff`/`dump`/`defaults`/`save`
-conventions.
+It follows the existing `set`/`get`/`diff`/`dump`/`save` conventions. It
+belongs to no `defaults <group>`: `defaults pid|rates|filters` never changes it.
 
 ```
 get loop_rate_hz            -> loop_rate_hz=4000
@@ -55,24 +55,23 @@ set loop_rate_hz 8000       -> set failed: armed            (while armed, like e
   `loop_rate_pending_reboot: 1`. That flag lets the Configurator tell "not
   rebooted yet" apart from "the firmware applied a fallback".
 - `diff` prints `set loop_rate_hz N` only when N differs from the board
-  default. `dump` always prints it. `defaults` resets it to the board default.
-  `storage` and export `scope` end in `,loop_rate_hz`.
+  default. `dump` always prints it. Only a fresh install (no saved record) starts
+  at the board default. `storage` and export `scope` list `loop_rate_hz`.
 
-## Persistence: schema 7
+## Persistence: schema 13
 
-- Payload 192 bytes, which is the config_store `MAX_PAYLOAD`. The schema 6
-  bytes 0..187 are unchanged, and `loop_rate_hz` is stored as u32 LE at bytes
-  188..191.
+- Stored as u32 LE at bytes 192..195 of the 256-byte schema 13 payload
+  ([SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md)).
 - On load, the value must be 1000/4000/8000 and supported by the board.
   Otherwise the load fails with `invalid_settings`, exactly like any other bad
   field.
-- A schema ≤6 record migrates by adding the board default (4000 on Kakute,
-  1000 elsewhere). It stays `dirty` until the next Save. The old slot is kept,
-  and older firmware keeps reading its schema 6 record.
-- Tests: `config_store` (schema6→7 migration, all write cuts, downgrade
-  protection), `persist_config` (migration default, round-trip of 1000/8000,
-  rejection of 2000/0), and `loop_rate_setting_cli` (real host CLI per board,
-  including save plus a host warm reboot).
+- No migration: an older-schema record is not read (`fresh_install_required`).
+  With no saved record the board default applies (4000 on Kakute, 1000
+  elsewhere).
+- Tests: `config_store` (all write cuts, downgrade protection),
+  `persist_config` (round-trip of 1000/8000, rejection of 2000/0),
+  `loop_rate_setting_cli` (real host CLI per board, including save plus a host
+  warm reboot) and `defaults_scoped` (loop 1000 survives every group).
 
 ## Frozen `status` contract
 

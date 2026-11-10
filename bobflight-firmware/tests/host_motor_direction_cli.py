@@ -36,11 +36,11 @@ assert 'ok motor_direction=props-in' in lines,lines
 assert [l for l in lines if l.startswith('set failed')]==[INVALID,INVALID,'set failed'],lines
 assert any(l.startswith('  mixer - ') for l in lines),lines
 
-# diff only when props-in; dump always; defaults -> props-out; storage schema 11 scope.
-lines=run(['diff','set motor_direction props-in','diff','dump','defaults','diff','get motor_direction','storage'])
+# diff only when props-in; dump always; no `defaults <group>` touches it (D1); storage schema 13 scope.
+lines=run(['diff','set motor_direction props-in','diff','dump','defaults pid','defaults rates','defaults filters','diff','get motor_direction','storage'])
 sets=[l for l in lines if l.startswith('set motor_direction')]
-assert sets==['set motor_direction props-in','set motor_direction props-in'],sets
-assert 'motor_direction=props-out' in lines,lines
+assert sets==['set motor_direction props-in']*3,sets
+assert 'motor_direction=props-in' in lines and 'motor_direction=props-out' not in lines,lines
 assert values(lines,'schema')==['13'] and values(lines,'# schema')==['13']*4,lines
 assert all(s.endswith(',motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates') for s in values(lines,'scope')+values(lines,'# scope')),lines
 
