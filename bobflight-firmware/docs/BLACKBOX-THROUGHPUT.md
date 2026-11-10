@@ -38,7 +38,7 @@ The same host byte-level card model run against the unchanged legacy code:
 
 ## Host model results (`bobflight_blackbox_throughput_test`, bbl2, schema 2)
 
-_Historical (schema 2 frames, 60 µs cascade). The current matrix is in **Schema 3 drop matrix (BB1)** below._
+_Historical (schema 2 frames, 60 µs cascade). The matrix below is the schema 3 drop matrix, also historical. Current logs are schema 4 ([BLACKBOX-FIELDS.md](BLACKBOX-FIELDS.md))._
 
 This is a byte-level SPI SD emulator on a virtual clock that drives the real CLI → session → FAT32 → `sd_spi` path. It uses a 1 kHz loop with 60 µs of task cost and a FAT32 volume with 20,000 used clusters.
 
@@ -53,7 +53,7 @@ The model parameters are assumptions. Only a physical re-log on the Kakute confi
 
 ## Schema 3 drop matrix (BB1)
 
-Log schema 3 (`docs/BLACKBOX-FIELDS.md`) grows the typical frame from about 70.7 B to **about 81 B**: four eRPM fields, five state fields, and `bobflightIteration` removed. The session's encode buffer is now the proven 271 B worst case instead of a fixed 256 B. `host_blackbox_throughput.c` is now table-driven over three loop configurations, with separate gyro-only and PID slot costs (structural estimates from `LOOP-RATE.md`, not measurements). Capture goes through the production schema 3 path (`bb_capture_observe_ex`, decimate first). The test is built twice:
+This section records the schema 3 measurement, not the current log. Log schema 3 (`docs/BLACKBOX-FIELDS.md` at that time) grew the typical frame from about 70.7 B to **about 81 B**: four eRPM fields, five state fields, and `bobflightIteration` removed. The session's encode buffer for that measurement was the proven 271 B worst case instead of a fixed 256 B. `host_blackbox_throughput.c` was table-driven over three loop configurations, with separate gyro-only and PID slot costs (structural estimates from `LOOP-RATE.md`, not measurements). Capture in that measurement went through the schema 3 path (`bb_capture_observe_ex`, decimate first). That measurement was built twice:
 
 - `blackbox_sd_throughput_model`: default 500 Hz (`BLACKBOX_RATE_DEFAULT_HZ 500u`)
 - `blackbox_sd_throughput_model_1k`: the same source with `-DBLACKBOX_RATE_DEFAULT_HZ=1000u`
