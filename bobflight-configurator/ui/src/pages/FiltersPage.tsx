@@ -10,6 +10,8 @@ import {
 } from "../tuning/mockSettingsApi";
 import type { FiltersConfig } from "../tuning/mockTuningStore";
 import { browserConfirm, requestRefresh } from "../components/storageRefresh";
+import { ScopedDefaults } from "../components/ScopedDefaults";
+import { AccelCalSavedNote } from "../components/AccelCalSavedNote";
 import type { GyroNotchIndex } from "../protocol";
 import {
   applyNotch,
@@ -104,6 +106,7 @@ export function FiltersPage() {
   const [err, setErr] = useState<string | null>(null);
   const [usingFallback, setUsingFallback] = useState(false);
   const [ready, setReady] = useState(false);
+  const [savedRev, setSavedRev] = useState(0);
   const [loadedValues, setLoadedValues] = useState<FiltersConfig>(emptyFilters);
   const [notchSnap, setNotchSnap] = useState<NotchSnapshot>(emptyNotchSnapshot);
   const [drafts, setDrafts] = useState<Record<GyroNotchIndex, NotchDraft>>({
@@ -127,6 +130,8 @@ export function FiltersPage() {
    * never while the gate is busy, never behind the local fallback (QA #60).
    */
   const [fcRead, setFcRead] = useState(false);
+  /** A controller read failed after the link was up: shown with "Read again"; never the local fallback. */
+  const [readErr, setReadErr] = useState<string | null>(null);
 
   /** Aborted on unmount: stops the RPM commands' busy-gate retries (QA #60). */
   const rpmLife = useRef<AbortController | null>(null);
@@ -172,9 +177,12 @@ export function FiltersPage() {
       setSettingsBusy({ message, final });
     };
     setErr(null);
+    setReadErr(null);
     setFcRead(false);
+    let linked = false;
     try {
       await ensureMockConnected(host);
+      linked = true;
       let all: Record<string, string>;
       try {
         // Only the gate's own refusal is retried (nothing was sent); FC replies / transport errors are not.
@@ -204,6 +212,16 @@ export function FiltersPage() {
       if (e instanceof RpmCancelled || signal.aborted) return; // unmounted, newer load or disconnect
       if (loadCtl.current === ctl) loadCtl.current = null;
       setSettingsBusy(null);
+      if (linked) {
+        // A controller is linked: its read failed. Never switch to demo memory; Defaults and Save stay off.
+        setNotchSnap(emptyNotchSnapshot());
+        setRpmSnap(emptyRpmSnapshot());
+        setRpmDraft({ harmonics: "", minHz: "", q: "" });
+        setUsingFallback(false);
+        setReady(false);
+        setReadErr(`Could not read the controller's filter settings (${settingsErrorMessage(e)}). Nothing was changed. Defaults and Save stay disabled until a read succeeds.`);
+        return;
+      }
       try {
         const fb = loadFiltersViaFallback();
         setValues(fb);
@@ -309,6 +327,7 @@ export function FiltersPage() {
         return;
       }
       setMsg("saved");
+      setSavedRev((r) => r + 1);
       await load();
       return;
     }
@@ -353,33 +372,10 @@ export function FiltersPage() {
       await reloadNotches();
       await host.saveSettings();
       setMsg("saved");
+      setSavedRev((r) => r + 1);
       await load();
     } catch (e) {
       if (e instanceof RpmCancelled) return; // unmounted mid-Save: nothing more is sent
-      setErr(settingsErrorMessage(e));
-    }
-  }
-
-  async function onDefaults() {
-    setErr(null);
-    setMsg(null);
-    if (usingFallback) {
-      const reply = mockSettingsApi.defaults("filters");
-      if (reply !== "defaults restored") {
-        setErr(reply);
-        return;
-      }
-      setMsg("defaults restored");
-      await load();
-      return;
-    }
-
-    try {
-      await ensureMockConnected(host);
-      await host.restoreDefaults();
-      setMsg("defaults restored");
-      await load();
-    } catch (e) {
       setErr(settingsErrorMessage(e));
     }
   }
@@ -425,15 +421,21 @@ export function FiltersPage() {
       <h2>Filters</h2>
       <p className="muted">
         Gyro and D-term low-pass, two manual gyro notches (FW schema 8) and the RPM filter (FW schema 9). Protocol{" "}
-        <code>get/set/save/defaults</code>. Keys: {protocolKeys.join(", ") || FILTER_KEYS.join(", ")}.
+        <code>get/set/save</code> and <code>defaults filters</code> (this tab only). Keys: {protocolKeys.join(", ") || FILTER_KEYS.join(", ")}.
         Range: <code>0</code> = off; else <code>10..1000</code> Hz. Defaults{" "}
         <code>320</code> / <code>53</code>.
       </p>
 
-      {!ready && !err && !settingsBusy?.final && (
+      {!ready && !err && !readErr && !settingsBusy?.final && (
         <p className="muted">Connecting / loading settings…</p>
       )}
       {settingsBusy && <p className="fail" data-testid="settings-busy">{settingsBusy.message}</p>}
+      {(readErr || settingsBusy?.final) && (
+        <div role="alert" data-testid="filters-read-error">
+          {readErr && <p className="fail">{readErr}</p>}
+          <button type="button" onClick={() => void load()}>Read again</button>
+        </div>
+      )}
 
       <fieldset className="tuning-axis">
         <legend>Low-pass</legend>
@@ -593,20 +595,23 @@ export function FiltersPage() {
       </fieldset>
 
       <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="button" className="primary" disabled={!!settingsBusy} onClick={() => void onSave()}>
+        <button type="button" className="primary" disabled={!!settingsBusy || !ready} onClick={() => void onSave()}>
           Save
         </button>
         <button type="button" className="ghost" onClick={onReload}>
           Reload{pageDirty ? " (discard edits)" : ""}
         </button>
-        <button
-          type="button"
-          className="ghost"
-          onClick={() => void onDefaults()}
-        >
-          Defaults
-        </button>
+        <ScopedDefaults
+          host={host}
+          group="filters"
+          onReread={load}
+          savedRevision={savedRev}
+          pageDirty={pageDirty}
+          disabled={!!settingsBusy || !ready}
+          localFallback={usingFallback ? async () => { mockSettingsApi.defaults("filters"); await load(); } : undefined}
+        />
       </div>
+      {ready && !usingFallback && fcRead && <AccelCalSavedNote raw={notchSnap.storageRaw ?? ""} />}
       {msg && <p className="muted">Last reply: {msg}</p>}
       {err && <p className="fail">{err}</p>}
     </div>

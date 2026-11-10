@@ -66,7 +66,16 @@ bool config_board_alignment_pending(void);
 void config_board_alignment_activate(void);
 void config_board_alignment_apply(float vector[3]);
 void config_init(void);
+/* Boot only (config_init): every config key plus motor_direction. The CLI never
+ * calls this; `defaults <group>` uses config_defaults_group(). */
 void config_defaults(void);
+/* D1 scoped defaults (frozen tokens pid|rates|filters). Returns the group's key
+ * list in reply order and its length, or NULL (count 0) for any other token. */
+const char *const *config_defaults_group_keys(const char *group, size_t *count);
+/* Resets only that group's keys to their defaults. Never touches align_*,
+ * motor_direction, motor_poles, loop rate or any non-config setting. Returns
+ * false with no change for an unknown group. */
+bool config_defaults_group(const char *group);
 const bf_config_t *config_get(void);
 bool config_get_key(const char *key, float *out);
 bool config_set_key(const char *key, float value);

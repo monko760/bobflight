@@ -51,6 +51,8 @@ export class MockRpmFilter {
     if (s === "bidir-off" || s === "erpm-unavailable") this.values.rpm_filter_harmonics = 2;
   }
   defaults(): void { this.values = { ...DEFAULTS }; }
+  /** `defaults filters` (D1): the three RPM filter keys only; motor_poles is hardware setup and stays. */
+  defaultsFilterKeys(): void { this.values = { ...DEFAULTS, motor_poles: this.values.motor_poles }; }
   snapshot(): Record<RpmFilterKey, string> {
     const out = {} as Record<RpmFilterKey, string>;
     for (const k of RPM_FILTER_KEYS) out[k] = formatFwFloat(this.values[k]);

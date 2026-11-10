@@ -1,4 +1,4 @@
-# RPM notch filter (config schema 9)
+# RPM notch filter (config schema 13)
 
 Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0.
 
@@ -7,7 +7,7 @@ bidirectional DShot eRPM telemetry. They run after the gyro LPF and the manual n
 ([GYRO-NOTCH.md](GYRO-NOTCH.md)), before PID and blackbox, on all three axes. Clean-room
 implementation (RBJ cookbook notch); no Betaflight source.
 
-## Settings (persisted, schema 9, payload 224 bytes)
+## Settings (persisted, schema 13 bytes 212..227)
 
 | key | meaning | rule (integer) | default |
 |---|---|---|---|
@@ -17,8 +17,10 @@ implementation (RBJ cookbook notch); no Betaflight source.
 | `motor_poles` | magnetic poles of all four motors (eRPM → mechanical Hz) | even, `4..36` | `14` |
 
 The filter is **off by default**, and it never turns on bidirectional DShot. `dshot_bidir` stays a
-separate explicit setting. Older images (schema < 9) migrate to the defaults and stay dirty until an
-explicit Save. `get`/`diff`/`dump`/`defaults`/`save` work like the other float settings.
+separate explicit setting. Only schema 13 records load; there is no migration from older images
+([SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md)). `get`/`diff`/`dump`/`save` work like the other
+float settings. `defaults filters` resets the three `rpm_filter_*` keys; `motor_poles` belongs to no
+defaults group and is never reset by `defaults <group>`.
 
 ### `set` replies (the firmware is the authority)
 
@@ -105,14 +107,12 @@ rpm_filter_end: 1
 
 ## Export size
 
-Schema 10 adds `motor_direction` (worst case 1875 bytes on kakute_f7_hdv, see [MOTOR-DIRECTION.md](MOTOR-DIRECTION.md)). A schema 9 `dump` with realistic calibration (`%.9g`) is about 1810 bytes. The export buffer and the
-Configurator's `CONFIG_EXPORT_MAX_BYTES` are **2048** bytes (was 1800); `tests/host_storage_cli.c`
-checks a calibrated worst case above 1800 and at most 2047 bytes. The uncalibrated worst case measured
-1719, 1744 and 1731 bytes (dummy, kakute, tmotor).
+The Configurator's `CONFIG_EXPORT_MAX_BYTES` is **3072** bytes. `tests/host_storage_cli.c` prints and
+checks the calibrated schema 13 worst case (above 1800 bytes, with at least 64 bytes of headroom under
+3072).
 
-**Older Configurators:** a Configurator released before schema 9 accepts only schema 1–8 exports, so it
-rejects **every** schema 9 `diff`/`dump`, whatever its size. Upgrade the Configurator before exporting
-from schema 9 FW.
+**Configurators:** the current Configurator accepts only schema 13 exports and rejects every other
+schema, whatever its size. Use a matching Configurator.
 
 ## Risks and limits
 

@@ -37,6 +37,20 @@ import {
 } from "./settings";
 import { isGyroNotchCliCommand } from "./gyro-notch";
 import { isRpmFilterCliCommand } from "./rpm-filter";
+import {
+  DEFAULTS_ERROR_PREFIX,
+  isDefaultsGroup,
+  isDefaultsReplyEnd,
+  parseDefaultsGroupReply,
+  type DefaultsGroup,
+  type DefaultsGroupResult,
+} from "./defaults-scoped";
+
+/** Idle gap tolerated inside a scoped defaults reply before it counts as complete (the end line usually ends it first). */
+export const DEFAULTS_REPLY_IDLE_MS = 300;
+/** After an incomplete scoped-defaults reply: quiet time that ends the late-tail drain, and its hard cap. */
+export const DEFAULTS_LATE_QUIET_MS = 1000;
+export const DEFAULTS_LATE_MAX_MS = 5000;
 
 /** R0b patterned CLI: get erpm_m1..4 / dshot_telem_m1..4 / get|set dshot_bidir on|off. */
 export function isR0bDshotCliCommand(cmd: string): boolean {
@@ -73,6 +87,8 @@ const ALLOWED_COMMANDS: readonly CliCommand[] = [
   "dshot 600",
   "get loop_rate_hz", "set loop_rate_hz 1000", "set loop_rate_hz 4000", "set loop_rate_hz 8000", "loop_rate",
   "get motor_direction", "set motor_direction props-out", "set motor_direction props-in", "mixer",
+  // Scoped defaults (D1). Bare `defaults` stays reachable only through restoreDefaults() (FW: group_required).
+  "defaults pid", "defaults rates", "defaults filters",
 ] as const;
 
 /**
@@ -87,6 +103,13 @@ export class BobFlightCliClient {
   private status: ConnectionStatus = "disconnected";
   private lineBuf = new LineBuffer();
   private collector: ResponseCollector | null = null;
+  /**
+   * After an incomplete `defaults <group>` reply (idle gap, no end line) the
+   * FC may still send the tail. Until it does (an end line) or the link stays
+   * quiet for DEFAULTS_LATE_QUIET_MS, incoming bytes are discarded and the
+   * next command waits, so the tail never lands in a later reply.
+   */
+  private lateDrain: { done: Promise<void>; finish: () => void; timer: ReturnType<typeof setTimeout> | null; cap: ReturnType<typeof setTimeout> | null } | null = null;
   private lineListeners = new Set<(line: string) => void>();
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private lastConnect: ConnectOptions | null = null;
@@ -189,6 +212,7 @@ export class BobFlightCliClient {
 
   async disconnect(): Promise<void> {
     this.intentionalClose = true;
+    this.lateDrain?.finish();
     if (this.collector) {
       this.collector.cancel(new Error("disconnected"));
       this.collector = null;
@@ -233,6 +257,7 @@ export class BobFlightCliClient {
       this.collector.push(text);
     }
     const lines = this.lineBuf.push(text);
+    if (this.lateDrain) this.armLateDrain(lines.some((l) => isDefaultsReplyEnd(l)));
     for (const line of lines) {
       for (const cb of this.lineListeners) {
         try {
@@ -290,12 +315,29 @@ export class BobFlightCliClient {
     return this.sendRaw(cmd, opts);
   }
 
+  /** Starts (or extends) the late-tail drain; `ended`: the tail's end line arrived. */
+  private armLateDrain(ended = false): void {
+    if (!this.lateDrain) {
+      let finish!: () => void;
+      const done = new Promise<void>((r) => { finish = r; });
+      const d = { done, finish: () => {}, timer: null as ReturnType<typeof setTimeout> | null, cap: null as ReturnType<typeof setTimeout> | null };
+      d.finish = () => { if (d.timer) clearTimeout(d.timer); if (d.cap) clearTimeout(d.cap); if (this.lateDrain === d) this.lateDrain = null; finish(); };
+      d.cap = setTimeout(d.finish, DEFAULTS_LATE_MAX_MS);
+      this.lateDrain = d;
+    }
+    const d = this.lateDrain;
+    if (ended) { d.finish(); return; }
+    if (d.timer) clearTimeout(d.timer);
+    d.timer = setTimeout(d.finish, DEFAULTS_LATE_QUIET_MS);
+  }
+
   /**
    * Send a free-form CLI line (settings get/set/save/defaults, etc.).
    * Does not widen CliCommand; dedicated settings methods prefer this.
    */
   async sendRaw(line: string, opts?: SendCommandOptions): Promise<string> {
     if (opts?.beforeSend) await opts.beforeSend();
+    if (this.lateDrain && !this.collector) await this.lateDrain.done;
     if (!this.port?.isOpen || this.status !== "connected") {
       throw new Error("not connected");
     }
@@ -303,23 +345,27 @@ export class BobFlightCliClient {
       throw new Error("another command is in flight");
     }
 
-    const idleMs = opts?.idleMs ?? DEFAULT_IDLE_MS;
+    const scopedDefaults = /^defaults (?:pid|rates|filters)$/.test(line.trim());
+    const idleMs = opts?.idleMs ?? (scopedDefaults ? DEFAULTS_REPLY_IDLE_MS : DEFAULT_IDLE_MS);
     const timeoutMs = opts?.timeoutMs ?? (line === "save" ? 15000 : DEFAULT_TIMEOUT_MS);
 
     const responsePromise = new Promise<string>((resolve, reject) => {
       this.collector = new ResponseCollector(
         (text) => {
           this.collector = null;
+          // Idle gap without the end line: the tail may still come; drain it before the next command.
+          if (scopedDefaults && !text.split(/\r?\n/).some((l) => isDefaultsReplyEnd(l))) this.armLateDrain();
           resolve(text);
         },
         (err) => {
           this.collector = null;
+          if (scopedDefaults) this.armLateDrain(); // the reply may still arrive late
           // A truncated framed snapshot can leave late USB bytes in flight.
           // Reconnect rather than risk attributing them to a later command.
           if (line === "save" || ((line === "pid_diag" || line.startsWith("pid_diag ") || line === "barometer" || line === "storage" || line === "flash_info" || line.startsWith("sd ") || line.startsWith("blackbox ") || line === "diff all" || line === "dump all" || line === "sensors" || line === "calibration" || line === "timing" || line === "loop_rate" || line === "mixer" || line === "ports" || line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) && /terminator missing/.test(err.message))) void this.disconnect();
           reject(err);
         },
-        { idleMs, timeoutMs, maxChars: opts?.maxResponseChars,
+        { idleMs, timeoutMs, maxChars: opts?.maxResponseChars, endLine: scopedDefaults ? isDefaultsReplyEnd : undefined,
           endMarker: line === "barometer" ? "barometer_end: 1" : line === "flash_info" ? "flash_info_end: 1" : line.startsWith("sd read") ? "sd_data_end: 1" : line.startsWith("blackbox ") ? "blackbox_end: 1" : line.startsWith("sd ") ? "sd_end: 1" : (line === "pid_diag" || line.startsWith("pid_diag ")) ? "pid_diag_end: 1" : line === "storage" ? "storage_end: 1" : (line === "diff all" || line === "dump all") ? "# config_end: 1" : line === "ports" ? "ports_end: 1" : (line === "modes" || (line.startsWith("mode_range ") || line.startsWith("control_source "))) ? "modes_end: 1" : line === "timing" ? "timing_end: 1" : line === "loop_rate" ? "loop_rate_end: 1" : line === "mixer" ? "mixer_end: 1" : line === "sensors" ? "sensors_end: 1" : line === "calibration" ? "calibration_end: 1" : undefined }
       );
     });
@@ -327,7 +373,17 @@ export class BobFlightCliClient {
     const wireCmd = line.trim();
     this.sentCommands.push(wireCmd);
     const wire = encodeCommand(wireCmd);
-    this.port.write(wire);
+    try {
+      this.port.write(wire);
+    } catch (e) {
+      // A throwing write must not leave a stale collector behind (every later command would be "in flight").
+      const c = this.collector as ResponseCollector | null;
+      this.collector = null;
+      void responsePromise.catch(() => {});
+      c?.cancel(e instanceof Error ? e : new Error(String(e)));
+      if (scopedDefaults) this.armLateDrain(); // part of the line may have gone out
+      throw e;
+    }
 
     return responsePromise;
   }
@@ -405,12 +461,28 @@ export class BobFlightCliClient {
   }
 
   /**
-   * Restore FW defaults (does not auto-save). Returns all 12 keys after reset.
+   * Scoped defaults (D1): `defaults pid|rates|filters`. Nothing is saved (FC
+   * storage goes dirty). Returns the parsed reply; an FC error line, an older
+   * FC or an incomplete frame are results, not exceptions. Transport errors
+   * (timeout, disconnect, size cap) throw: the outcome is then unknown.
+   */
+  async restoreDefaultsGroup(group: DefaultsGroup, opts?: SendCommandOptions): Promise<DefaultsGroupResult> {
+    if (!isDefaultsGroup(group)) throw new Error(`unsupported defaults group: ${String(group)}`);
+    const raw = await this.sendCommand(`defaults ${group}`, opts);
+    return parseDefaultsGroupReply(raw, group);
+  }
+
+  /**
+   * Bare `defaults`. FW with scoped defaults answers `defaults_error:
+   * group_required ...` (thrown verbatim); only older FW answers
+   * `defaults restored`. Does not auto-save. The UI no longer sends it.
    */
   async restoreDefaults(
     opts?: SendCommandOptions
   ): Promise<Record<SettingsKey, string>> {
     const raw = await this.sendRaw("defaults", opts);
+    const err = raw.split(/\r?\n/).map((l) => l.trim()).find((l) => l.startsWith(DEFAULTS_ERROR_PREFIX));
+    if (err) throw new Error(err);
     const parsed = parseDefaultsReply(raw);
     if (!parsed.ok) {
       throw new Error(

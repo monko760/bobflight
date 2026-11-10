@@ -1,19 +1,20 @@
-# Manual gyro notches (config schema 8)
+# Manual gyro notches (config schema 13)
 
 Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0.
 
 Two static notch filters on the gyro, applied after the gyro LPF on all three axes, before
 PID and blackbox. Manual only: no dynamic or RPM tracking.
 
-## Settings (persisted, schema 8, payload 208 bytes)
+## Settings (persisted, schema 13 bytes 196..211)
 
 | key | meaning | rule |
 |---|---|---|
 | `gyro_notch1_hz`, `gyro_notch2_hz` | centre frequency | `0` = off, else `20..1000` Hz |
 | `gyro_notch1_cutoff_hz`, `gyro_notch2_cutoff_hz` | lower -3 dB edge | `0 < cutoff < centre`; while the centre is 0: `0..<1000` (kept) |
 
-Defaults are 0 (both notches off). An older image (schema < 8) migrates with both notches off.
-`get`/`diff`/`dump`/`defaults`/`save` follow `gyro_lpf_hz` (`%.6g`). `diff`/`dump` list the
+Defaults are 0 (both notches off). Only schema 13 records load; there is no migration from older
+images ([SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md)). `get`/`diff`/`dump`/`save` follow
+`gyro_lpf_hz` (`%.6g`), and `defaults filters` resets both pairs together. `diff`/`dump` list the
 cutoff before the centre so a replayed export always passes the pair rule.
 
 ### `set` checks (the firmware is the authority)

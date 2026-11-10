@@ -1,5 +1,5 @@
 <!-- Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 -->
-# Motor direction (`motor_direction`, config schema 10, tentative)
+# Motor direction (`motor_direction`, config schema 13)
 
 `motor_direction` tells the mixer which way the props spin. It does **NOT** change the spin
 direction in the ESC: the firmware sends no direction command to the ESCs, and the motors keep
@@ -36,8 +36,8 @@ base mixer. `host_mixer_direction` does not keep a copy of the mixer (a copy cou
 bug): it checks, bit for bit over a roll/pitch/yaw/throttle/min_throttle grid that includes saturating
 cases, that `props-in` with yaw `y` gives exactly the `props-out` output for yaw `-y` (the only
 difference is the sign of the yaw input), and it pins the QUADX signs above with a literal table
-in the unsaturated range. Existing quads keep exactly the yaw behaviour they fly with today, and migrated
-configs get `props-out`.
+in the unsaturated range. Existing quads keep exactly the yaw behaviour they fly with today, and a
+fresh install starts at `props-out`.
 
 **Why the name `props-out` (to confirm on hardware).** The repo does not state the gyro z sign.
 The mixer comment says "+yaw CW looking down", but the same comment says "+pitch raises nose",
@@ -103,41 +103,25 @@ mixer_end: 1
 ```
 
 `diff` lists `set motor_direction props-in` only when it differs from the default. `dump` always
-lists it (after `set motor_poles`). `defaults` resets it to `props-out`.
+lists it (after `set motor_poles`). No `defaults <group>` changes it (D1); only a fresh install starts at `props-out`.
 
-## Storage: schema 10 (tentative number)
+## Storage: schema 13
 
-- Payload 256 bytes (`MAX_PAYLOAD` 256): schema 9 bytes 0..223 unchanged, 224..227 reserved zero,
-  **228..231 `motor_direction` u32 LE** (0 = props-out, 1 = props-in, anything else refuses the
-  whole record), 232..255 reserved zero.
-- Migration: a record from **any older schema** loads with `props-out`, written explicitly
-  (`if (loaded_schema < MOTOR_DIRECTION_SCHEMA) put32(p + 228, props-out)`), and stays dirty
-  until an explicit Save, like the earlier migrations.
-- Storage `scope` and the export `# scope:` end with `,motor_poles,motor_direction`.
+- **228..231 `motor_direction` u32 LE** in the 256-byte schema 13 payload (0 = props-out,
+  1 = props-in, anything else refuses the whole record). Full layout:
+  [SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md).
+- No migration: records of any other schema are not read (`fresh_install_required`).
+- Storage `scope` and the export `# scope:` list `motor_poles,motor_direction`.
 
-**Older Configurators:** a Configurator released before schema 10 (it knows schema 9 at most)
-rejects **every** schema 10 `diff`/`dump`, whatever its size, like the schema 9 note in
-`RPM-FILTER.md`. Upgrade the Configurator before exporting from schema 10 FW.
-
-**If G1 lands first.** G1 (`gyro_rate_hz`, branch `feat/gyro-rate`) also calls itself schema 10
-with the same 256-byte shape and puts `gyro_rate_hz` at 224..227, 228..255 reserved zero. That is
-why `motor_direction` sits at 228 and 224..227 is left reserved here. If G1 merges first, this
-change becomes **schema 11**: set `MOTOR_DIRECTION_SCHEMA` and `PERSIST_SCHEMA` to 11, add the
-v11 store functions, narrow G1's reserved-zero check to 232..255, and append `motor_direction`
-after G1's scope (Configurator `STORAGE_SCOPE_V11`). The migration needs no change: it keys on
-`loaded_schema < MOTOR_DIRECTION_SCHEMA`, so a G1 schema 10 record (228..231 zero) also migrates
-to `props-out`, and its `gyro_rate_hz` is kept. This combination is not built or tested here.
+**Configurators:** the current Configurator accepts only schema 13 `diff`/`dump` exports. Use a
+matching Configurator.
 
 ## Export size
 
-The worst-case schema 10 `dump` (`host_storage_cli`: accel calibration printing all 9 `%.9g`
-digits, `long_mode` HORIZON range, AUX12 mode rows, loop 8000, `props-in`) measures (it differs per board build):
-**1858 bytes** on the host dummy board,
-**1863 bytes** on tmotor_f7_v2 and **1875 bytes** on kakute_f7_hdv. The Configurator limit is
-`CONFIG_EXPORT_MAX_BYTES` 2048, so the worst board leaves **173 bytes** of headroom. The test
-prints the count and fails if `len + 64 > 2048` (or `len <= 1800`, so a broken dump cannot pass) or
-the export reports `config export failed`. With G1 also merged, an estimated ~36 more bytes (one
-`set gyro_rate_hz 8000` line plus its scope entry), about 1911 bytes on Kakute, still fits.
+`host_storage_cli` prints and checks the calibrated schema 13 worst case (accel calibration printing
+all 9 `%.9g` digits, HORIZON range, AUX12 mode rows, loop 8000, `props-in`). It fails if the dump
+reports `config export failed`, is not above 1800 bytes, or leaves less than 64 bytes of headroom
+under the Configurator's `CONFIG_EXPORT_MAX_BYTES` (3072).
 
 ## Tests
 
@@ -147,8 +131,9 @@ the export reports `config export failed`. With G1 also merged, an estimated ~36
 - `motor_direction_cli_unit` (C): armed → `set failed: armed`, each motor-test source →
   `set failed: motor test running`, value unchanged after each refusal.
 - `motor_direction_cli` (Python on the real `bobflight_host`): get/set/refusal lines, report,
-  diff/dump/defaults, storage schema 10, save + reboot keeps `props-in`.
-- `persist_config`, `legacy_p54_migration`, `config_store`, `storage_cli`: layout, migration from
-  schema 9 and older, out-of-domain refusal, export bytes.
+  diff/dump, kept by every `defaults <group>`, storage schema 13, save + reboot keeps `props-in`.
+- `persist_config`, `config_store`, `storage_cli`: layout, out-of-domain refusal, export bytes.
+- `defaults_scoped` (C) and `defaults_scoped_cli` (Python): props-in survives `defaults <group>`,
+  save and reload.
 
 The bench test above has not been done on hardware for this change.
