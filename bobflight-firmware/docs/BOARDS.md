@@ -88,3 +88,66 @@ results; and the registry/catalog matches apart from the `ir` path and the new
 - Capabilities: `motor_output` needs motors, `sd_logging` needs `sd`, `usb.cdc` equals `capabilities.usb_cdc` (host-only exempt).
 - Strings: no empty or quoted `absent`, no quotes/backslashes, max 200 chars. YAML 1.1 traps (`010`, `1:30`, `NO`, `On`, `8.0`) are errors.
 - `menu_order` only on diagnostic profiles; display names unique; only `<board_id>.yaml` files (and README.md) in boards/.
+
+## Building every board (`scripts/build_all_boards.py`, CI: "Firmware — every boards/*.yaml builds")
+
+One command builds every `boards/*.yaml` and fails if any board does not build:
+
+```sh
+cd bobflight-firmware
+python3 scripts/build_all_boards.py --out build-all-boards     # build; exit 0 only if every board built
+python3 scripts/build_all_boards.py --list-flashable           # expected flashable list, builds nothing
+python3 scripts/build_all_boards.py --plan                     # per-board recipe, builds nothing
+```
+
+Requirements are the same as the per-board builds: Python 3, CMake with Make or Ninja, and
+`arm-none-eabi-gcc`/`objcopy` on `PATH` (CI uses the pinned toolchain from
+`.github/actions/setup-arm-toolchain`). Nothing is flashed and no device is accessed.
+
+Each board uses the recipe the repository already has for it, chosen from its definition
+(no board list is written anywhere else):
+
+| Definition | Recipe | Output |
+| --- | --- | --- |
+| `support: host-only` (`dummy`) | host build of `bobflight_host` | none: the target registry refuses host-only targets for hardware builds, so it is never flashable |
+| `support: diagnostic` (`mltempf4`, `custom_f405xg_usb`) | `tools/build_f405_usb_diagnostic.py`, Intel HEX checked against `mcu.flash_kib` | `hex/<board_id>/<configurator.artifact_name>` |
+| anything else, `image_profile: main` (`kakute_f7_hdv`, `matek_f722_px`, `tmotor_f7_v2`) | CMake cross build with the registry toolchain, `check_bootloader_image`, `scripts/publish_target_image.py` | `hex/<board_id>/bobflight-<board_id>-main.hex` and its `.hex.json` provenance manifest |
+
+The two diagnostic profiles are built by the same tool and give the same image
+(`custom_f405xg_usb.yaml`: "same diagnostic image as MLTEMPF4"); only the file name differs.
+
+### Output contract
+
+`--out` must be a new or empty directory, so an older HEX can never be mistaken for this
+build. Inside it:
+
+```text
+boards.json                                     index (always written once building starts)
+hex/<board_id>/bobflight-<board_id>-main.hex    main images
+hex/<board_id>/bobflight-<board_id>-main.hex.json
+hex/<board_id>/<configurator.artifact_name>     diagnostic images
+logs/<board_id>.log                             build log per board
+work/<board_id>/                                build trees (not part of the contract)
+```
+
+`boards.json` (`schema_version: 1`) has `ok`, `git_commit`, `tracked_source_dirty`,
+`flashable` (board ids with a device HEX, sorted by `board_id`: `board_id`,
+`image_profile`, `hex` path relative to the output directory, `sha256`), and `boards`
+(every definition with `result` `hex`, `host-build` or `failed`, plus its log path).
+`--list-flashable` prints the same `flashable` list without `sha256` and without
+building, so a consumer can compare its own board list against it. Use the HEX files only
+when `ok` is `true`.
+
+### CI rule
+
+The `firmware-all-boards` job runs `tests/test_build_all_boards.py` and then the real
+build. The job fails when any board definition is invalid, any board fails to configure,
+compile, link or pass its image check, any expected HEX or manifest is missing, or the
+set of results differs from `boards/*.yaml`. On success the `bobflight-all-boards-hex`
+artifact holds `boards.json` and `hex/`; on failure `bobflight-all-boards-logs` holds the
+per-board logs.
+
+Board identity metadata inside the HEX (planned for the safer-flashing work) is not part
+of these images yet; it will join this pipeline when that lands. Today the board identity
+comes from the file location, `boards.json`, the main-image manifest, and the firmware's
+`version` reply after flashing.
