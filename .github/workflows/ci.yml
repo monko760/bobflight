@@ -108,6 +108,39 @@ jobs:
           name: bobflight-matek-f722-px
           path: bobflight-firmware/build-matek/bobflight.hex
 
+  firmware-all-boards:
+    name: Firmware — every boards/*.yaml builds (HEX per flashable board)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: bobflight-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pinned ARM toolchain (verified archive cache)
+        timeout-minutes: 10
+        uses: ./.github/actions/setup-arm-toolchain
+      - name: All-boards build orchestration (broken board, missing HEX, host-only off the flashable list)
+        run: python3 tests/test_build_all_boards.py
+      - name: Build every board definition; fail if any board does not build or a HEX is missing
+        run: python3 scripts/build_all_boards.py --out build-all-boards
+      - name: Upload every flashable HEX with boards.json
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bobflight-all-boards-hex
+          path: |
+            bobflight-firmware/build-all-boards/boards.json
+            bobflight-firmware/build-all-boards/hex/
+      - name: Upload per-board build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bobflight-all-boards-logs
+          path: |
+            bobflight-firmware/build-all-boards/boards.json
+            bobflight-firmware/build-all-boards/logs/
+
   configurator:
     name: Configurator — typecheck, smoke, build
     runs-on: ubuntu-latest
