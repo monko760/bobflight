@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
-import { SETTINGS_KEYS, type SettingsKey } from "../protocol";
+import { canSaveStorage, SETTINGS_KEYS, type SettingsKey } from "../protocol";
 import { ensureMockConnected } from "../protocol/ensureConnected";
 import {
   FILTER_KEYS,
@@ -30,6 +30,13 @@ import {
 } from "../filters/gyroNotch";
 import { isGateNotSent } from "../protocol/commandGate";
 import {
+  filterDraftValid,
+  midSaveFailure,
+  numberFromInput,
+  storageSnapshotFromRaw,
+  withMidSave,
+} from "../tuning/saveHonesty";
+import {
   RpmCancelled,
   applyRpmSetting,
   gated,
@@ -51,6 +58,13 @@ const FILTER_LABELS: Record<FilterKey, string> = {
 
 /** Client-side LPF range hint; worded so it cannot be mistaken for an FC `set failed` line. */
 export const LPF_RANGE_HINT = "Out of range (10–1000 or 0).";
+
+/** Empty is not 0. A typed 0 stays legal (LPF off). */
+function lpfFieldProblem(key: FilterKey, n: number): string | null {
+  if (!Number.isFinite(n)) return `${FILTER_LABELS[key]}: enter a number (empty is not 0).`;
+  if (!validateFilterHz(n)) return `${FILTER_LABELS[key]}: ${LPF_RANGE_HINT}`;
+  return null;
+}
 
 function emptyFilters(): FiltersConfig {
   return { gyro_lpf_hz: 0, dterm_lpf_hz: 0 };
@@ -100,12 +114,16 @@ function settingsErrorMessage(err: unknown): string {
 }
 
 export function FiltersPage() {
-  const { host } = useHost();
+  const { host, connectionStatus, postFlashGate } = useHost();
   const [values, setValues] = useState<FiltersConfig>(emptyFilters);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [usingFallback, setUsingFallback] = useState(false);
   const [ready, setReady] = useState(false);
+  const [saving, setSaving] = useState(false);
+  /** A save already sent `set` calls. Further saves stay off until a reload. */
+  const [saveBlocked, setSaveBlocked] = useState(false);
+  const saveLock = useRef(false);
   const [savedRev, setSavedRev] = useState(0);
   const [loadedValues, setLoadedValues] = useState<FiltersConfig>(emptyFilters);
   const [notchSnap, setNotchSnap] = useState<NotchSnapshot>(emptyNotchSnapshot);
@@ -175,6 +193,7 @@ export function FiltersPage() {
       setReady(false);
       setFcRead(false);
       setSettingsBusy({ message, final });
+      if (final) setSaveBlocked(false);
     };
     setErr(null);
     setReadErr(null);
@@ -207,6 +226,7 @@ export function FiltersPage() {
       await reloadRpm(notches.schema, signal);
       if (signal.aborted) return;
       setFcRead(true);
+      setSaveBlocked(false);
       if (loadCtl.current === ctl) loadCtl.current = null;
     } catch (e) {
       if (e instanceof RpmCancelled || signal.aborted) return; // unmounted, newer load or disconnect
@@ -219,6 +239,7 @@ export function FiltersPage() {
         setRpmDraft({ harmonics: "", minHz: "", q: "" });
         setUsingFallback(false);
         setReady(false);
+        setSaveBlocked(false);
         setReadErr(`Could not read the controller's filter settings (${settingsErrorMessage(e)}). Nothing was changed. Defaults and Save stay disabled until a read succeeds.`);
         return;
       }
@@ -232,12 +253,14 @@ export function FiltersPage() {
         setRpmDraft({ harmonics: "", minHz: "", q: "" });
         setUsingFallback(true);
         setReady(true);
+        setSaveBlocked(false);
         setErr(
           `Protocol settings unavailable (${settingsErrorMessage(e)}); using local mockSettingsApi fallback`,
         );
       } catch (fe) {
         setErr(settingsErrorMessage(fe));
         setReady(false);
+        setSaveBlocked(false);
       }
     }
   }, [host, reloadNotches, reloadRpm]);
@@ -267,83 +290,83 @@ export function FiltersPage() {
   }, [host, load]);
 
   function updateField(key: FilterKey, raw: string) {
-    const n = Number(raw);
-    setValues((prev) => ({
-      ...prev,
-      [key]: Number.isFinite(n) ? n : prev[key],
-    }));
+    setValues((prev) => ({ ...prev, [key]: numberFromInput(raw) }));
     setMsg(null);
     setErr(null);
   }
 
   async function onSave() {
+    if (!canSave || saveLock.current) return;
+    saveLock.current = true;
+    setSaving(true);
     setErr(null);
     setMsg(null);
     setNotchFcLine(null);
     setRpmFcLine(null);
-    for (const key of FILTER_KEYS) {
-      if (!validateFilterHz(values[key])) {
-        // Client-side check (not an FC reply), so it must not read like FW text.
-        setErr(`${FILTER_LABELS[key]}: ${LPF_RANGE_HINT}`);
-        return;
-      }
-    }
-    const rows = notchRows(notchSnap);
-    const notchChanges = rows.filter((r) => draftDirty(r, drafts[r.index]));
-    for (const r of notchChanges) {
-      // Client-side hint only; the FC re-checks and its line wins.
-      const problem = draftProblem(drafts[r.index]);
-      if (problem) {
-        setErr(`Notch ${r.index}: ${problem}`);
-        return;
-      }
-    }
-    const rpmNow = rpmView(rpmSnap, notchSnap.schema);
-    const rpmChanges = rpmDirtyKeys(rpmNow, rpmDraft);
-    {
-      // Client-side hint only; the FC re-checks and its line wins.
-      const problem = rpmDraftProblem(rpmNow, rpmDraft);
-      if (problem) {
-        setErr(`RPM filter: ${problem}`);
-        return;
-      }
-    }
-
-    if (usingFallback) {
+    let sent = 0;
+    const sendSet = async (run: () => Promise<unknown>) => {
+      sent += 1;
+      try { await run(); }
+      catch (e) { if (isGateNotSent(e)) sent -= 1; throw e; }
+    };
+    try {
       for (const key of FILTER_KEYS) {
-        const reply = mockSettingsApi.set(key, values[key]);
-        if (!reply.startsWith("ok ")) {
-          setErr(
-            reply === "unknown key" || reply === "set failed"
-              ? reply
-              : "set failed",
-          );
+        // Already shown beside the field. Empty is not 0, so this must not send.
+        if (!validateFilterHz(values[key])) return;
+      }
+      const rowsNow = notchRows(notchSnap);
+      const notchChanges = rowsNow.filter((r) => draftDirty(r, drafts[r.index]));
+      for (const r of notchChanges) {
+        // Client-side hint only; the FC re-checks and its line wins.
+        const problem = draftProblem(drafts[r.index]);
+        if (problem) {
+          setErr(`Notch ${r.index}: ${problem}`);
           return;
         }
       }
-      const saveReply = mockSettingsApi.save();
-      if (saveReply !== "saved") {
-        setErr(saveReply === "save failed" ? "save failed" : saveReply);
+      const rpmNow = rpmView(rpmSnap, notchSnap.schema);
+      const rpmChanges = rpmDirtyKeys(rpmNow, rpmDraft);
+      {
+        // Client-side hint only; the FC re-checks and its line wins.
+        const problem = rpmDraftProblem(rpmNow, rpmDraft);
+        if (problem) {
+          setErr(`RPM filter: ${problem}`);
+          return;
+        }
+      }
+
+      if (usingFallback) {
+        for (const key of FILTER_KEYS) {
+          const reply = mockSettingsApi.set(key, values[key]);
+          if (!reply.startsWith("ok ")) {
+            const line = reply === "unknown key" || reply === "set failed" ? reply : "set failed";
+            if (sent > 0) { setSaveBlocked(true); setErr(withMidSave(line)); }
+            else setErr(line);
+            return;
+          }
+          sent += 1;
+        }
+        const saveReply = mockSettingsApi.save();
+        if (saveReply !== "saved") {
+          setSaveBlocked(true);
+          setErr(withMidSave(saveReply === "save failed" ? "save failed" : saveReply));
+          return;
+        }
+        setMsg("saved");
+        setSavedRev((r) => r + 1);
+        await load();
         return;
       }
-      setMsg("saved");
-      setSavedRev((r) => r + 1);
-      await load();
-      return;
-    }
 
-    try {
       await ensureMockConnected(host);
       for (const key of FILTER_KEYS) {
-        await host.setSetting(
-          key as SettingsKey,
-          formatSettingValue(values[key]),
-        );
+        await sendSet(() => host.setSetting(key as SettingsKey, formatSettingValue(values[key])));
       }
       for (const r of notchChanges) {
         const next = draftPair(drafts[r.index]);
         if (!next) continue;
         const res = await applyNotch(host, r.index, loadedPair(r), next);
+        sent += res.sent.length;
         if (!res.ok) {
           // Show the FC's refusal exactly, then re-read what the FC holds now.
           setNotchFcLine(res.fcLine);
@@ -358,6 +381,7 @@ export function FiltersPage() {
         const n = rpmValues[k];
         if (n === null) continue;
         const res = await applyRpmSetting(host, rs, k, n, rpmLife.current?.signal);
+        sent += res.ops.filter((op) => op.startsWith("set ")).length;
         rs = res.snap;
         setRpmSnap(rs);
         if (!res.ok) {
@@ -371,12 +395,28 @@ export function FiltersPage() {
       // Re-read after the sets (no optimistic update) before saving.
       await reloadNotches();
       await host.saveSettings();
+      const after = await host.getAllSettings();
+      for (const key of FILTER_KEYS) {
+        const got = Number(after[key]);
+        const want = values[key];
+        if (!Number.isFinite(got) || Math.abs(got - want) > Math.max(1e-6, Math.abs(want) * 2e-6)) {
+          throw new Error(`Readback mismatch: ${key}`);
+        }
+      }
       setMsg("saved");
       setSavedRev((r) => r + 1);
       await load();
     } catch (e) {
       if (e instanceof RpmCancelled) return; // unmounted mid-Save: nothing more is sent
-      setErr(settingsErrorMessage(e));
+      if (sent > 0) {
+        setSaveBlocked(true);
+        setErr(midSaveFailure(e));
+      } else {
+        setErr(settingsErrorMessage(e));
+      }
+    } finally {
+      saveLock.current = false;
+      setSaving(false);
     }
   }
 
@@ -387,6 +427,14 @@ export function FiltersPage() {
   const rpmDirty = rpmDirtyKeys(rpm, rpmDraft);
   const rpmHint = rpmDirty.length ? rpmDraftProblem(rpm, rpmDraft) : null;
   const pageDirty = lpfDirty || rows.some((r) => draftDirty(r, drafts[r.index])) || rpmDirty.length > 0;
+  const lpfProblems = ready && !settingsBusy
+    ? FILTER_KEYS.map((k) => lpfFieldProblem(k, values[k])).filter((m): m is string => m !== null)
+    : [];
+  const notchOk = rows.every((r) => !draftDirty(r, drafts[r.index]) || !draftProblem(drafts[r.index]));
+  const draftValid = filterDraftValid(values) && notchOk && !rpmHint;
+  const storageSnap = storageSnapshotFromRaw(notchSnap.storageRaw);
+  const canSave = ready && !settingsBusy && !saving && !saveBlocked && !postFlashGate && draftValid && pageDirty
+    && (usingFallback || canSaveStorage(storageSnap, connectionStatus === "connected", saving));
 
   function updateRpmDraft(patch: Partial<RpmDraft>) {
     setRpmDraft((prev) => ({ ...prev, ...patch }));
@@ -453,12 +501,14 @@ export function FiltersPage() {
                 min={0}
                 max={1000}
                 disabled={!!settingsBusy}
-                value={settingsBusy ? "unknown" : values[key]}
+                value={settingsBusy ? "unknown" : (Number.isFinite(values[key]) ? values[key] : "")}
+                aria-invalid={ready && !settingsBusy && lpfFieldProblem(key, values[key]) !== null ? true : undefined}
                 onChange={(e) => updateField(key, e.target.value)}
               />
             </div>
           ))}
         </div>
+        {lpfProblems.map((problem) => <p className="fail" key={problem}>{problem}</p>)}
       </fieldset>
 
       <fieldset className="tuning-axis" data-testid="gyro-notch">
@@ -595,7 +645,7 @@ export function FiltersPage() {
       </fieldset>
 
       <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="button" className="primary" disabled={!!settingsBusy || !ready} onClick={() => void onSave()}>
+        <button type="button" className="primary" disabled={!canSave} onClick={() => void onSave()}>
           Save
         </button>
         <button type="button" className="ghost" onClick={onReload}>
@@ -607,13 +657,16 @@ export function FiltersPage() {
           onReread={load}
           savedRevision={savedRev}
           pageDirty={pageDirty}
-          disabled={!!settingsBusy || !ready}
+          disabled={!!settingsBusy || !ready || postFlashGate || saving}
           localFallback={usingFallback ? async () => { mockSettingsApi.defaults("filters"); await load(); } : undefined}
         />
       </div>
       {ready && !usingFallback && fcRead && <AccelCalSavedNote raw={notchSnap.storageRaw ?? ""} />}
       {msg && <p className="muted">Last reply: {msg}</p>}
-      {err && <p className="fail">{err}</p>}
+      {err && <p className="fail" data-testid="save-error">{err}</p>}
+      {saveBlocked && !readErr && !settingsBusy?.final && (
+        <button type="button" onClick={() => void load()}>Read again</button>
+      )}
     </div>
   );
 }

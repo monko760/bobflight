@@ -865,7 +865,7 @@ async function main() {
     for (const k of lpfInputs) { assert.equal(String(lpf(k).value), String(Number(all[k as SettingsKey])), k); assert.ok(!isDisabled(lpf(k)), `${k} editable`); }
     for (const k of rpmInputs) { assert.notEqual(input(k).value, "unknown", k); assert.ok(!isDisabled(input(k)), `${k} editable`); }
     assert.equal(status("Filter reason"), "ok");
-    assert.ok(!isDisabled(button("Save")));
+    assert.ok(isDisabled(button("Save")), "Save stays disabled on a clean page");
     root.unmount(); await t.mock.disconnect();
   });
 
