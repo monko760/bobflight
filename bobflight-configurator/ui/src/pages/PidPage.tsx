@@ -265,7 +265,7 @@ export function PidPage() {
         <AxisGroup title="Pitch" keys={PITCH_KEYS} values={values} ready={ready} onChange={updateField} />
         <AxisGroup title="Yaw" keys={YAW_KEYS} values={values} ready={ready} onChange={updateField} />
         <fieldset className="tuning-axis">
-          <legend>Flight readiness (schema 4)</legend>
+          <legend>Flight readiness</legend>
           <div className="tuning-grid">
             <div className="tuning-field">
               <label htmlFor="airmode">AirMode</label>

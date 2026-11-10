@@ -15,8 +15,9 @@ Default baud: 115200.
 Package script `smoke` builds then runs scripts/smoke.ts against MockSerial.
 Asserts connect never sends arm; exercises version, status, help.
 
-Package script `smoke:settings` exercises get/set/save/defaults for the
-FW-locked first-12 settings keys (exact reply shapes, no spaces around `=`).
+Package script `smoke:settings` exercises get/set/save and
+`defaults pid|rates|filters` (exact reply shapes, no spaces around `=`).
+Bare `defaults` is refused.
 
 ## Proposed API
 
@@ -30,12 +31,13 @@ BobFlightCliClient methods:
 - getVersion() / getStatus()
 - arm() / disarm() / reboot() for UI-confirmed calls only
 - configureReconnect(...)
-- **Settings (first-12 keys):**
+- **Settings:**
   - getSetting(key) -> { key, value }
   - setSetting(key, value) -> { key, value }
-  - saveSettings() -> void (acks saved)
-  - restoreDefaults() -> all 12 after reset (defaults restored, no auto-save)
-  - getAllSettings() -> Record of all 12
+  - saveSettings() -> void (verified flash save)
+  - restoreDefaultsGroup("pid" | "rates" | "filters") -> that group's keys in RAM (no auto-save)
+  - restoreDefaults() sends bare `defaults`. Current firmware refuses it (`defaults_error: group_required pid|rates|filters`). The UI does not send it.
+  - getAllSettings() -> Record of SETTINGS_KEYS (keys an older firmware does not advertise are omitted)
 
 ConnectionStatus: disconnected | connecting | connected | reconnecting | error
 
@@ -73,9 +75,10 @@ Keys: see SETTINGS_KEYS; the schema 13 layout is in bobflight-firmware/docs/SETT
 
 ## Storage schema (host contract)
 
-Schema 5 payload is 184 bytes (includes gyro/dterm LPF). Schema 6 is **188** bytes:
-`pid_yaw_d` LE float at bytes **184..187** (default `0.00005`, validate `0..10` finite).
-Migration 5→6 writes that default; reserved 165–175 and LPF 176–183 are left untouched.
+Only storage schema 13 is supported (256-byte payload). There are no loaders or
+migrations for schemas 1..12. Layout and `defaults pid|rates|filters` are in
+`bobflight-firmware/docs/SETTINGS-PERSISTENCE.md`. `pid_yaw_d` is stored with
+the other PID gains (bytes 36..71); default `0.00005`, validate `0..10` finite.
 
 ## Web Serial (browser)
 

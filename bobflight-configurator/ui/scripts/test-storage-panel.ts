@@ -1,6 +1,8 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { REFRESH_CONFIRM_MESSAGE, requestRefresh, shouldConfirmRefresh, storageDirty, browserConfirm } from "../src/components/storageRefresh";
 import { parseStorage, STORAGE_SCOPE_V13 } from "../../protocol/src/storage";
 import { BenchController, type BenchState } from "../src/motors/benchController";
@@ -134,6 +136,42 @@ async function main() {
     assert.equal(panel.length, 1, "MotorsPage renders one StoragePanel");
     assert.match(panel[0], /blocked=\{storageBlocked\(state\)\}/);
     assert.doesNotMatch(panel[0], /busy/);
+  });
+  await test("shipped UI copy: schema 13 and scoped defaults, not schema 3/4/6/10 as current", () => {
+    const root = fileURLToPath(new URL("../src/", import.meta.url));
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, ent.name);
+        if (ent.isDirectory()) walk(p);
+        else if (/\.(tsx|ts)$/.test(ent.name)) files.push(p);
+      }
+    };
+    walk(root);
+    const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const visible = files.map((f) => strip(readFileSync(f, "utf8"))).join("\n");
+    for (const n of [3, 4, 6, 10]) {
+      assert.doesNotMatch(visible, new RegExp(`\\b[Ss]chema\\s+${n}\\b`), `schema ${n} presented as current`);
+    }
+    assert.doesNotMatch(visible, /accept this migration/);
+    assert.doesNotMatch(visible, /migrated_control_source_manual/);
+    const storage = strip(source("../src/components/StoragePanel.tsx"));
+    assert.match(storage, /storage schema 13 only/);
+    assert.match(storage, /Saved scope below is the list this connected firmware reports/);
+    assert.doesNotMatch(storage, /Schema 3 includes/);
+    const pid = strip(source("../src/pages/PidPage.tsx"));
+    assert.match(pid, /<legend>Flight readiness<\/legend>/);
+    assert.match(pid, /AirMode default/);
+    const motors = strip(source("../src/pages/MotorsPage.tsx"));
+    assert.match(motors, /This connected firmware does not advertise <code>motor_poles<\/code>/);
+    assert.doesNotMatch(motors, /has no <code>motor_poles<\/code> setting/);
+    const poles = strip(source("../src/motors/MotorPolesPanel.tsx"));
+    assert.match(poles, /kind === "unsupported"\) return <>\{fallback\}<\/>/);
+    const setup = strip(source("../src/pages/SetupPage.tsx"));
+    assert.match(setup, /defaults pid/);
+    assert.match(setup, /defaults rates/);
+    assert.match(setup, /defaults filters/);
+    assert.doesNotMatch(setup, /all 12/);
   });
   console.log(`${passed} storage-panel tests passed`);
 }

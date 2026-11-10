@@ -81,7 +81,7 @@ Apply edits to the controller, then explicitly Save to controller. Save verifies
 | Modes | All four mode ranges and manual/AUX control selection in flash. Unapplied row edits block this page's Save button. |
 | PID / Rates | Supported gain/rate keys (including `pid_yaw_d`) in flash through existing explicit save flow. |
 | Power & Battery | Divider, analog current scale/offset, cell count, warning/critical thresholds and capacity in flash. Consumption and measurements begin a new session after reboot. |
-| Motors | DShot300/600 selection and `motor_direction` in flash. The firmware also stores `motor_poles` (RPM filter block); the Motors tab pole-count field is a separate browser preference. Test values, consent, sessions and motor activation are never restored. |
+| Motors | DShot300/600 selection, `motor_direction`, and `motor_poles` in flash. The Motors tab sets `motor_poles` when the connected firmware advertises that key; a browser-only pole count is shown only when this firmware does not. Test values, consent, sessions and motor activation are never restored. |
 | Sensors | Validated applied accelerometer coefficients and binding remain in flash. Added Save panel. Gyro bias/readiness are measured at startup; candidate calibration and captures remain temporary. |
 | Configuration / Failsafe | Disabled placeholder editors have no settings to persist. Removed the obsolete fixed-500ms claim from the Failsafe page; actual firmware behavior is unchanged. |
 | Setup / Status / CLI | Read-only displays or explicit actions; CLI `save` commits the supported scope. `loop_rate_hz` is stored. CLI `defaults pid\|rates\|filters` resets one group in RAM (see below); bare `defaults` is refused. |

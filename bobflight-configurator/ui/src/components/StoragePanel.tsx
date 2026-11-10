@@ -73,14 +73,14 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
  const canSave=supported&&canSaveStorage(state,connected,pending||blocked);
  return <section aria-label="Controller storage" className="panel">
   <h3>Controller storage & backups</h3>
-  <p>Apply edits first, then Save to controller. The connected firmware reports which settings it can save below. Schema 3 includes power settings and DShot speed as well as PID/rates, receiver, modes and applied accelerometer calibration. Gyro bias is measured again at startup. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
+  <p>Apply edits first, then Save to controller. This Configurator reads storage schema 13 only. Saved scope below is the list this connected firmware reports. Gyro bias is measured again at startup. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
   <p data-testid="storage-status">{!connected?'Disconnected — no current storage status.':state?`${state.backend==='flash'?'Controller flash':state.backend==='host_sim'?'Host simulation — not physical storage':'Unsupported'} · ${state.state} · ${state.dirty?'unsaved changes':'no unsaved changes'} · generation ${state.generation}`:pending?'Reading storage status…':'Storage capability not yet verified.'}</p>
   <button disabled={!canSave} onClick={()=>void run('save')}>Save to controller</button>{' '}
   <button className="ghost" disabled={!connected||pending||blocked} onClick={()=>{requestRefresh({dirty:storageDirty(state),confirm:browserConfirm,refresh:()=>void run('refresh')});}}>Refresh storage</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('diff')}>Export changes</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('dump')}>Export full configuration</button>
   {state&&<AccelCalSavedNote raw={storageRaw}/>}
-  {state&&state.lastError!=='none'&&<p role="alert">{state.lastError==='migrated_control_source_manual'?'Older AUX mode routing was restored as manual selection. Your stored manual mode and other settings were retained. Review Modes, then explicitly Save to controller to accept this migration.':`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
+  {state&&state.lastError!=='none'&&<p role="alert">{`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
   {state&&<p>Saved scope: {state.scope.replaceAll("_"," ").replaceAll(",",", ")}</p>}
   {blocked&&<p>Apply all edits on this page before saving, and finish any active operation.</p>}
   {!supported&&state&&<p role="alert">Update firmware to save this page’s settings. This firmware does not advertise that capability.</p>}

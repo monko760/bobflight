@@ -716,6 +716,7 @@ async function main() {
     assert.ok(!/restoreDefaults|all 12/.test(pageText()), "old copy gone");
     const note = shown("setup-defaults-note") ?? "";
     assert.match(note, /PID, Rates or\s+Filters tab/); assert.match(note, /nothing is saved\s+until you press Save/);
+    assert.match(note, /defaults pid/); assert.match(note, /defaults rates/); assert.match(note, /defaults filters/);
     assert.match(note, /There is no full reset on this page/);
     assert.ok(!r.client.getSentCommands().some((c) => c.startsWith("defaults")), "Setup sends no defaults command");
     await r.done();
