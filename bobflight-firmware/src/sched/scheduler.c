@@ -3,6 +3,8 @@
  * replayed as synthetic sensor samples. Stats are foreground-owned snapshots.
  */
 #include "sched/scheduler.h"
+#include "sched/scheduler_profile.h"
+#include "flight/arming.h"
 #include "sched/tasks.h"
 #include "hal/hal.h"
 #include <limits.h>
@@ -11,6 +13,7 @@ static uint32_t g_pid_remaining;
 static uint64_t g_next_gyro_us,g_last_gyro_us,g_last_pid_us;
 static uint32_t bounded(uint64_t n){return n>UINT32_MAX?UINT32_MAX:(uint32_t)n;}
 static void maximum(uint32_t *dst,uint64_t value){if(value>*dst)*dst=bounded(value);}
+#include "sched/scheduler_profile_impl.h"
 static void interval(uint64_t now,uint64_t before,uint64_t expected,bool *valid,
  uint32_t *last,uint32_t *min,uint32_t *max,uint32_t *jitter){
  uint64_t dt=now-before;*last=bounded(dt);
@@ -41,6 +44,7 @@ static void window_roll(uint64_t now){
 }
 void scheduler_init(uint32_t gyro_hz,uint32_t pid_process_denom){
  sanitize(&gyro_hz,&pid_process_denom);
+ g_profile=(scheduler_profile_stats_t){0};g_profile_have_return=false;
  g_stats=(scheduler_stats_t){0};g_stats.gyro_hz=gyro_hz;
  g_stats.pid_process_denom=pid_process_denom;g_stats.gyro_period_us=1000000u/gyro_hz;
  /* The first gyro slot runs the full cascade (motors get a real frame at
@@ -54,6 +58,7 @@ void scheduler_set_rate(uint32_t gyro_hz,uint32_t pid_process_denom){
  if(!g_stats.gyro_period_us){scheduler_init(gyro_hz,pid_process_denom);return;}
  if(gyro_hz==g_stats.gyro_hz && pid_process_denom==g_stats.pid_process_denom)return;
  uint64_t now=hal_micros();
+ if(profile_safe(now))profile_finish(PROFILE_RATE_CHANGED,now);
  g_stats.gyro_hz=gyro_hz;g_stats.pid_process_denom=pid_process_denom;
  g_stats.gyro_period_us=1000000u/gyro_hz;g_pid_remaining=1u;
  /* Rate-relative statistics restart; since-boot fault counters do not. */
@@ -69,7 +74,9 @@ void scheduler_set_rate(uint32_t gyro_hz,uint32_t pid_process_denom){
 }
 void scheduler_run(void){
  /* Receiver/failsafe ordering remains unchanged; other agent owns that work. */
- bg_rx_poll();bg_failsafe_tick();
+ const bool profile=profile_enter();
+ const uint64_t profile_generation=g_profile_generation;
+ PROFILE_CALL(PROFILE_RX,bg_rx_poll());PROFILE_CALL(PROFILE_FAILSAFE,bg_failsafe_tick());
  uint64_t now=hal_micros();
  if(now>=g_next_gyro_us){
   window_roll(now);
@@ -82,10 +89,12 @@ void scheduler_run(void){
    &g_stats.gyro_interval_max_us,&g_stats.gyro_jitter_max_us);
   g_last_gyro_us=now;g_stats.gyro_runs++;g_stats.loop_window_open_gyro++;
   uint64_t gyro_start=hal_micros();loop_gyro();
-  maximum(&g_stats.gyro_exec_max_us,hal_micros()-gyro_start);
+  uint64_t gyro_end=hal_micros();
+  if(profile && profile_generation==g_profile_generation)profile_record(PROFILE_GYRO,gyro_start,gyro_end);
+  maximum(&g_stats.gyro_exec_max_us,gyro_end-gyro_start);
   /* Safety S1: gyro LPF + notches on EVERY gyro sample, so a PID divider
    * (8000/2) never drops a sample unfiltered (no aliasing of HF noise). */
-  loop_filter();
+  PROFILE_CALL(PROFILE_FILTER,loop_filter());
   if(--g_pid_remaining==0){
    g_pid_remaining=g_stats.pid_process_denom;
    uint64_t pid_start=hal_micros();
@@ -93,14 +102,18 @@ void scheduler_run(void){
     &g_stats.pid_interval_valid,&g_stats.pid_interval_last_us,&g_stats.pid_interval_min_us,
     &g_stats.pid_interval_max_us,&g_stats.pid_jitter_max_us);
    g_last_pid_us=pid_start;g_stats.pid_runs++;
-   loop_pid();loop_mixer_dshot();g_stats.cascade_runs++;g_stats.loop_window_open_runs++;
+   PROFILE_CALL(PROFILE_PID,loop_pid());PROFILE_CALL(PROFILE_MOTOR_OUTPUT,loop_mixer_dshot());
+   g_stats.cascade_runs++;g_stats.loop_window_open_runs++;
   }
   uint64_t duration=hal_micros()-now;
   maximum(&g_stats.cascade_exec_max_us,duration);
   if(duration>g_stats.gyro_period_us){g_stats.overruns++;g_stats.loop_window_open_overruns++;}
+  if(profile && profile_generation==g_profile_generation)profile_leave();
   return;
  }
- bg_rx_poll();bg_cli_poll();bg_failsafe_tick();g_stats.bg_runs++;
+ PROFILE_CALL(PROFILE_RX,bg_rx_poll());PROFILE_CALL(PROFILE_CLI,bg_cli_poll());
+ PROFILE_CALL(PROFILE_FAILSAFE,bg_failsafe_tick());g_stats.bg_runs++;
+ if(profile && profile_generation==g_profile_generation)profile_leave();
 }
 const scheduler_stats_t *scheduler_stats(void){return &g_stats;}
 uint32_t scheduler_loop_target_hz(void){

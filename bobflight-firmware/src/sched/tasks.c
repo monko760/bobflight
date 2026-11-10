@@ -29,11 +29,13 @@
 #include <math.h>
 #include <stddef.h>
 static uint64_t last_sample;
+static bool have_sample_time;
 static float sample_dt;
 /* PID uses its own invocation clock, never the latest gyro sample interval. */
 static uint64_t last_pid_us;
 static bool have_pid_time;
-static bool sample_ok,arm_low_seen;
+/* Rate control needs valid gyro/time; leveled modes also need attitude. */
+static bool sample_ok,attitude_ok,arm_low_seen;
 static uint32_t arm_revision_seen;
 static unsigned bench_motor;
 /* Remain busy until a cascade has actually submitted the stop frame. */
@@ -162,10 +164,21 @@ void loop_gyro(void)
 {
     gyro_calibration_tick();
     uint64_t now=hal_micros();
-    sample_dt=last_sample?(float)(now-last_sample)*0.000001f:nominal_gyro_dt(); last_sample=now;
+    const bool first=!have_sample_time;
+    const uint64_t elapsed=first?0u:now-last_sample;
+    const bool time_ok=first || (now>last_sample && elapsed<=10000u);
+    sample_dt=first?nominal_gyro_dt():(float)elapsed*0.000001f;
+    last_sample=now;have_sample_time=true;
     sample_ok=gyro_sample(g_gyro_raw);
-    if(!sample_ok || sample_dt>0.01f){arming_disarm();arm_low_seen=false;}
-    if(sample_ok)sample_ok=attitude_update(g_gyro_raw,gyro_accel_g(),sample_dt);
+    if(!time_ok || !isfinite(sample_dt) || sample_dt<=0.f || sample_dt>0.01f)
+        sample_ok=false;
+    for(unsigned axis=0;axis<3;axis++)
+        if(!isfinite(g_gyro_raw[axis]))sample_ok=false;
+    /* Invalidate the last attitude on bad gyro/time without integrating it.
+     * attitude_update rejects a null gyro before any estimator work. */
+    attitude_ok=attitude_update(sample_ok?g_gyro_raw:NULL,gyro_accel_g(),sample_dt);
+    if(!sample_ok){arming_disarm();arm_low_seen=false;}
+
 }
 
 void loop_filter(void)
@@ -174,6 +187,9 @@ void loop_filter(void)
      * gyro LPF + notches see every sample at the gyro period (1 / gyro_hz,
      * follows runtime rate changes). The PID reads the latest output. */
     gyro_filter_set_dt(nominal_gyro_dt());
+    /* Rejected gyro/time must not poison persistent DSP state. An unavailable
+     * accelerometer/Euler solution is NOT a rejected gyro sample in Acro. */
+    if(!sample_ok){for(unsigned axis=0;axis<3;axis++)g_gyro_filt[axis]=0.f;return;}
     gyro_filter(g_gyro_raw, g_gyro_filt);
 }
 
@@ -207,7 +223,9 @@ void loop_pid(void)
         /* Normal configuration setters refuse edits while armed. */
         if (arming_state() == ARM_ARMED) arming_disarm();
     }
-    if(!sample_ok || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
+    const control_mode_t requested_mode=control_mode_requested();
+    const bool needs_attitude=fs_flying || requested_mode!=CONTROL_MODE_ACRO;
+    if(!sample_ok || (needs_attitude && !attitude_ok) || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
     else if(fs_flying) {arm_low_seen=false;
         /* Staged HOLD/LAND fly leveled output: without qualified gravity that
          * would be fake leveling, so fail closed and stop the motors. */
@@ -225,11 +243,11 @@ void loop_pid(void)
         const float *angles=attitude_degrees();
         /* Acro is rate-only: no attitude/tilt precondition. Leveled modes
          * keep the full attitude and tilt qualification. */
-        const bool acro = control_mode_requested()==CONTROL_MODE_ACRO;
+        const bool acro = requested_mode==CONTROL_MODE_ACRO;
         if(gyro_calibrated() && (acro || (attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f)) && arming_try_arm())arm_low_seen=false;
     }
     /* Preserve the existing leveling override during staged failsafe. */
-    g_effective_mode = fs_flying ? CONTROL_MODE_ANGLE : control_mode_requested();
+    g_effective_mode = fs_flying ? CONTROL_MODE_ANGLE : requested_mode;
     if (g_effective_mode == CONTROL_MODE_ACRO)
         rates_update(sticks,g_setpoint);
     else if (g_effective_mode == CONTROL_MODE_HORIZON)
