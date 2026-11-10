@@ -17,11 +17,22 @@ const catalog = require('../ui/src/targets/catalog.generated.json');
 export function mainBoards(cat) {
   return cat.boards.filter(b => { const m = cat.mcus.find(x => x.id === b.mcu); return b.support !== 'host-only' && b.build_label && m?.status === 'implemented' && m.family === 'F7'; });
 }
+export const MAIN_IMAGE_PROFILE = 'main';
+export function mainImageFilename(boardId) { return `bobflight-${boardId}-main.hex`; }
+// Device HEX this builder offers, sorted by board_id. Host-only boards are omitted.
+// Each diagnostic profile stays on its own image_profile and artifact_name.
+// Identity is board_id + image_profile + filename. Publish directories and the CI hex/<board_id>/ prefix are not compared.
+export function flashableArtifacts(cat = catalog) {
+  const diags = cat.diagnostic_profiles ?? [];
+  return [...mainBoards(cat).map(b => ({ board_id: b.id, image_profile: MAIN_IMAGE_PROFILE, filename: mainImageFilename(b.id) })),
+    ...diags.map(p => ({ board_id: p.id, image_profile: p.image_profile, filename: p.artifact_name }))]
+    .sort((a, b) => a.board_id < b.board_id ? -1 : a.board_id > b.board_id ? 1 : 0);
+}
 const mains = mainBoards(catalog);
 // Toolchains the main-image build accepts: those of the MCUs behind buildable boards.
 const toolchains = [...new Set(mains.map(b => catalog.mcus.find(m => m.id === b.mcu).toolchain))];
 const diagnostics = catalog.diagnostic_profiles;
-const known = [...mains.map(b => b.id), ...diagnostics.map(p => p.id)];
+export const known = [...mains.map(b => b.id), ...diagnostics.map(p => p.id)];
 export function resolveBuildProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k=>!['boardId','customMcu','customFlash','customHse'].includes(k))) throw new Error('Only board/profile selections are accepted.');
   for (const key of ['boardId','customMcu','customFlash','customHse']) if (typeof input[key] !== 'string' || input[key].length > 64) throw new Error('Invalid board/profile fields.');
@@ -30,7 +41,7 @@ export function resolveBuildProfile(input) {
   const c = diag?.custom;
   if (c && (input.customMcu !== c.mcu || input.customFlash !== String(c.flash_kib) || input.customHse !== String(c.hse_hz))) throw new Error(`Custom builds currently require ${c.mcu.replace(/^STM32/,'')}xG / ${c.flash_kib} KiB / ${c.hse_hz/1000000} MHz. Other MCU and routing combinations are not implemented.`);
   const label = diag ? diag.build_label : mains.find(b => b.id === input.boardId).build_label;
-  return Object.freeze({ boardId:input.boardId, diagnostic:!!diag, profile:diag?diag.image_profile:'main', label, artifactName: diag ? diag.artifact_name : null });
+  return Object.freeze({ boardId:input.boardId, diagnostic:!!diag, profile:diag?diag.image_profile:MAIN_IMAGE_PROFILE, label, artifactName: diag ? diag.artifact_name : null });
 }
 async function buildEnvironment(repo) {
   const env={...process.env};const original=env.PATH||env.Path||'';
@@ -97,7 +108,7 @@ export async function compileHex(profile,{repo=REPO,signal,log=()=>{}}={}) {
       await run(cmake,['--build',build,'--target','check_bootloader_image'],ctx);
       await run(python,[...py,path.join(firmware,'scripts/publish_target_image.py'),'--target',profile.boardId,'--hex',path.join(build,'bobflight.hex'),'--output',temp],ctx);
       const parent=path.join(temp,'artifacts',profile.boardId);const entries=await fs.readdir(parent);if(entries.length!==1)throw new Error('Ambiguous verified artifact.');
-      fileName=`bobflight-${profile.boardId}-main.hex`;image=path.join(parent,entries[0],fileName);
+      fileName=mainImageFilename(profile.boardId);image=path.join(parent,entries[0],fileName);
       manifest=JSON.parse(await fs.readFile(image+'.json','utf8'));
       if(manifest.git_commit!==sourceRevision||manifest.tracked_source_dirty||manifest.board.id!==profile.boardId)throw new Error('Artifact provenance does not match this build.');
     }
