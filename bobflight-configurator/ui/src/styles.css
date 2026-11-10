@@ -84,6 +84,11 @@ input, select, textarea {
   padding: 0.5rem 0.65rem;
 }
 
+input[aria-invalid="true"] {
+  border-color: #f87171;
+  outline: 2px solid #f87171;
+}
+
 button.primary, button.danger, button.ghost {
   border-radius: 8px;
   padding: 0.5rem 0.9rem;

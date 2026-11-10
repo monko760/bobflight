@@ -583,7 +583,7 @@ async function main() {
     assert.ok(noMock(), `no demo fallback: ${pageText().slice(0, 400)}`);
     assert.ok(isDisabled(findButton("Save")!), "Save disabled"); assert.ok(isDisabled(findButton("Defaults…")!), "Defaults disabled");
     await held; click("Read again");
-    assert.ok(await waitFor(() => !isDisabled(findButton("Defaults…")!) && !isDisabled(findButton("Save")!)), "real read enables Defaults and Save");
+    assert.ok(await waitFor(() => !isDisabled(findButton("Defaults…")!) && isDisabled(findButton("Save")!)), "real read enables Defaults; Save stays disabled on a clean page");
     assert.equal(shown("pid-read-error"), null); assert.ok(noMock());
     await r.done();
   });
@@ -599,7 +599,7 @@ async function main() {
     assert.ok(noMock(), "no demo fallback");
     assert.ok(isDisabled(findButton("Save")!)); assert.ok(isDisabled(findButton("Defaults…")!));
     await sleep(Math.max(0, r.busyUntil - Date.now()) + 50); click("Read again");
-    assert.ok(await waitFor(() => input("pid_roll_p").value === "0.002" && !isDisabled(findButton("Save")!)), "re-read shows FC default");
+    assert.ok(await waitFor(() => input("pid_roll_p").value === "0.002" && isDisabled(findButton("Save")!)), "re-read shows FC default; Save stays disabled on a clean page");
     await r.done();
   });
 
