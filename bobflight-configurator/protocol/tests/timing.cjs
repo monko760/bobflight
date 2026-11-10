@@ -15,6 +15,13 @@ async function main(){
  await client.connect({path:'mock://bobflight',transport:'mock'});await new Promise(r=>setTimeout(r,15));
  const response=await client.sendCommand('timing');assert.match(response,/timing_available: no/);assert.match(response,/mock-no-hardware/);assert.match(response,/timing_end: 1/);
  for(const cmd of ['timing reset','timing\narm','timing extra'])await assert.rejects(()=>client.sendCommand(cmd),/unsupported/);
+ for(const cmd of ['timing_profile','timing_profile start','timing_profile stop']){
+  const p=await client.sendCommand(cmd);assert.match(p,/timing_profile_available: no/);assert.match(p,/mock-no-hardware/);assert.match(p,/timing_profile_end: 1/);
+ }
+ for(const cmd of ['timing_profile start 10','timing_profile\narm','timing_profile START','timing_profile reset'])await assert.rejects(()=>client.sendCommand(cmd),/unsupported/);
+ let profile=null;const pc=new ResponseCollector(x=>profile=x,()=>{},{endMarker:'timing_profile_end: 1'});
+ pc.push('profile_state: complete\r\ntiming_profile_en');assert.equal(profile,null);pc.push('d: 1\r\n');assert.match(profile,/complete/);
+ const pe=await new Promise((resolve,reject)=>{const t=new ResponseCollector(()=>reject(Error('accepted profile truncation')),resolve,{idleMs:1,timeoutMs:10,endMarker:'timing_profile_end: 1'});t.push('profile_state: complete\r\n');});assert.match(pe.message,/terminator missing/);
  await client.disconnect();console.log('PASS timing: framed split response, truncation, old firmware, read-only allowlist and honest mock');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
