@@ -24,7 +24,7 @@ mode_range ARM 1 12 1100 1450
 
 The command above configures the ARM **preview** on AUX12. Values are equivalent microseconds derived from normalized channel data, not measured PWM pulses. Bounds are inclusive and must satisfy `900 <= min < max <= 2100`. Invalid, overflowing, signed, fractional, extra, or missing parameters are refused before mutation. Edits while armed or during active/pending motor-bench work are refused. Success returns a full modes snapshot; the UI checks exact readback. Refusals begin `mode_range refused:`.
 
-Defaults: ARM enabled, AUX1, 1751–2100; ANGLE enabled, AUX2, 900–2100. Edits initially live in RAM. Explicit verified `save` persists these settings on the supported flash backend; unsaved edits are lost on reboot. Consult `storage` for dirty/error/backend state and [the persistence guide](../../PERSISTENCE.md) before installation. `defaults` remains the existing PID/rates defaults command, not a reset for these preview settings.
+Defaults: ARM enabled, AUX1, 1751–2100; ANGLE enabled, AUX2, 900–2100. Edits initially live in RAM. Explicit verified `save` persists these settings on the supported flash backend; unsaved edits are lost on reboot. Consult `storage` for dirty/error/backend state and [the persistence guide](../../PERSISTENCE.md) before installation. `defaults pid|rates|filters` resets only that tab group and never these settings ([SETTINGS-PERSISTENCE.md](SETTINGS-PERSISTENCE.md)).
 
 ## Safety and scope
 

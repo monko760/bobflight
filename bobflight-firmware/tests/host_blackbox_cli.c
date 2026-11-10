@@ -46,6 +46,9 @@ int main(void){
  for(unsigned i=0;i<3;i++){unsigned before=cancels;output[0]=0;assert(cmd_sd(blocked[i])&&strstr(output,"recording owns the card")&&strstr(output,"sd_end: 1"));assert(cancels==before);}
  output[0]=0;assert(blackbox_cli_filter("set pid_roll_p = 1"));assert(blackbox_cli_filter("bl"));assert(!blackbox_cli_filter("disarm")&&!blackbox_cli_filter("bench_stop"));
  output[0]=0;assert(blackbox_cli_filter("mode_range 0 1 1 1751 2100"));assert(strstr(output,"modes_end: 1"));
+ /* D1: the Blackbox refusal comes first for every defaults form (handle_line runs this filter before cmd_defaults). */
+ {const char *d[]={"defaults","defaults pid","defaults rates","defaults filters","defaults foo"};assert(config_set_key("pid_roll_p",.004f));bf_config_t before=*config_get();
+  for(unsigned i=0;i<5;i++){output[0]=0;assert(blackbox_cli_filter(d[i]));assert(strstr(output,"command refused: stop Blackbox")&&!strstr(output,"defaults_"));assert(!memcmp(&before,config_get(),sizeof before));}}
  usb=false;now+=10;blackbox_cli_poll();assert(blackbox_cli_busy()); /* Disconnect does not cancel the recorder. */
  output[0]=0;assert(cmd_blackbox("blackbox stop"));
  for(unsigned i=0;i<10000&&blackbox_cli_busy();i++){now+=10;blackbox_cli_poll();}

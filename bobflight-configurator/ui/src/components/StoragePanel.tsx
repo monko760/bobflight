@@ -2,8 +2,9 @@
 import {useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
 import {canSaveStorage,type StorageSnapshot} from '../protocol';
-import {runStorageGated,loadSequence,saveSequence,exportSequence,describeStorageError,StorageCancelledError,type StorageAction,type StorageProblem,type StorageResult} from './storageSequence';
+import {runStorageGated,readStorage,saveSequence,exportSequence,describeStorageError,StorageCancelledError,type StorageAction,type StorageProblem,type StorageResult} from './storageSequence';
 import {requestRefresh,storageDirty,browserConfirm} from './storageRefresh';
+import {AccelCalSavedNote} from './AccelCalSavedNote';
 /**
  * Load, Save and Export each run as ONE gated storage sequence with a bounded
  * busy-only retry (storageSequence.ts). The panel reloads only on connect,
@@ -17,6 +18,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
  const {host,connectionStatus,postFlashGate}=useHost();
  const connected=connectionStatus==='connected'&&!postFlashGate;
  const [state,setState]=useState<StorageSnapshot|null>(null),[pending,setPending]=useState(false),[error,setError]=useState<StorageProblem|null>(null),[message,setMessage]=useState('');
+ const [storageRaw,setStorageRaw]=useState('');/* D1 accel_cal_saved line: the raw reply behind `state` */
  const epoch=useRef(0),busy=useRef(false);
  /** Aborted on unmount / revision change: drops this panel's commands still waiting in the shared CommandGate queue. */
  const abort=useRef<AbortController|null>(null);
@@ -27,9 +29,9 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
   const id=epoch.current;busy.current=true;setPending(true);if(mode!=='quiet'){setError(null);setMessage('');}
   try{
    const result:StorageResult=await runStorageGated(host,action,send=>
-    action==='save'?saveSequence(send,requiredScope).then(snapshot=>({snapshot})):
+    action==='save'?saveSequence(send,requiredScope):
     action==='diff'||action==='dump'?exportSequence(send,action):
-    loadSequence(send).then(snapshot=>({snapshot})),{cancelled:()=>!live(id),signal:abort.current?.signal});
+    readStorage(send),{cancelled:()=>!live(id),signal:abort.current?.signal});
    if(!live(id))return;
    if(result.export){
     const data=result.export;
@@ -37,14 +39,14 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
     try{const a=document.createElement('a');a.href=url;a.download=`bobflight-${data.board}-${data.firmware}-${action}-config.txt`;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
     setMessage('Exported runtime configuration. Calibration metadata cannot be replayed; retain controller flash or recalibrate if it is lost. Export does not save to the controller.');
    }
-   setState(result.snapshot);setError(null);if(action==='save')setMessage('Saved to controller flash and verified. Confirm once with a complete power-cycle test.');
+   setState(result.snapshot);setStorageRaw(result.raw);setError(null);if(action==='save')setMessage('Saved to controller flash and verified. Confirm once with a complete power-cycle test.');
   }catch(e){
    if(e instanceof StorageCancelledError||!live(id))return;
    const problem=describeStorageError(e);
    if(mode==='quiet'&&problem.kind==='busy')return; // nothing was read; the shown status stands
    setError(problem);
    // Busy: nothing was read or sent, so the last verified status still stands. Anything else: status is no longer known.
-   if(problem.kind!=='busy')setState(null);
+   if(problem.kind!=='busy'){setState(null);setStorageRaw('');}
   }
   finally{if(id===epoch.current){busy.current=false;setPending(false);}}
  }
@@ -55,7 +57,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
  // When the page unblocks again (an apply finished), storage is re-read QUIETLY: the shown status
  // stays until the reply arrives. A `blocked` change never resets the panel (G3).
  const wantLoad=useRef(false),wantQuiet=useRef(false),wasBlocked=useRef(blocked);
- useEffect(()=>{++epoch.current;const mine=new AbortController();abort.current=mine;busy.current=false;wantLoad.current=connected;wantQuiet.current=false;setState(null);setError(null);setMessage('');setPending(false);return()=>{++epoch.current;mine.abort();};},[host,connected,revision]);
+ useEffect(()=>{++epoch.current;const mine=new AbortController();abort.current=mine;busy.current=false;wantLoad.current=connected;wantQuiet.current=false;setState(null);setStorageRaw('');setError(null);setMessage('');setPending(false);return()=>{++epoch.current;mine.abort();};},[host,connected,revision]);
  useEffect(()=>{
   if(wasBlocked.current&&!blocked&&!wantLoad.current)wantQuiet.current=true;
   wasBlocked.current=blocked;
@@ -71,13 +73,14 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
  const canSave=supported&&canSaveStorage(state,connected,pending||blocked);
  return <section aria-label="Controller storage" className="panel">
   <h3>Controller storage & backups</h3>
-  <p>Apply edits first, then Save to controller. The connected firmware reports which settings it can save below. Schema 3 includes power settings and DShot speed as well as PID/rates, receiver, modes and applied accelerometer calibration. Gyro bias is measured again at startup. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
+  <p>Apply edits first, then Save to controller. This Configurator reads storage schema 13 only. Saved scope below is the list this connected firmware reports. Gyro bias is measured again at startup. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
   <p data-testid="storage-status">{!connected?'Disconnected — no current storage status.':state?`${state.backend==='flash'?'Controller flash':state.backend==='host_sim'?'Host simulation — not physical storage':'Unsupported'} · ${state.state} · ${state.dirty?'unsaved changes':'no unsaved changes'} · generation ${state.generation}`:pending?'Reading storage status…':'Storage capability not yet verified.'}</p>
   <button disabled={!canSave} onClick={()=>void run('save')}>Save to controller</button>{' '}
   <button className="ghost" disabled={!connected||pending||blocked} onClick={()=>{requestRefresh({dirty:storageDirty(state),confirm:browserConfirm,refresh:()=>void run('refresh')});}}>Refresh storage</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('diff')}>Export changes</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('dump')}>Export full configuration</button>
-  {state&&state.lastError!=='none'&&<p role="alert">{state.lastError==='migrated_control_source_manual'?'Older AUX mode routing was restored as manual selection. Your stored manual mode and other settings were retained. Review Modes, then explicitly Save to controller to accept this migration.':`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
+  {state&&<AccelCalSavedNote raw={storageRaw}/>}
+  {state&&state.lastError!=='none'&&<p role="alert">{`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
   {state&&<p>Saved scope: {state.scope.replaceAll("_"," ").replaceAll(",",", ")}</p>}
   {blocked&&<p>Apply all edits on this page before saving, and finish any active operation.</p>}
   {!supported&&state&&<p role="alert">Update firmware to save this page’s settings. This firmware does not advertise that capability.</p>}

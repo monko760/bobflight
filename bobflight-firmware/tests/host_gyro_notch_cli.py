@@ -58,8 +58,8 @@ else:
     assert 'gyro_notch2_hz=0' in lines,lines  # unchanged
 assert 'ok gyro_notch2_hz=449' in lines,lines
 
-# diff lists non-defaults (cutoff before centre), dump lists all, defaults resets.
-lines=run(['diff','set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5','diff','dump','defaults','diff','storage']+[f'get {k}' for k in KEYS])
+# diff lists non-defaults (cutoff before centre), dump lists all, `defaults filters` resets (D1).
+lines=run(['diff','set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5','diff','dump','defaults filters','diff','storage']+[f'get {k}' for k in KEYS])
 sets=[l for l in lines if l.startswith('set gyro_notch')]
 assert sets==['set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5',
               'set gyro_notch1_cutoff_hz 150','set gyro_notch1_hz 200.5','set gyro_notch2_cutoff_hz 0','set gyro_notch2_hz 0'],sets

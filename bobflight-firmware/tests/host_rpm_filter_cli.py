@@ -63,12 +63,14 @@ r=reports(lines)
 assert r==[expect(0,'no','bidir-off'),expect(0,'no','erpm-unavailable'),expect(0,'no','off')],r
 assert lines.index('dshot_bidir=off')<lines.index('ok dshot_bidir=on') and 'erpm_m1=none' in lines,lines
 
-# diff lists non-defaults, dump lists all four, defaults resets, storage schema 11 (schema 9 added these keys).
-lines=run(['diff','set rpm_filter_harmonics 3','set motor_poles 12','diff','dump','defaults','diff','storage']+[f'get {k}' for k in KEYS])
+# diff lists non-defaults, dump lists all four, `defaults filters` resets the three RPM filter keys but
+# never motor_poles (D1: outside every group), storage schema 13.
+lines=run(['diff','set rpm_filter_harmonics 3','set motor_poles 12','diff','dump','defaults filters','diff','storage']+[f'get {k}' for k in KEYS])
 sets=[l for l in lines if l.startswith(('set rpm_filter','set motor_poles'))]
 assert sets==['set rpm_filter_harmonics 3','set motor_poles 12',
-              'set rpm_filter_harmonics 3','set rpm_filter_min_hz 100','set rpm_filter_q_x100 500','set motor_poles 12'],sets
-assert [l for l in lines if l.split('=')[0] in KEYS][-4:]==[f'{k}={v}' for k,v in zip(KEYS,DEF)],lines
+              'set rpm_filter_harmonics 3','set rpm_filter_min_hz 100','set rpm_filter_q_x100 500','set motor_poles 12',
+              'set motor_poles 12'],sets
+assert [l for l in lines if l.split('=')[0] in KEYS][-4:]==[f'{k}={v}' for k,v in zip(KEYS,DEF[:3]+['12'])],lines
 assert values(lines,'schema')==['13'] and values(lines,'# schema')==['13']*4,lines
 assert all(s.endswith(',rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates') for s in values(lines,'scope')+values(lines,'# scope')),lines
 

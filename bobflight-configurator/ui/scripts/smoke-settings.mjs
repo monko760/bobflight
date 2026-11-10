@@ -95,7 +95,11 @@ for (const k of PID_KEYS) {
 }
 assert(afterSavePid.pid_roll_p === "0.003", "saved pid");
 
-const defs = await client.restoreDefaults();
+for (const g of ["pid", "rates", "filters"]) {
+  const r = await client.restoreDefaultsGroup(g);
+  assert(r.kind === "ok", `defaults ${g}: ${r.kind}`);
+}
+const defs = await client.getAllSettings();
 assert(defs.rate_max_roll === DEFAULT_SETTINGS.rate_max_roll, "defaults rate");
 assert(defs.pid_roll_p === DEFAULT_SETTINGS.pid_roll_p, "defaults pid");
 

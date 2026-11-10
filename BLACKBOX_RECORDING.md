@@ -17,7 +17,9 @@ This branch adds a real recording path: production PID/mixer observer -> bounded
 
 ## Recorded data and Explorer
 
-**Log schema 3** (54 fields): per-motor `eRPM[0..3]` (eRPM/100), telemetry-OK mask, filter flags, latched events, loop code and session overruns, plus board, firmware version, schema, loop and filter settings in the header. Field units, bit orders, the event latch/clear rules, the byte budget and the schema 2 → 3 upgrade note are in [bobflight-firmware/docs/BLACKBOX-FIELDS.md](bobflight-firmware/docs/BLACKBOX-FIELDS.md).
+Current logs are schema 4 (71 fields, or 79 with the barometer backend). Names, units and the header are in [bobflight-firmware/docs/BLACKBOX-FIELDS.md](bobflight-firmware/docs/BLACKBOX-FIELDS.md). Configuration storage is schema 13 and is a different schema. The notes below describe earlier log schema 3.
+
+**Earlier log schema 3** (54 fields): per-motor `eRPM[0..3]` (eRPM/100), telemetry-OK mask, filter flags, latched events, loop code and session overruns, plus board, firmware version, schema, loop and filter settings in the header. The field names in the bullets below (`bobflightError`, `bobflightSchema`, and similar) are that earlier log. Current logs use the `bf...` names in BLACKBOX-FIELDS.
 
 The file keeps honest BobFlight firmware headers. Frames contain filtered gyro, pre-filter board-aligned/calibrated gyro, commanded setpoint, real P/I/D terms, clamped controller output, requested logical mixer motor commands, receiver input, mode/failsafe state, timing and validity flags.
 
@@ -39,7 +41,7 @@ The file keeps honest BobFlight firmware headers. Frames contain filtered gyro, 
 - Kakute MCU build and bootloader-image bounds/vector/version checks passed. Image size: 175,776 programmed bytes; RAM data plus BSS: 27,652 bytes (not a measured stack high-water mark). The real-card simulated end-to-end test also passed AddressSanitizer and UndefinedBehaviorSanitizer.
 - Configurator typecheck/build and focused recording, protocol, SD-panel and USB bench-recorder tests passed.
 
-- Schema 3: the oracle script below now expects 54 fields and `bobflightSchema` 3, but it has **not** been re-run against the pinned viewer for schema 3. On-box schema 3 checks are the clean-room decoder CTest `blackbox_schema3_decode` and the host encode, capture, task and throughput tests.
+- Earlier schema 3: that oracle note expected 54 fields and `bobflightSchema` 3 and was not re-run against the pinned viewer. The current `bobflight-firmware/tests/verify_blackbox_explorer.cjs` expects schema 4 (71 fields, or 79 with the barometer) and `H BobFlight log_schema:4`.
 
 The independent oracle script is `bobflight-firmware/tests/verify_blackbox_explorer.cjs`. It takes an external checkout of the pinned viewer and the output from `bobflight_blackbox_card_test`. It requires Node, esbuild and semver (for example via `NODE_PATH`). No GPL viewer code is included in firmware or this repository.
 

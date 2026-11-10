@@ -117,7 +117,7 @@ export function MotorsPage() {
               <button disabled={!validMotorPoles(Number(poleDraft))} onClick={savePoles}>Save pole count</button></div>
             <p>Current: <strong>{poleCount} poles · {poleCount / 2} pole pairs</strong></p>
             {!validMotorPoles(Number(poleDraft)) && <p className="banner-warn">Enter an even whole number from 2 to 60.</p>}
-            <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This firmware has no <code>motor_poles</code> setting, so the preference is local to this browser, shared across aircraft, and is not written to the flight controller. It does not change motor output or enable RPM telemetry.</p>
+            <p className="muted">Defaults to 14, common for 2306 FPV motors. Verify your motor specifications. This connected firmware does not advertise <code>motor_poles</code>, so this pole count stays in this browser only. It is shared across aircraft, is not written to the flight controller, and does not change motor output or enable RPM telemetry.</p>
             {poleMessage && <p role="status">{poleMessage}</p>}
           </section>
         } />
