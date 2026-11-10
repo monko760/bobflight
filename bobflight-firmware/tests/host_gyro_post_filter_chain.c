@@ -68,7 +68,9 @@ static void spy(float v[3],float dt){
 }
 static const float TWO_PI=6.28318531f;
 static void run(uint32_t g,uint32_t d){
- now=1000000;opens=0;memset(&board,0,sizeof board);strcpy(board.board_id,"kakute_f7_hdv");board.motor_count=4;
+ /* Reinitializing fixtures/rates does not rewind a live monotonic clock. */
+ if(!now)now=1000000;
+ opens=0;memset(&board,0,sizeof board);strcpy(board.board_id,"kakute_f7_hdv");board.motor_count=4;
  board.gyro_cs_pin=HAL_PIN_INVALID;board.rx_uart=4;board.rx_pin=HAL_PIN_PACK(0,1);
  for(unsigned i=0;i<4;i++)board.motors[i]=(board_motor_ch_t){HAL_PIN_PACK(1,i),3,i+1};
  config_init();mode_range_init();rx_init();failsafe_init();arming_init();attitude_init();rates_init();pid_init();dshot_init();

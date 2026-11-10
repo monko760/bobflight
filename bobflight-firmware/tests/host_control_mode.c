@@ -29,6 +29,7 @@ static bool gyro_flight=true;
 bool gyro_flight_ready(void){return gyro_flight;}
 static float motors[4];
 static pid_axis_out_t captured;
+static unsigned filter_calls;
 uint64_t hal_micros(void){return now;}
 uint32_t hal_millis(void){return (uint32_t)(now/1000u);}
 bool hal_usb_cdc_connected(void){return usb;}
@@ -38,7 +39,7 @@ bool arming_try_arm(void){return false;}
 void gyro_calibration_tick(void){}
 bool gyro_manual_calibration_active(void){return calibrating;}
 bool gyro_sample(float out[3]){memcpy(out,gyro,sizeof(gyro));return gyro_ok;}
-void gyro_filter(const float in[3],float out[3]){memcpy(out,in,sizeof(gyro));}
+void gyro_filter(const float in[3],float out[3]){filter_calls++;memcpy(out,in,sizeof(gyro));}
 const float *gyro_accel_g(void){return accel;}
 bool gyro_calibrated(void){return gyro_ok;}
 const float *rx_channels(void){return rc;}
@@ -216,7 +217,53 @@ int main(void){
     healthy=false;tick(1000);CHECK(arm==ARM_DISARMED);
     for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
     CHECK(prime(CONTROL_MODE_ACRO));loop_pid();CHECK(arm==ARM_DISARMED);
-    CHECK(prime(CONTROL_MODE_ACRO));attitude_init();accel[0]=-1;accel[1]=accel[2]=0;
-    tick(1000);CHECK(arm==ARM_DISARMED); /* estimator pitch singularity is NOT bypassed */
+    /* Acro is gyro-only even when the Euler estimator cannot initialize or
+     * reaches either pitch singularity. Leveled modes still fail closed. */
+    const control_mode_t modes[]={CONTROL_MODE_ACRO,CONTROL_MODE_ANGLE,CONTROL_MODE_HORIZON};
+    const float invalid_attitudes[][3]={{1,0,0},{-1,0,0},{0,0,0},{NAN,0,1},{0,INFINITY,1}};
+    for(unsigned m=0;m<3;m++)for(unsigned pose=0;pose<5;pose++){
+        gyro_ok=true;gyro_flight=true;fresh=true;
+        memset(gyro,0,sizeof gyro);accel[0]=accel[1]=0;accel[2]=1;
+        CHECK(prime(modes[m]));
+        memcpy(accel,invalid_attitudes[pose],sizeof accel);attitude_init();
+        if(modes[m]==CONTROL_MODE_ACRO)gyro_flight=false;
+        unsigned filtered=filter_calls;tick(1000);
+        CHECK(!attitude_ready());CHECK(filter_calls==filtered+1);
+        CHECK(arm==(modes[m]==CONTROL_MODE_ACRO?ARM_ARMED:ARM_DISARMED));
+        CHECK((motors[0]>0)==(modes[m]==CONTROL_MODE_ACRO));
+    }
+    /* HOLD/LAND need leveling even when the selected pilot mode is Acro. */
+    accel[0]=accel[1]=0;accel[2]=1;
+    CHECK(prime(CONTROL_MODE_ACRO));override=true;gyro_flight=true;
+    accel[0]=1;accel[2]=0;attitude_init();tick(1000);
+    CHECK(arm==ARM_DISARMED);for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+    override=false;
+    /* Actual gyro faults are still fatal to every mode, and invalid samples
+     * never advance the filter chain or contaminate persistent DSP state. */
+    for(unsigned m=0;m<3;m++)for(unsigned fault=0;fault<4;fault++){
+        accel[0]=accel[1]=0;accel[2]=1;memset(gyro,0,sizeof gyro);gyro_ok=true;
+        CHECK(prime(modes[m]));
+        if(fault==0)gyro_ok=false;
+        else gyro[fault-1]=(fault==2)?INFINITY:NAN;
+        unsigned filtered=filter_calls;tick(1000);
+        CHECK(arm==ARM_DISARMED);CHECK(filter_calls==filtered);CHECK(!attitude_ready());
+        for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+    }
+    gyro_ok=true;memset(gyro,0,sizeof gyro);
+    /* A repeated, backward or over-10ms gyro timestamp is invalid for Acro,
+     * even if its separate PID interval would otherwise be acceptable. */
+    for(unsigned fault=0;fault<3;fault++){
+        CHECK(prime(CONTROL_MODE_ACRO));unsigned filtered=filter_calls;
+        if(fault==0)tick(0);
+        else if(fault==1){now-=1;tick(0);}
+        else tick(10001);
+        CHECK(arm==ARM_DISARMED);CHECK(filter_calls==filtered);CHECK(!attitude_ready());
+        for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+    }
+    accel[0]=accel[1]=0;accel[2]=1;attitude_init();
+    CHECK(prime(CONTROL_MODE_ACRO));tick(1000);CHECK(arm==ARM_ARMED);
+    tick(10000);CHECK(arm==ARM_ARMED); /* existing inclusive 10ms sample bound */
+    /* Restore a disarmed, finite fixture for the Blackbox integration caller. */
+    arm=ARM_DISARMED;tick(1000);
     puts("PASS: unified build - manual Angle/Acro/Horizon routing, bench switch session, failsafe fail-closed, guards, measured dt dividers, reset/prime and health gates");return 0;
 }
