@@ -61,6 +61,11 @@ static void prime(void){
 }
 int main(void){
  mode_range_init(); /* Match production initialization before mocking armed state. */
+ /* Test the genuine initial zero epoch, not a backward live-clock jump. */
+ now=0;arm=ARM_DISARMED;rc[4]=0;loop_gyro();loop_filter();loop_pid();
+ arm=ARM_ARMED;rc[4]=1;rc[3]=0.4f;loop_pid();
+ unsigned zero_updates=updates;sample(1000,true);CHECK(updates==zero_updates+1);
+
  /* Exercise the real task entrypoints with fake arm/PID endpoints, not flight. */
  for(unsigned div=1;div<=8;div*=2){
   prime();CHECK(updates==0);
@@ -76,9 +81,6 @@ int main(void){
  rc[3]=0;sample(1000,true);unsigned before=updates;
  rc[3]=0.4f;sample(1000,true);CHECK(updates==before);
  sample(1000,true);CHECK(updates==before+1&&fabsf(measured_dt-0.001f)<1e-8f);
- /* Timestamp zero is valid, never used as an initialization sentinel. */
- arm=ARM_DISARMED;loop_pid();now=0;loop_gyro();loop_gyro();arm=ARM_ARMED;rc[3]=0.4f;loop_pid();
- before=updates;sample(1000,true);CHECK(updates==before+1);
  /* Zero/backward/too-long PID intervals disarm and never call pid_set_dt. */
  prime();before=sets;loop_pid();CHECK(arm==ARM_DISARMED&&sets==before);
  prime();before=sets;now--;loop_pid();CHECK(arm==ARM_DISARMED&&sets==before);
