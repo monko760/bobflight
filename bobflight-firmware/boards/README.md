@@ -13,4 +13,5 @@ Policy:
 - `mltempf4.yaml` and `custom_f405xg_usb.yaml` are F405 USB-only diagnostic profiles,
   not CMake targets.
 
-Validate with `python3 scripts/board_def.py`.
+Validate with `python3 scripts/board_def.py`. Build every board with
+`python3 scripts/build_all_boards.py --out build-all-boards` (see docs/BOARDS.md).
