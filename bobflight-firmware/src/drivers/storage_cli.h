@@ -63,7 +63,7 @@ static void cmd_config_export(bool full)
         {"pid_roll_p", .002f}, {"pid_roll_i", .001f},
         {"pid_roll_d", .00005f}, {"pid_pitch_p", .002f}, {"pid_pitch_i", .001f},
         {"pid_pitch_d", .00005f}, {"pid_yaw_p", .002f}, {"pid_yaw_i", .001f},
-        {"pid_yaw_d", .00005f},
+        {"pid_yaw_d", 0.f},
         {"min_throttle", .05f}, {"airmode", 0.f}, {"gyro_lpf_hz", 320.f}, {"dterm_lpf_hz", 53.f},
         /* Schema 8 notches: cutoff before centre so a pasted export replays
          * onto defaults (a nonzero centre needs its cutoff first). */

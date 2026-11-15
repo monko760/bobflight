@@ -24,7 +24,8 @@
  *   min_throttle: 0..0.2; airmode: 0|1
  *
  * LOCKED Schema 6 / Yaw D (FW Lead freeze):
- *   key pid_yaw_d float; default 0.00005; validate 0..10 finite (same as other pid_* D)
+ *   key pid_yaw_d float; default 0 (was 0.00005 until 2026-11; owner-approved change,
+ *     firmware DEF_KD_YAW); validate 0..10 finite (same as other pid_* D)
  *   schema 6 payload 188 bytes (was 184); pid_yaw_d LE @ 184..187
  *   migration schema5→6: write default 0.00005 at 184..187; keep reserved 165–175;
  *   do not touch LPF 176–183
@@ -129,7 +130,7 @@ export const DEFAULT_SETTING_VALUES: Readonly<Record<SettingsKey, number>> = {
   rate_max_roll: 800, rate_max_pitch: 800, rate_max_yaw: 800,
   pid_roll_p: 0.002, pid_roll_i: 0.001, pid_roll_d: 0.00005,
   pid_pitch_p: 0.002, pid_pitch_i: 0.001, pid_pitch_d: 0.00005,
-  pid_yaw_p: 0.002, pid_yaw_i: 0.001, pid_yaw_d: 0.00005,
+  pid_yaw_p: 0.002, pid_yaw_i: 0.001, pid_yaw_d: 0,
   min_throttle: 0.05, airmode: 0, gyro_lpf_hz: 320, dterm_lpf_hz: 53,
   gyro_notch1_hz: 0, gyro_notch1_cutoff_hz: 0, gyro_notch2_hz: 0, gyro_notch2_cutoff_hz: 0,
   rpm_filter_harmonics: 0, rpm_filter_min_hz: 100, rpm_filter_q_x100: 500, motor_poles: 14,

@@ -9,6 +9,9 @@
 #define DEF_KP 0.002f
 #define DEF_KI 0.001f
 #define DEF_KD 0.00005f
+/* Yaw has no D by default: yaw authority comes from prop torque (slow), so D
+ * there mostly passes gyro noise to all four motors. Still settable. */
+#define DEF_KD_YAW 0.f
 #define DEF_MIN_THR 0.05f
 #define DEF_AIRMODE 0
 #define DEF_GYRO_LPF 320.f
@@ -28,7 +31,7 @@ static bf_config_t g_cfg={
  .rate_max_roll=DEF_RATE_MAX,.rate_max_pitch=DEF_RATE_MAX,.rate_max_yaw=DEF_RATE_MAX,
  .pid_roll_p=DEF_KP,.pid_roll_i=DEF_KI,.pid_roll_d=DEF_KD,
  .pid_pitch_p=DEF_KP,.pid_pitch_i=DEF_KI,.pid_pitch_d=DEF_KD,
- .pid_yaw_p=DEF_KP,.pid_yaw_i=DEF_KI,.pid_yaw_d=DEF_KD,
+ .pid_yaw_p=DEF_KP,.pid_yaw_i=DEF_KI,.pid_yaw_d=DEF_KD_YAW,
  .min_throttle=DEF_MIN_THR,.airmode=DEF_AIRMODE,.gyro_lpf_hz=DEF_GYRO_LPF,.dterm_lpf_hz=DEF_DTERM_LPF,
  .gyro_notch1_hz=DEF_GYRO_NOTCH,.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,
  .gyro_notch2_hz=DEF_GYRO_NOTCH,.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,
@@ -58,7 +61,7 @@ void config_defaults(void){
  g_cfg.rate_max_roll=DEF_RATE_MAX;g_cfg.rate_max_pitch=DEF_RATE_MAX;g_cfg.rate_max_yaw=DEF_RATE_MAX;
  g_cfg.pid_roll_p=DEF_KP;g_cfg.pid_roll_i=DEF_KI;g_cfg.pid_roll_d=DEF_KD;
  g_cfg.pid_pitch_p=DEF_KP;g_cfg.pid_pitch_i=DEF_KI;g_cfg.pid_pitch_d=DEF_KD;
- g_cfg.pid_yaw_p=DEF_KP;g_cfg.pid_yaw_i=DEF_KI;g_cfg.pid_yaw_d=DEF_KD;
+ g_cfg.pid_yaw_p=DEF_KP;g_cfg.pid_yaw_i=DEF_KI;g_cfg.pid_yaw_d=DEF_KD_YAW;
  g_cfg.min_throttle=DEF_MIN_THR;g_cfg.airmode=DEF_AIRMODE;g_cfg.gyro_lpf_hz=DEF_GYRO_LPF;g_cfg.dterm_lpf_hz=DEF_DTERM_LPF;
  g_cfg.gyro_notch1_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;
  g_cfg.gyro_notch2_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;
@@ -74,7 +77,8 @@ bool config_get_default_key(const char *key,float *out){
  if(!strcmp(key,"rate_max_roll")||!strcmp(key,"rate_max_pitch")||!strcmp(key,"rate_max_yaw")){*out=DEF_RATE_MAX;return true;}
  if(!strcmp(key,"pid_roll_p")||!strcmp(key,"pid_pitch_p")||!strcmp(key,"pid_yaw_p")){*out=DEF_KP;return true;}
  if(!strcmp(key,"pid_roll_i")||!strcmp(key,"pid_pitch_i")||!strcmp(key,"pid_yaw_i")){*out=DEF_KI;return true;}
- if(!strcmp(key,"pid_roll_d")||!strcmp(key,"pid_pitch_d")||!strcmp(key,"pid_yaw_d")){*out=DEF_KD;return true;}
+ if(!strcmp(key,"pid_roll_d")||!strcmp(key,"pid_pitch_d")){*out=DEF_KD;return true;}
+ if(!strcmp(key,"pid_yaw_d")){*out=DEF_KD_YAW;return true;}
  if(!strcmp(key,"min_throttle")){*out=DEF_MIN_THR;return true;}
  if(!strcmp(key,"airmode")){*out=(float)DEF_AIRMODE;return true;}
  if(!strcmp(key,"gyro_lpf_hz")){*out=DEF_GYRO_LPF;return true;}
