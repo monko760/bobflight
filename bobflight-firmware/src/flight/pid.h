@@ -43,6 +43,10 @@ void pid_set_mixer_saturated(bool saturated);
 void pid_set_dterm_lpf_pt2(bool enabled);
 bool pid_dterm_lpf_pt2(void);
 void pid_set_dt(float dt);
+/* Lower bound for the D-term divisor only: the nominal PID period
+ * (pid_process_denom / gyro_hz). D uses max(measured dt, floor); P, I and the
+ * D low-pass keep the measured dt. 0 or out of (0, 20 ms) disables the floor. */
+void pid_set_d_dt_floor(float dt);
 void pid_update(const float gyro_dps[3], const float setpoint_dps[3],
                 pid_axis_out_t *out);
 

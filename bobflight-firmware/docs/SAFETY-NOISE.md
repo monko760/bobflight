@@ -92,6 +92,12 @@ samples reached nothing at all.
 
 ## Why the second-order D filter (item 4)
 
+> Numbers in this section were computed with the earlier low-pass coefficient
+> (`alpha = dt/(tau+dt)`) and a yaw D of 0.00005. Since 2026-11 the low-pass
+> is -3 dB exactly at the configured frequency (see docs/FLIGHT.md) and yaw D
+> defaults to 0, so absolute gains differ slightly; the comparison still holds
+> (host test `pid_s1_antiwindup_dterm`).
+
 The noise reaches the motors mainly through D. With the defaults (gyro
 low-pass 320 Hz, D low-pass 53 Hz first order, `pid_*_d` 0.00005) the gain
 from gyro noise to PID output is:

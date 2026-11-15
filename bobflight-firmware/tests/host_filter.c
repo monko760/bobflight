@@ -40,27 +40,53 @@ int main(void)
         return fail("dt<=0 should be passthrough");
     }
 
-    /* Default gyro continuity: fc=320 → α≈0.3345 at dt=1/4000 */
+    /* Exact cutoff: the measured steady-state gain of the real step function
+     * at fc is 1/sqrt(2) at every loop rate (old dt/(tau+dt) form: 0.59 for
+     * 320 Hz at 1 kHz, i.e. a real cutoff of 197 Hz). */
     {
-        const float alpha = filter_lpf_alpha(320.f, dt);
-        if (!near(alpha, 0.3345f, 5e-4f)) {
-            fprintf(stderr, "gyro alpha=%g\n", alpha);
-            return fail("gyro default alpha vs legacy 0.3345");
+        static const float rates[] = {1000.f, 2000.f, 4000.f, 8000.f};
+        static const float cuts[] = {53.f, 100.f, 320.f};
+        for (unsigned r = 0; r < 4; r++) {
+            for (unsigned c = 0; c < 3; c++) {
+                const float fs = rates[r], fc = cuts[c];
+                const float alpha = filter_lpf_alpha(fc, 1.f / fs);
+                float st = 0.f;
+                double sq = 0.0;
+                const unsigned n = (unsigned)(fs * 2.f); /* 2 s */
+                for (unsigned k = 0; k < n; k++) {
+                    const float x = sinf(2.f * (float)M_PI * fc * (float)k / fs);
+                    const float y = filter_lpf_step(&st, x, alpha);
+                    if (k >= n / 2) { /* settled; 1 s = whole cycles */
+                        sq += (double)y * (double)y;
+                    }
+                }
+                /* amplitude from RMS (a sampled peak misses the crest) */
+                const float peak = (float)sqrt(2.0 * sq / (double)(n / 2));
+                if (!near(peak, 0.70711f, 0.004f)) {
+                    fprintf(stderr, "fc=%g fs=%g alpha=%g gain=%g\n", fc, fs, alpha, peak);
+                    return fail("-3 dB point is not at fc");
+                }
+            }
         }
-        const float tau = 1.f / (2.f * (float)M_PI * 320.f);
-        const float expect = dt / (tau + dt);
-        if (!near(alpha, expect, 1e-6f)) {
-            return fail("alpha formula mismatch");
+        /* Known values of the closed form. */
+        if (!near(filter_lpf_alpha(320.f, 1.f / 4000.f), 0.38884f, 2e-4f) ||
+            !near(filter_lpf_alpha(53.f, 1.f / 4000.f), 0.07984f, 2e-4f)) {
+            fprintf(stderr, "alpha 320@4k=%g 53@4k=%g\n",
+                    filter_lpf_alpha(320.f, 1.f / 4000.f), filter_lpf_alpha(53.f, 1.f / 4000.f));
+            return fail("closed-form alpha values");
         }
-    }
-
-    /* Default D-term continuity: fc=53 ≈ τ=0.003 */
-    {
-        const float alpha = filter_lpf_alpha(53.f, dt);
-        const float legacy = dt / (0.003f + dt);
-        if (!near(alpha, legacy, 2e-4f)) {
-            fprintf(stderr, "dterm alpha=%g legacy=%g\n", alpha, legacy);
-            return fail("dterm default alpha vs legacy tau=0.003");
+        /* Monotonic in fc, and passthrough at/above Nyquist. */
+        float prev = 0.f;
+        for (float fc = 10.f; fc < 500.f; fc += 10.f) {
+            const float a = filter_lpf_alpha(fc, 1.f / 1000.f);
+            if (!(a > prev) || !(a < 1.f)) {
+                return fail("alpha must rise with fc below Nyquist");
+            }
+            prev = a;
+        }
+        if (!near(filter_lpf_alpha(500.f, 1.f / 1000.f), 1.f, 1e-6f) ||
+            !near(filter_lpf_alpha(1000.f, 1.f / 1000.f), 1.f, 1e-6f)) {
+            return fail("at/above Nyquist must be passthrough");
         }
     }
 

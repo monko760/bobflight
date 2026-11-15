@@ -6,11 +6,12 @@
  * runs two of them in series on 8 kHz-sensor builds, see FILTER_PT2_STAGE_SCALE).
  *
  * Formula (documented in docs/FLIGHT.md):
- *   tau   = 1 / (2 * pi * fc)
- *   alpha = dt / (tau + dt)
+ *   k     = 4 * sin^2(pi * fc * dt)
+ *   alpha = (sqrt(k*k + 4*k) - k) / 2
  *   y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
+ * so the -3 dB point is fc at every loop rate (not only when fc << 1/dt).
  *
- * fc_hz <= 0 means filter off (passthrough: alpha = 1).
+ * fc_hz <= 0, or fc_hz at/above Nyquist, means filter off (alpha = 1).
  *
  * Second-order notch (manual gyro notches, schema 8), written from the
  * bilinear-transform notch in R. Bristow-Johnson's public "Audio EQ Cookbook":

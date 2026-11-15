@@ -47,9 +47,10 @@ void dshot_write(const float m[4]){memcpy(motors,m,sizeof(motors));}
 #include "flight/pid.h"
 #include "flight/config.h"
 #include <math.h>
-static unsigned updates,sets,resets;static float measured_dt;
+static unsigned updates,sets,resets,floors;static float measured_dt,d_dt_floor;
 void pid_init(void){resets++;}
 void pid_set_dt(float dt){sets++;measured_dt=dt;}
+void pid_set_d_dt_floor(float dt){floors++;d_dt_floor=dt;}
 void pid_update(const float g[3],const float s[3],pid_axis_out_t *out){(void)g;(void)s;updates++;*out=(pid_axis_out_t){0};}
 void mixer_update(const pid_axis_out_t *p,float t,float out[4]){(void)p;for(unsigned i=0;i<4;i++)out[i]=t;}
 #define CHECK(c) do{if(!(c)){fprintf(stderr,"PID elapsed FAIL %d: %s\n",__LINE__,#c);return 1;}}while(0)
@@ -81,6 +82,7 @@ int main(void){
  rc[3]=0;sample(1000,true);unsigned before=updates;
  rc[3]=0.4f;sample(1000,true);CHECK(updates==before);
  sample(1000,true);CHECK(updates==before+1&&fabsf(measured_dt-0.001f)<1e-8f);
+ CHECK(floors>0&&fabsf(d_dt_floor-125e-6f)<1e-9f); /* fallback 8 kHz, divider 1: floor is the nominal period, not the measured one */
  /* Zero/backward/too-long PID intervals disarm and never call pid_set_dt. */
  prime();before=sets;loop_pid();CHECK(arm==ARM_DISARMED&&sets==before);
  prime();before=sets;now--;loop_pid();CHECK(arm==ARM_DISARMED&&sets==before);
