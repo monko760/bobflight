@@ -34,7 +34,7 @@ Live gains — `pid_update` / `rates_update` read `config_get()` each tick.
 | `rate_expo_roll` / `pitch` / `yaw` | `0.30` | 0 = linear, 1 = max expo |
 | `pid_roll_p` / `i` / `d` | `0.002` / `0.001` / `0.00005` | roll axis |
 | `pid_pitch_p` / `i` / `d` | same | pitch axis |
-| `pid_yaw_p` / `i` / `d` | same P/I / `0.00005` | yaw D same path + dterm LPF |
+| `pid_yaw_p` / `i` / `d` | same P/I / `0` | yaw D off by default; when set it uses the same path + dterm LPF |
 | `gyro_lpf_hz` | `320` | soft gyro LPF; `0`=off |
 | `dterm_lpf_hz` | `53` | soft D-term LPF; `0`=off |
 
@@ -51,10 +51,33 @@ Min throttle (`min_throttle` 0..0.2, default **0.05**): armed mixer floor (stick
 First-order low-pass used by soft gyro filtering (`gyro_filter` via `loop_filter`) and PID D-term. Filter math is Flight-owned; Lead owns persist/CLI.
 
 ```
-tau   = 1 / (2 * pi * fc)
-alpha = dt / (tau + dt)
+k     = 4 * sin^2(pi * fc * dt)
+alpha = (sqrt(k*k + 4*k) - k) / 2
 y[n]  = y[n-1] + alpha * (x[n] - y[n-1])
 ```
+
+`alpha` is solved so the discrete filter is -3 dB exactly at `fc` at every loop
+rate. The earlier `alpha = dt / (tau + dt)` form was only accurate for
+`fc << 1/dt`; the real cutoff sat below the setting:
+
+| setting | 1 kHz | 2 kHz | 4 kHz | 8 kHz |
+|---|---|---|---|---|
+| `gyro_lpf_hz 320`, old real -3 dB | 197 Hz | 231 Hz | 263 Hz | 287 Hz |
+| `dterm_lpf_hz 53`, old real -3 dB | 46 Hz | 49 Hz | 51 Hz | 52 Hz |
+
+So the same stored value now filters slightly **less** than before (most at
+1 kHz, where the sensor's own 42 Hz DLPF dominates anyway). `fc` at or above
+Nyquist is passthrough. Not measured on hardware.
+
+### D-term time base
+
+P and I use the measured time between PID runs. D divides the gyro change by
+`max(measured dt, nominal PID period)` (`pid_set_d_dt_floor`, fed from the
+scheduler's gyro period x PID divider). The gyro value changes once per sensor
+sample, so a PID run that lands early after a late slot still spans a full
+sample; dividing by the short interval scaled D up (4.7x for 213 us at a 1 ms
+period, host test `pid_d_time_base`). Skipped slots still use the longer
+measured interval.
 
 `fc_hz = 0` disables the filter (passthrough, alpha = 1). No notches / dyn / RPM / HW gyro DLPF register writes in this increment.
 
@@ -102,7 +125,8 @@ Ship/treat as flight-ready when dual-IR unblocks. Host default dummy remains fai
 > **FLASH HELD.** Validate yaw D offline / CLI get-set only. No flight maneuvers.
 > No props-on. Do not arm for gain checks.
 
-`pid_yaw_d` is independent (default `0.00005`, stored with the other PID gains in schema 13).
+`pid_yaw_d` is independent (default `0` since 2026-11, was `0.00005`; stored with the other PID gains in schema 13).
+Settings already saved on a board keep their stored value until `defaults pid` or `set pid_yaw_d`.
 Yaw D uses the same D-term path + `dterm_lpf_hz` LPF as roll/pitch (see table above).
 
 ### Acceptance (no board / host)
