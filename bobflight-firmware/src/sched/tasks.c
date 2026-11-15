@@ -160,6 +160,14 @@ static float nominal_gyro_dt(void)
     return 1.f / (float)hz;
 }
 
+/* Nominal PID period: gyro slot period times the PID divider. */
+static float nominal_pid_dt(void)
+{
+    const scheduler_stats_t *st = scheduler_stats();
+    const uint32_t denom = st && st->pid_process_denom ? st->pid_process_denom : 1u;
+    return nominal_gyro_dt() * (float)denom;
+}
+
 void loop_gyro(void)
 {
     gyro_calibration_tick();
@@ -266,6 +274,7 @@ void loop_pid(void)
         pid_init();g_pid=(pid_axis_out_t){0};
     } else {
         pid_set_dt((float)pid_elapsed*0.000001f);
+        pid_set_d_dt_floor(nominal_pid_dt());
         pid_update(g_gyro_filt,g_setpoint,&g_pid);
     }
 }

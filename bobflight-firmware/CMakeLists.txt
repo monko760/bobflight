@@ -293,6 +293,9 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   add_executable(bobflight_pid_s1_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_pid_s1.c)
   target_link_libraries(bobflight_pid_s1_test m)
   add_test(NAME pid_s1_antiwindup_dterm COMMAND bobflight_pid_s1_test)
+  add_executable(bobflight_pid_d_dt_test src/flight/pid.c src/flight/filter.c src/flight/config.c tests/host_pid_d_dt.c)
+  target_link_libraries(bobflight_pid_d_dt_test m)
+  add_test(NAME pid_d_time_base COMMAND bobflight_pid_d_dt_test)
   add_executable(bobflight_noise_saturation_test
     tests/host_noise_saturation.c
     src/sched/scheduler.c src/sched/tasks.c
