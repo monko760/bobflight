@@ -2,7 +2,7 @@
  * Copyright 2026 Robert Leclercq
  * SPDX-License-Identifier: Apache-2.0
  *
- * First-order LPF: alpha = dt/(tau+dt), tau = 1/(2*pi*fc).
+ * First-order LPF: alpha solved so the discrete -3 dB point is exactly fc.
  * Biquad notch: RBJ cookbook bilinear notch (see filter.h), clean-room.
  */
 #include "flight/filter.h"
@@ -23,8 +23,18 @@ float filter_lpf_alpha(float fc_hz, float dt)
     if (fc_hz <= 0.f) {
         return 1.f;
     }
-    const float tau = 1.f / (2.f * (float)M_PI * fc_hz);
-    return dt / (tau + dt);
+    /* Exact match for y += alpha*(x-y): |H| = 1/sqrt(2) at fc for any sample
+     * rate. With k = 4*sin^2(pi*fc*dt): alpha = (sqrt(k*k + 4k) - k) / 2.
+     * (The earlier dt/(tau+dt) form put the real -3 dB point below fc, e.g.
+     * 197 Hz for a 320 Hz setting at 1 kHz.) A first-order stage cannot have a
+     * -3 dB point at or above Nyquist: passthrough there. */
+    const float w = 2.f * (float)M_PI * fc_hz * dt;
+    if (!(w < (float)M_PI)) {
+        return 1.f;
+    }
+    const float sn = sinf(0.5f * w);
+    const float k = 4.f * sn * sn;
+    return 0.5f * (sqrtf(k * k + 4.f * k) - k);
 }
 
 float filter_lpf_step(float *state, float x, float alpha)
