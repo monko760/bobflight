@@ -52,3 +52,12 @@ assert.equal(acro.status,0);assert.match(acro.stdout,/control_mode refused/);
 const acroFrames=[...acro.stdout.matchAll(/modes_api: 2\r?\n[\s\S]*?modes_end: 1\r?\n/g)].map(m=>parseModes(m[0]));
 assert.equal(acroFrames.length,2);for(const x of acroFrames){assert.equal(x.requestedMode,'acro');assert.equal(x.effectiveMode,'angle','host CLI does not run a controller pass; do not fake effective-mode readback');assert.equal(x.armed,false);}
 console.log('PASS main image manual Acro actual firmware readback + invalid selection leaves Acro unchanged');
+
+// N1 level fallback keys from the actual firmware through the actual parser. The host
+// image never arms, so no rate fallback is reported or counted; the estimator state is verbatim.
+for(const x of [...modes,...flightSnapshots,...acroFrames]){
+ assert.ok(x.levelFallback,'firmware reports level_fallback/level_fallback_reason/level_fallback_count/attitude_state');
+ assert.equal(x.levelFallback.active,false);assert.equal(x.levelFallback.reason,'none');assert.equal(x.levelFallback.count,0);
+ assert.match(x.raw,new RegExp(`attitude_state: ${x.levelFallback.attitudeState}\\r?\\n`));
+}
+console.log('PASS N1 actual firmware level_fallback 0/none/0 while disarmed and verbatim attitude_state through the configurator parser');

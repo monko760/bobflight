@@ -251,6 +251,8 @@ jobs:
         run: npm --prefix ui run test:receiver-link
       - name: Live receiver switch identification in Modes
         run: node ui/scripts/test-mode-receiver.cjs
+      - name: Modes tab leveled-mode rate fallback readout (N1; mocks report nothing)
+        run: npm --prefix ui run test:level-fallback
       - name: Receiver switch bench CLI guards
         run: node ui/scripts/test-switch-bench.cjs
       - name: Motor bench UI safety tests

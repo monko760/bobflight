@@ -19,6 +19,17 @@ async function main(){
  assert.equal(parseModes(await client.sendCommand(command)).modes[0].aux,12);assert.equal(parsePorts(await client.sendCommand('ports')).receiverUart,0);
  await assert.rejects(()=>client.sendCommand('mode_range ARM 1 aux1 1100 1450'),/unsupported/);await client.disconnect();
  mock.handle('reboot',false,false);assert.equal(parseModes(mock.handle('modes',false,false)).modes[0].aux,1);
+ // N1 level fallback keys: absent in the offline mock (no estimator), strict when present.
+ assert.equal(parseModes(initial).levelFallback,undefined,'mock reports no attitude estimator data');
+ assert.doesNotMatch(initial,/level_fallback|attitude_state/);
+ const lf=(a,r,c,st,eff='acro')=>initial.replace('effective_mode: angle',`effective_mode: ${eff}`).replace('mode_conflict: 0',`mode_conflict: 0\r\nlevel_fallback: ${a}\r\nlevel_fallback_reason: ${r}\r\nlevel_fallback_count: ${c}\r\nattitude_state: ${st}`);
+ assert.deepEqual(parseModes(lf(0,'none',0,'valid','angle')).levelFallback,{active:false,reason:'none',count:0,attitudeState:'valid'});
+ assert.deepEqual(parseModes(lf(1,'attitude-invalid',3,'recovering')).levelFallback,{active:true,reason:'attitude-invalid',count:3,attitudeState:'recovering'});
+ assert.deepEqual(parseModes(lf(1,'failsafe-gravity-unqualified',4294967295,'valid')).levelFallback,{active:true,reason:'failsafe-gravity-unqualified',count:4294967295,attitudeState:'valid'});
+ for(const bad of [lf(1,'none',0,'valid'),lf(0,'attitude-invalid',0,'valid','angle'),lf(1,'attitude-invalid',1,'valid','angle'),lf(2,'none',0,'valid','angle'),
+  lf(0,'none',-1,'valid','angle'),lf(0,'none','01','valid','angle'),lf(0,'none',4294967296,'valid','angle'),lf(0,'bogus',0,'valid','angle'),lf(0,'none',0,'bogus','angle'),
+  lf(0,'none',0,'valid','angle').replace(/attitude_state: valid\r\n/,'')])assert.throws(()=>parseModes(bad),undefined,bad);
+ console.log('PASS Ports/Modes: N1 level_fallback/level_fallback_reason/level_fallback_count/attitude_state strict parse, mock omits them');
  console.log('PASS Ports/Modes: numeric AUX1/AUX12, exact serialization, strict rejection, atomic mock/guards/reset, complete framing/refusals/legacy/truncation, real client mock roundtrip');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

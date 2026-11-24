@@ -7,6 +7,7 @@
 #ifndef BOBFLIGHT_TASKS_H
 #define BOBFLIGHT_TASKS_H
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,16 @@ control_mode_t control_mode_requested(void);
 const char *control_requested_name(void);
 const char *control_effective_name(void);
 bool control_mode_conflict(void);
+/* N1 rate fallback of leveled control (last controller pass). */
+typedef enum {
+    LEVEL_FALLBACK_NONE = 0,
+    LEVEL_FALLBACK_ATTITUDE = 1, /* Angle/Horizon/HOLD/LAND: attitude not trusted */
+    LEVEL_FALLBACK_GRAVITY = 2   /* HOLD/LAND: attitude ok but gravity unqualified */
+} level_fallback_t;
+level_fallback_t control_level_fallback(void);
+const char *control_level_fallback_name(void);
+/** Fallback engagements while armed since boot. */
+uint32_t control_level_fallback_count(void);
 
 void loop_gyro(void);
 void loop_filter(void);
