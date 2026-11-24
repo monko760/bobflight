@@ -30,6 +30,8 @@ typedef struct {
 void mode_range_init(void);
 void mode_range_reset(void);
 const mode_config_t *mode_range_get(mode_id_t mode);
+/* The single default row for a mode (fresh boot, reset, export diff); NULL if out of range. */
+const mode_config_t *mode_range_default(mode_id_t mode);
 bool mode_range_set(mode_id_t mode, bool enabled, uint8_t aux, uint16_t min_us, uint16_t max_us);
 bool mode_range_is_active(mode_id_t mode);
 /* Returns input validity separately from the active range match. */

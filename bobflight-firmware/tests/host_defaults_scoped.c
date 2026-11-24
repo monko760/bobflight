@@ -28,7 +28,7 @@
 static board_t board={.board_id="kakute_f7_hdv",.rx_uart=6};
 static bool armed,bench,calibrating,supported=true,exists,write_failure,read_failure;
 static unsigned saves,rx_resets,freshness_resets,generation;
-static uint8_t image[256];static size_t image_len;static uint32_t image_board;static uint32_t image_schema=13;
+static uint8_t image[CONFIG_STORE_PAYLOAD_BYTES];static size_t image_len;static uint32_t image_board;static uint32_t image_schema=CONFIG_STORE_SCHEMA;
 const board_t *board_get(void){return &board;}
 bool board_select_rx_uart(unsigned u){if(!(u==1||u==2||u==3||u==4||u==6||u==7))return false;board.rx_uart=u;return true;}
 arm_state_t arming_state(void){return armed?ARM_ARMED:ARM_DISARMED;}
@@ -54,8 +54,8 @@ const float *rx_channels(void){return restored_rc;}
 bool config_store_supported(void){return supported;}
 const char *config_store_backend(void){return supported?"host_sim":"unsupported";}
 uint32_t config_store_generation(void){return generation;}
-config_store_result_t config_store_load(uint32_t id,void *p,size_t n){if(!supported)return CONFIG_STORE_UNSUPPORTED;if(read_failure)return CONFIG_STORE_IO_ERROR;if(!exists)return CONFIG_STORE_EMPTY;if(image_schema!=13)return CONFIG_STORE_INCOMPATIBLE;if(n!=image_len||id!=image_board)return CONFIG_STORE_INVALID;memcpy(p,image,n);return CONFIG_STORE_OK;}
-config_store_result_t config_store_save(uint32_t id,const void *p,size_t n){saves++;if(!supported)return CONFIG_STORE_UNSUPPORTED;if(write_failure)return CONFIG_STORE_IO_ERROR;if(exists&&image_schema!=13)return CONFIG_STORE_INCOMPATIBLE;if(!exists||n!=image_len||memcmp(p,image,n))generation++;memcpy(image,p,n);image_len=n;image_board=id;exists=true;return CONFIG_STORE_OK;}
+config_store_result_t config_store_load(uint32_t id,void *p,size_t n){if(!supported)return CONFIG_STORE_UNSUPPORTED;if(read_failure)return CONFIG_STORE_IO_ERROR;if(!exists)return CONFIG_STORE_EMPTY;/* Models config_store: schema 13 (256 B) is returned zero-filled for migration. */if(image_schema!=CONFIG_STORE_SCHEMA&&image_schema!=CONFIG_STORE_SCHEMA_V13)return CONFIG_STORE_INCOMPATIBLE;if(n!=CONFIG_STORE_PAYLOAD_BYTES||id!=image_board||image_len!=(image_schema==CONFIG_STORE_SCHEMA?CONFIG_STORE_PAYLOAD_BYTES:CONFIG_STORE_PAYLOAD_BYTES_V13))return CONFIG_STORE_INVALID;memset(p,0,n);memcpy(p,image,image_len);return CONFIG_STORE_OK;}
+config_store_result_t config_store_save(uint32_t id,const void *p,size_t n){saves++;if(!supported)return CONFIG_STORE_UNSUPPORTED;if(write_failure)return CONFIG_STORE_IO_ERROR;if(exists&&image_schema!=CONFIG_STORE_SCHEMA&&image_schema!=CONFIG_STORE_SCHEMA_V13)return CONFIG_STORE_INCOMPATIBLE;if(!exists||image_schema!=CONFIG_STORE_SCHEMA||n!=image_len||memcmp(p,image,n))generation++;memcpy(image,p,n);image_len=n;image_board=id;image_schema=CONFIG_STORE_SCHEMA;exists=true;return CONFIG_STORE_OK;}
 static gyro_calibration_info_t cal;
 void gyro_calibration_info(gyro_calibration_info_t *out){*out=cal;}
 uint32_t gyro_accel_calibration_binding(void){return 0x01006810u;}
@@ -116,9 +116,9 @@ static const char *EXPECT[3]=
  "defaults_end: filters 9\r\n"};
 
 /* Byte-level snapshot of everything a refusal must not change. */
-typedef struct{bf_config_t cfg;motor_direction_t dir;uint32_t loop;gyro_calibration_info_t cal;uint8_t saved[256];bool have_saved,dirty;const char *err;float active[3];}snap_t;
-static void take(snap_t *s){memset(s,0,sizeof *s);s->cfg=*config_get();s->dir=config_motor_direction();s->loop=loop_rate_setting_get();s->cal=cal;memcpy(s->saved,saved,256);s->have_saved=have_saved;s->dirty=persist_dirty();s->err=persist_last_error();memcpy(s->active,config_board_alignment_active(),12);}
-static bool same(const snap_t *a,const snap_t *b){return !memcmp(&a->cfg,&b->cfg,sizeof a->cfg)&&a->dir==b->dir&&a->loop==b->loop&&!memcmp(&a->cal,&b->cal,sizeof a->cal)&&!memcmp(a->saved,b->saved,256)&&a->have_saved==b->have_saved&&a->dirty==b->dirty&&a->err==b->err&&!memcmp(a->active,b->active,12);}
+typedef struct{bf_config_t cfg;motor_direction_t dir;uint32_t loop;gyro_calibration_info_t cal;uint8_t saved[CONFIG_STORE_PAYLOAD_BYTES];bool have_saved,dirty;const char *err;float active[3];}snap_t;
+static void take(snap_t *s){memset(s,0,sizeof *s);s->cfg=*config_get();s->dir=config_motor_direction();s->loop=loop_rate_setting_get();s->cal=cal;memcpy(s->saved,saved,sizeof s->saved);s->have_saved=have_saved;s->dirty=persist_dirty();s->err=persist_last_error();memcpy(s->active,config_board_alignment_active(),12);}
+static bool same(const snap_t *a,const snap_t *b){return !memcmp(&a->cfg,&b->cfg,sizeof a->cfg)&&a->dir==b->dir&&a->loop==b->loop&&!memcmp(&a->cal,&b->cal,sizeof a->cal)&&!memcmp(a->saved,b->saved,sizeof a->saved)&&a->have_saved==b->have_saved&&a->dirty==b->dirty&&a->err==b->err&&!memcmp(a->active,b->active,12);}
 static void refused(const char *line,const char *want){
  snap_t before,after;take(&before);unsigned s0=saves;run(line);take(&after);
  CHECK(!strcmp(out,want),"'%s' -> '%s' want '%s'",line,out,want);

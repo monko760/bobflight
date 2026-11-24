@@ -44,7 +44,7 @@ t=values(lines,'loop_target_hz');assert len(t)==2 and t[0]==t[1]==DEFAULT,(t,lin
 assert values(lines,'loop_rate_setting_hz')==[CHANGED],lines
 assert values(lines,'loop_rate_boot_setting_hz')==[DEFAULT],lines
 assert values(lines,'loop_rate_pending_reboot')==['1' if CHANGED!=DEFAULT else '0'],lines
-assert values(lines,'schema')==['13'] and values(lines,'# schema')==['13','13'],lines
+assert values(lines,'schema')==['14'] and values(lines,'# schema')==['14','14'],lines
 assert all(s.endswith(',loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates') for s in values(lines,'scope')+values(lines,'# scope')),lines
 sets=[l for l in lines if l.startswith('set loop_rate_hz ')]
 # diff lists it only when it differs from the board default; dump always does.
@@ -71,4 +71,4 @@ assert [l for l in lines if l.startswith('defaults_end: ')]==['defaults_end: pid
 assert [l for l in lines if l.startswith('set loop_rate_hz ')]==([f'set loop_rate_hz {CHANGED}'] if CHANGED!=DEFAULT else []),lines
 print(f'PASS loop_rate_hz CLI ({board}): default {DEFAULT}, invalid rejected, '
       f'{"8000 accepted" if FAST else "4000/8000 refused"}, pending until save+reboot, '
-      f'diff/dump, kept by defaults <group>, schema 13, reboot applies target {want_target}')
+      f'diff/dump, kept by defaults <group>, schema 14, reboot applies target {want_target}')

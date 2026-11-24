@@ -1,22 +1,81 @@
-# Settings persistence (schema 13)
+# Settings persistence (schema 14)
 
 Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0.
 
 Development firmware, not flight-qualified.
 
-## Fresh install, not migration
+## Schema 14 (N3): append-only, one migration from 13
 
-Only schema 13 configuration is supported (`CONFIG_STORE_SCHEMA` 13, payload **256** bytes, `src/drivers/persist.c`). There are no loaders or migrations for schemas 1..12. Old, future or foreign records are not interpreted or automatically erased:
+`CONFIG_STORE_SCHEMA` 14, payload **1024** bytes (`src/drivers/config_store.h`, `src/drivers/persist.c`).
+Bytes 0..255 are the schema 13 layout below, byte for byte and validated by the same code. The rest is
+an append-only extension:
 
-- An erased store (both slots blank) loads nothing and reports `last_error: empty` with `state: defaults`; the first Save writes a schema 13 record.
-- `fresh_install_required` appears only when a slot holds an old, future or foreign record (BobFlight record header with another schema, board or payload size) and no valid schema 13 record exists. Load and Save then both report it.
-- Any other unreadable, non-blank slot content reports `invalid_record`.
-- With one valid schema 13 slot and one old-schema slot, load succeeds, but Save is still refused with `fresh_install_required` until the old slot is erased.
-- Erase the internal configuration as part of a deliberate fresh installation, then re-enter receiver/map/modes/mounting and calibrate again. Do not paste an old dump wholesale; the Configurator rejects exports of any schema other than 13.
+| Bytes | Contents |
+|---|---|
+| 0..255 | schema 13 layout (unchanged offsets and meanings) |
+| 256..259 | `layout_bytes` (LE32): how many leading payload bytes the writer's layout defines. N3 writes **260**. |
+| 260..1023 | reserved, must be zero. Later settings append at `layout_bytes` and raise it. |
 
-`diff all`, explicit `save` and verified reload remain supported. A schema migration framework is a separate, bench-tested change and does not exist yet.
+Record on flash: 32-byte header + 1024 payload + 32-byte commit block = **1088** bytes per slot (was 320).
+Smallest slot on any board that has storage: Matek F722-PX, 16 KiB (sectors 1/2); Kakute F7 HDV uses
+256 KiB slots (sectors 6/7); host_sim 256 KiB. T-Motor F7 V2 and the F405 images have no storage backend.
 
-## Schema 13 layout (256 bytes, little-endian)
+Headroom budget for the roadmap (estimates, not reservations; order follows merge order):
+
+| Item | Estimate |
+|---|---|
+| N4 failsafe (hold window, cut/land, hold time limit, stick check) | ~16-24 B |
+| N5 PID at idle with airmode off | ~4-8 B |
+| N6 radio-switch modes (more rows, 8 B each) | ~64-160 B |
+| N7 Angle/Horizon tuning | ~16-24 B |
+| N8 DShot beacon | ~8 B |
+| N9 battery and telemetry | ~16-64 B |
+| total | ~124-288 B of 764 B free |
+
+Load rules:
+
+- `layout_bytes` must be a multiple of 4 in 260..1024 and every byte from `layout_bytes` to 1023 must be zero
+  (`invalid_settings` otherwise).
+- A shorter layout (older schema 14 firmware) loads; fields it lacks take their defaults.
+- A longer layout (written by newer firmware) is refused with `last_error: newer_settings`; Save is refused
+  too, so the newer record is never overwritten by firmware that would drop its fields.
+
+### Migration 13 -> 14
+
+- The store still reads a sealed schema 13 record (256-byte payload, same header, CRC and commit rules).
+  Persist validates it with the schema 13 checks, keeps every byte 0..255, sets `layout_bytes` and fills
+  any new field from defaults. Nothing is written at boot.
+- `storage` then reports `schema: 14`, `state: saved` (the values in flash load identically on every boot)
+  and `stored_schema: 13`. The schema 13 record stays in flash, untouched, until the next Save.
+- Save writes a schema 14 record (generation + 1) into the other slot. The schema 13 record survives that
+  first Save (a power cut at any byte leaves it loadable); the second changed Save replaces it.
+- Schemas other than 13 and 14, a schema 13 record with another length, and foreign boards are still
+  `fresh_install_required`: not migrated, not erased, Save refused.
+
+### Downgrade
+
+- Before any schema 14 Save: flash holds only schema 13, so schema 13 firmware loads it as before.
+- After one schema 14 Save: schema 13 firmware loads the older schema 13 slot (settings as they were at
+  migration time, later edits not visible) and refuses Save with `fresh_install_required`.
+- After two schema 14 Saves: schema 13 firmware reports `fresh_install_required` and runs on defaults.
+  Nothing is erased; upgrading again restores the schema 14 settings.
+
+### `storage` line `stored_schema`
+
+`stored_schema: 14|13|none` is the schema of the record the last load or verified save used: `13` means
+migrated in RAM and rewritten as 14 on the next Save; `none` means nothing was loaded (erased store,
+unsupported backend or an unreadable/incompatible record). It is printed after `accel_cal_saved`, just
+before `storage_end: 1`.
+
+## One defaults source
+
+Every `set`/`get` key default lives in `CONFIG_DEFAULTS_INIT` in `src/flight/config.c`. Fresh boot (static
+initializer), `config_defaults()`, `config_get_default_key()`, `defaults <group>` and the export `diff`
+baseline all read it; the export keeps only its frozen key ORDER (`g_export_keys`). Mode-range defaults
+live in one table (`mode_range_default()`), used by reset and by the export diff.
+`tests/host_settings_schema14.c` checks fresh boot == defaults == `defaults <group>` == empty diff.
+
+## Schema 13 layout (bytes 0..255 of schema 14, little-endian)
 
 | Bytes | Contents |
 |---|---|
@@ -69,7 +128,7 @@ Refusals are a single line and change nothing, including the storage dirty flag.
 
 ## `storage` line `accel_cal_saved`
 
-`storage` ends with `accel_cal_saved: yes|no` just before `storage_end: 1`. It is `yes` only when the last verified save (or boot load) record carries the accelerometer calibration. Saving while the requested mounting differs from the active mounting deliberately leaves the old-frame calibration out ([BOARD-ALIGNMENT.md](BOARD-ALIGNMENT.md)), and this line then reads `no`. Existing parsers ignore the extra field; the `saved: <backend> verified` reply is unchanged.
+`storage` carries `accel_cal_saved: yes|no` after `flight_enabled` (followed by the N3 `stored_schema` line, then `storage_end: 1`). It is `yes` only when the last verified save (or boot load) record carries the accelerometer calibration. Saving while the requested mounting differs from the active mounting deliberately leaves the old-frame calibration out ([BOARD-ALIGNMENT.md](BOARD-ALIGNMENT.md)), and this line then reads `no`. Existing parsers ignore the extra field; the `saved: <backend> verified` reply is unchanged.
 
 Apply edits to the controller, then explicitly Save to controller. Save verifies flash readback; reboot does not save unapplied browser drafts or unsaved runtime changes. No automatic flash writes on startup or slider movement.
 
@@ -88,16 +147,16 @@ Apply edits to the controller, then explicitly Save to controller. Save verifies
 | Flasher / Connect | Connection/flash actions remain explicit; no automatic reconnect, reflash or controller write after reboot. |
 | Blackbox | USB recordings remain browser-session data and must be downloaded. Recorder activity is not restored. |
 
-Save panels require the connected firmware to advertise the relevant scope. Only schema 13 is read by the firmware and the Configurator. Unsupported targets (including current T-Motor F722) still refuse flash storage. Scope is capability, not evidence that current drafts were saved.
+Save panels require the connected firmware to advertise the relevant scope. The firmware reads schema 14 and migrates schema 13; the Configurator side of schema 14 is pending the Config Lead key freeze. Unsupported targets (including current T-Motor F722) still refuse flash storage. Scope is capability, not evidence that current drafts were saved.
 
 ## Format and compatibility
 
-Records use two independent erase slots with a CRC and a commit seal; Save writes the other slot and reads it back before reporting `saved: <backend> verified`. Future/foreign formats are rejected before the no-change save shortcut. Do not downgrade and assume newer settings remain readable.
+Records use two independent erase slots with a CRC and a commit seal; Save writes the other slot and reads it back before reporting `saved: <backend> verified`. Future/foreign formats are rejected before the no-change save shortcut; a schema 13 record is always rewritten (never shortcut). See Downgrade above.
 
 Diff/dump exports include Power and DShot commands, including defaults for those groups. Applied accelerometer values remain diagnostic metadata, not replayable coefficient-setting commands. Gyro bias and live state are excluded. Flashing must preserve the reserved configuration sectors; mass erase destroys settings regardless of persistence support.
 
 ## Owner acceptance
 
-After installing matching firmware/configurator, confirm `storage` reports schema 13 and backend flash, and that `version` matches the image you built. Set Receiver UART/map as needed and Apply each change, set a distinct Power value and Apply, then Save to controller. Confirm saved/dirty 0. Disconnect all controller power, reconnect, and check applied values, Modes and calibration. DShot persistence can be checked by selecting a supported alternate rate with motors stopped, saving, and power cycling; no motor test is necessary.
+After installing matching firmware/configurator, confirm `storage` reports schema 14 (and `stored_schema: 13` on the first boot after upgrading, `14` after Save) and backend flash, and that `version` matches the image you built. Set Receiver UART/map as needed and Apply each change, set a distinct Power value and Apply, then Save to controller. Confirm saved/dirty 0. Disconnect all controller power, reconnect, and check applied values, Modes and calibration. DShot persistence can be checked by selecting a supported alternate rate with motors stopped, saving, and power cycling; no motor test is necessary.
 
 Save failure, unsupported storage or missing calibration is not success; retain the diagnostic output instead of erasing or repeatedly saving. Physical power-cycle acceptance is still required; software tests cannot verify the attached board.
