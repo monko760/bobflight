@@ -83,6 +83,8 @@ export class MockBobFlightHost implements BobFlightHost {
   private armSwitchOn = false;
   /** N2: "check" = N2+ firmware (`arm_cli: check`, `arm` never arms); "old-fc" = pre-N2 (no key, `arm` really arms). */
   private armCli: ArmCliMockScenario = "check";
+  /** MCU-order receiver-stale check for `arm` (no receiver frames on a USB bench board); off = host build order. */
+  private receiverStale = false;
   /** Every CLI line this mock received, in order (tests assert `arm` is never sent to old-fc). */
   readonly commandLog: string[] = [];
   private bench = new MockMotorBench();
@@ -452,7 +454,7 @@ export class MockBobFlightHost implements BobFlightHost {
   }
 
   private armGateState(): MockArmGateState {
-    return { armed: this.armed, benchActive: this.bench.active, gyroOk: this.gyroOk(), failsafeActive: this.failsafeActive, armSwitchOn: this.armSwitchOn };
+    return { armed: this.armed, benchActive: this.bench.active, gyroOk: this.gyroOk(), failsafeActive: this.failsafeActive, armSwitchOn: this.armSwitchOn, receiverStale: this.receiverStale };
   }
 
   /**
@@ -497,7 +499,10 @@ export class MockBobFlightHost implements BobFlightHost {
     motorDirectionScenario?: MotorDirectionMockScenario;
     receiverLinkScenario?: ReceiverLinkMockScenario;
     gyroHealthScenario?: GyroHealthMockScenario;
+    /** MCU bench board with no receiver: `arm` replies receiver-stale before gyro/failsafe. */
+    receiverStale?: boolean;
   }): void {
+    if (opts.receiverStale !== undefined) this.receiverStale = opts.receiverStale;
     if (opts.gyroHealthScenario !== undefined) this.gyroHealthScenario = opts.gyroHealthScenario;
     if (opts.receiverLinkScenario !== undefined) {
       this.receiver.setScenario(opts.receiverLinkScenario);

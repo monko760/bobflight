@@ -60,6 +60,8 @@ export interface MockSerialOptions {
   armSwitchOn?: boolean;
   /** N2: "check" (default, N2+ firmware: `status` has `arm_cli: check`, `arm` never arms) or "old-fc" (pre-N2: no key, `arm` really arms). */
   armCli?: ArmCliMockScenario;
+  /** MCU bench board with no receiver: `arm` replies receiver-stale before gyro/failsafe (default false = host order). */
+  receiverStale?: boolean;
   failsafeActive?: boolean;
   boardId?: string;
   /** Explicit simulation only; default output-unavailable mock stays fail closed. */
@@ -106,6 +108,7 @@ export class MockSerial extends EventEmitter {
   /** N2: simulated radio ARM switch; the only way this mock arms, as on the FC. */
   private armSwitchOn: boolean;
   private readonly armCli: ArmCliMockScenario;
+  private readonly receiverStaleArm: boolean;
   private rebootRequested = false;
   /** R0c RAM-only bidir flag (default off). */
   private dshotBidir = false;
@@ -142,6 +145,7 @@ export class MockSerial extends EventEmitter {
     super();
     this.armSwitchOn = opts.armSwitchOn ?? false;
     this.armCli = opts.armCli ?? "check";
+    this.receiverStaleArm = opts.receiverStale ?? false;
     this.bench = new MockMotorBench(opts.benchReady ?? false);
     this.path = path;
     this.baudRate = baudRate;
@@ -190,7 +194,7 @@ export class MockSerial extends EventEmitter {
   }
 
   private armGateState(): MockArmGateState {
-    return { armed: this.armed, benchActive: this.bench.active, gyroOk: this.gyroOk(), failsafeActive: this.opts.failsafeActive, armSwitchOn: this.armSwitchOn };
+    return { armed: this.armed, benchActive: this.bench.active, gyroOk: this.gyroOk(), failsafeActive: this.opts.failsafeActive, armSwitchOn: this.armSwitchOn, receiverStale: this.receiverStaleArm };
   }
 
   /**

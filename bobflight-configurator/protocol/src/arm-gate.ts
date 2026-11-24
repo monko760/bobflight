@@ -124,6 +124,12 @@ export interface MockArmGateState {
   gyroOk: boolean;
   failsafeActive: boolean;
   armSwitchOn: boolean;
+  /**
+   * MCU builds only: no fresh receiver frame (arming.c `receiver-stale`,
+   * checked before gyro and failsafe). Default false models the host build.
+   * A USB bench board with no receiver has this AND `failsafe: ACTIVE`.
+   */
+  receiverStale?: boolean;
 }
 
 /**
@@ -133,6 +139,7 @@ export interface MockArmGateState {
 export function mockArmRefusal(s: MockArmGateState): ArmRefusalToken {
   if (s.armed) return "already-armed";
   if (s.benchActive) return "motors-active";
+  if (s.receiverStale) return "receiver-stale";
   if (!s.gyroOk) return "gyro-unhealthy";
   if (s.failsafeActive) return "failsafe";
   if (s.armSwitchOn) return "arm-switch-on";
@@ -146,7 +153,7 @@ export function mockArmRefusal(s: MockArmGateState): ArmRefusalToken {
  * why the Configurator must never send `arm` to such a board.
  */
 export function mockLegacyArm(s: MockArmGateState): { reply: string; armed: boolean } {
-  if (!s.gyroOk || s.failsafeActive) return { reply: ARM_LEGACY_REFUSED, armed: s.armed };
+  if (s.receiverStale || !s.gyroOk || s.failsafeActive) return { reply: ARM_LEGACY_REFUSED, armed: s.armed };
   return { reply: "armed", armed: s.armed || s.armSwitchOn };
 }
 
@@ -159,5 +166,5 @@ export function mockArmSwitchEdge(s: MockArmGateState, on: boolean): boolean {
   const wasOn = s.armSwitchOn;
   if (!on) return false;
   if (wasOn || s.armed) return s.armed;
-  return !s.benchActive && s.gyroOk && !s.failsafeActive;
+  return !s.benchActive && !s.receiverStale && s.gyroOk && !s.failsafeActive;
 }

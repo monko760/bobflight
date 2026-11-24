@@ -6,7 +6,6 @@
 import {
   parseStatus as protocolParseStatus,
   parseVersionLine as protocolParseVersionLine,
-  ARM_REFUSED_PREFIX,
   type ParsedStatus,
 } from "@bobflight/protocol";
 
@@ -27,15 +26,21 @@ export function shouldDisableArm(status: ParsedStatus | null): boolean {
 }
 
 /**
- * N2: the `arm refused: <token>` reply the FC gives while `status` already
- * shows a blocking line: the same CLI text as the firmware (tasks.c
- * arm_cli_refusal checks armed, then gyro, then failsafe). null when the
- * status shows none of them (the FC may still refuse for another reason).
+ * N2: why Arm check is disabled, worded from the `status` lines themselves
+ * ("Disabled while status shows failsafe: ACTIVE"). It never predicts the
+ * board's `arm` reply: the firmware checks more than status shows (on MCU
+ * builds e.g. no-motor-output and receiver-stale come before gyro and
+ * failsafe), so the only `arm refused: …` text the UI shows is a reply the
+ * board actually sent. null when none of these status lines blocks.
  */
 export function statusArmRefusal(status: ParsedStatus | null): string | null {
   if (!status) return null;
-  if (status.arm === "armed") return `${ARM_REFUSED_PREFIX}already-armed`;
-  if (status.gyro_ok === "no") return `${ARM_REFUSED_PREFIX}gyro-unhealthy`;
-  if (status.failsafe === "ACTIVE") return `${ARM_REFUSED_PREFIX}failsafe`;
-  return null;
+  const lines: string[] = [];
+  if (status.arm === "armed") lines.push("arm: armed");
+  if (status.gyro_ok === "no") lines.push("gyro_ok: no");
+  if (status.failsafe === "ACTIVE") lines.push("failsafe: ACTIVE");
+  return lines.length ? `${STATUS_DISABLED_PREFIX}${lines.join(" and ")}` : null;
 }
+
+/** Prefix of every status-worded Arm check disabled reason. */
+export const STATUS_DISABLED_PREFIX = "Disabled while status shows ";

@@ -9,7 +9,10 @@
  *  - the button sends `arm` only after confirmation and shows the FC reply
  *    verbatim plus the explanation; the mock never arms from `arm`;
  *  - while status blocks (gyro_ok no / failsafe ACTIVE / armed) the button is
- *    disabled and shows the same CLI text the FC sends for `arm`;
+ *    disabled with a reason worded from those status lines; the page never
+ *    predicts the board's `arm` reply (MCU firmware checks more, e.g.
+ *    receiver-stale before failsafe): the only `arm refused: …` text shown is
+ *    a reply the board actually sent;
  *  - legacy (pre-N2) and unknown replies are shown verbatim, never rewritten;
  *  - capability: `arm` is sent only to firmware whose `status` reports
  *    `arm_cli: check`. Key absent (older firmware, the "old-fc" mock, which
@@ -130,24 +133,46 @@ async function main() {
     assert.equal(r.mock.simulateArmSwitch(true), true, "fresh off-to-on edge arms");
     await (r.ctx.refreshStatus as () => Promise<void>)();
     assert.ok(isDisabled(button("Arm check…")), "armed: Arm check disabled");
-    assert.equal(shown("arm-status-refusal")?.startsWith("Arm check now: arm refused: already-armed"), true);
-    assert.equal(String(await r.mock.sendCommand("arm" as CliCommand)), "arm refused: already-armed", "same text as the FC");
+    assert.equal(shown("arm-status-refusal")?.startsWith("Arm check: Disabled while status shows arm: armed."), true);
+    assert.equal(String(await r.mock.sendCommand("arm" as CliCommand)), "arm refused: already-armed", "mock FC reply");
     r.root.unmount(); await r.mock.disconnect();
   });
-  for (const [label, gyro, fs, token] of [["gyro_ok no", false, false, "gyro-unhealthy"], ["failsafe ACTIVE", true, true, "failsafe"], ["both", false, true, "gyro-unhealthy"]] as const) {
-    await test(`status blocks (${label}): disabled, showing the exact CLI reply the FC gives`, async () => {
+  for (const [label, gyro, fs, reason] of [["gyro_ok no", false, false, "gyro_ok: no"], ["failsafe ACTIVE", true, true, "failsafe: ACTIVE"], ["both", false, true, "gyro_ok: no and failsafe: ACTIVE"]] as const) {
+    await test(`status blocks (${label}): disabled, reason worded from status, no predicted reply`, async () => {
       const r = await rig({ gyroHealthy: gyro, failsafeActive: fs });
       const b = button("Arm check…");
       assert.ok(isDisabled(b));
-      assert.equal(b.getAttribute("title"), `Disabled: the flight controller replies "arm refused: ${token}"`);
-      assert.equal(shown("arm-status-refusal"), `Arm check now: arm refused: ${token} — ${ARM_REFUSAL_TEXT[token]}`);
-      const alert = container.findAll((e) => e.getAttribute("role") === "alert").map(visibleText).join(" ");
-      assert.match(alert, new RegExp(`the\\s+flight controller replies arm refused: ${token}`));
-      assert.equal(String(await r.mock.sendCommand("arm" as CliCommand)), `arm refused: ${token}`, "mock FC sends the same text");
+      assert.equal(b.getAttribute("title"), `Disabled while status shows ${reason}`);
+      assert.equal(statusArmRefusal(r.ctx.status as never), `Disabled while status shows ${reason}`);
+      assert.equal(shown("arm-status-refusal"), `Arm check: Disabled while status shows ${reason}. Only a reply the board actually sends is shown here.`);
+      assert.ok(!/arm refused/.test(visibleText(container as unknown as FakeElement)), "no predicted `arm refused` text anywhere on the page");
+      assert.ok(!/arm refused/.test(b.getAttribute("title") ?? ""), "no predicted reply in the title");
+      assert.equal(byTestId("arm-check-line"), null, "no reply shown: none was received");
       assert.equal(r.sent.includes("arm"), false, "page never sent arm");
       r.root.unmount(); await r.mock.disconnect();
     });
   }
+  await test("MCU bench board, no receiver (failsafe ACTIVE, receiver-stale): page shows the status reason, never the reply it cannot know", async () => {
+    const r = await rig({ gyroHealthy: true, failsafeActive: true });
+    r.mock.setMockGates({ receiverStale: true }); await (r.ctx.refreshStatus as () => Promise<void>)();
+    assert.equal(shown("arm-status-refusal"), "Arm check: Disabled while status shows failsafe: ACTIVE. Only a reply the board actually sends is shown here.");
+    assert.ok(!/arm refused/.test(visibleText(container as unknown as FakeElement)), "page claims no reply");
+    // What the board really says (MCU order: receiver-stale is checked before failsafe):
+    assert.equal(String(await r.mock.sendCommand("arm" as CliCommand)), "arm refused: receiver-stale");
+    assert.equal(r.sent.includes("arm"), false, "page never sent arm");
+    r.root.unmount(); await r.mock.disconnect();
+  });
+  await test("real reply differs from anything status shows: the page shows exactly what the board returned", async () => {
+    const r = await rig({ gyroHealthy: true, failsafeActive: false });
+    r.mock.setMockGates({ receiverStale: true }); await (r.ctx.refreshStatus as () => Promise<void>)();
+    assert.equal(statusArmRefusal(r.ctx.status as never), null, "status shows no blocking line");
+    assert.ok(!/arm refused/.test(visibleText(container as unknown as FakeElement)), "nothing predicted before the reply");
+    assert.equal(await armCheck(r), "arm refused: receiver-stale", "verbatim board reply");
+    assert.equal(shown("arm-check-explanation"), ARM_REFUSAL_TEXT["receiver-stale"]);
+    const texts = container.findAll((e) => e.tagName === "CODE").map(visibleText).filter((t) => t.startsWith("arm refused"));
+    assert.deepEqual(texts, ["arm refused: receiver-stale"], "the only arm refused text is the received reply");
+    r.root.unmount(); await r.mock.disconnect();
+  });
   await test("a reply of `armed`, unknown tokens and the legacy refusal: shown verbatim, never rewritten, never throw", async () => {
     let next = "armed";
     const r = await rig({ gyroHealthy: true, failsafeActive: false, reply: (c) => (c === "arm" ? next + "\r\n" : null) });

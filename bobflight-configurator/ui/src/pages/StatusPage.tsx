@@ -155,12 +155,6 @@ export function StatusPage() {
               <li key={r}>{r}</li>
             ))}
           </ul>
-          {shouldDisableArm(status) && armCliCheck && (
-            <p>
-              Arm check is disabled while gyro_ok:no or failsafe:ACTIVE; the
-              flight controller replies <code>{statusRefusal}</code>.
-            </p>
-          )}
         </div>
       )}
 
@@ -174,7 +168,7 @@ export function StatusPage() {
             olderFirmware
               ? ARM_CLI_OLDER_FIRMWARE_TEXT
               : statusRefusal
-                ? `Disabled: the flight controller replies "${statusRefusal}"`
+                ? statusRefusal
                 : "Sends 'arm': the reply names the first check that blocks arming"
           }
         >
@@ -211,8 +205,8 @@ export function StatusPage() {
       )}
       {statusRefusal && (
         <p className="muted" data-testid="arm-status-refusal">
-          Arm check now: <code>{statusRefusal}</code> —{" "}
-          {parseArmReply(statusRefusal).explanation}
+          Arm check: {statusRefusal}. Only a reply the board actually sends
+          is shown here.
         </p>
       )}
 
