@@ -101,7 +101,7 @@ static const char *EXPECT[3]=
 {"defaults_group: pid\r\n"
  "defaults_key: pid_roll_p=0.002\r\ndefaults_key: pid_roll_i=0.001\r\ndefaults_key: pid_roll_d=5e-05\r\n"
  "defaults_key: pid_pitch_p=0.002\r\ndefaults_key: pid_pitch_i=0.001\r\ndefaults_key: pid_pitch_d=5e-05\r\n"
- "defaults_key: pid_yaw_p=0.002\r\ndefaults_key: pid_yaw_i=0.001\r\ndefaults_key: pid_yaw_d=5e-05\r\n"
+ "defaults_key: pid_yaw_p=0.002\r\ndefaults_key: pid_yaw_i=0.001\r\ndefaults_key: pid_yaw_d=0\r\n"
  "defaults_key: min_throttle=0.05\r\ndefaults_key: airmode=0\r\n"
  "defaults_end: pid 11\r\n",
  "defaults_group: rates\r\n"

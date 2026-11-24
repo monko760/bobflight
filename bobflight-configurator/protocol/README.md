@@ -78,7 +78,7 @@ Keys: see SETTINGS_KEYS; the schema 13 layout is in bobflight-firmware/docs/SETT
 Only storage schema 13 is supported (256-byte payload). There are no loaders or
 migrations for schemas 1..12. Layout and `defaults pid|rates|filters` are in
 `bobflight-firmware/docs/SETTINGS-PERSISTENCE.md`. `pid_yaw_d` is stored with
-the other PID gains (bytes 36..71); default `0.00005`, validate `0..10` finite.
+the other PID gains (bytes 36..71); default `0` (was `0.00005` until 2026-11), validate `0..10` finite.
 
 ## Web Serial (browser)
 

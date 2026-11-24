@@ -32,7 +32,7 @@ await test('ok frame per group: keys verbatim, count and group checked',()=>{
     assert.deepEqual(r.keys.map(k=>k.key),[...KEYS[g]]);
     for(const k of r.keys){assert.equal(k.line,`defaults_key: ${k.key}=${k.value}`);assert.equal(k.value,DEFAULT_SETTINGS[k.key],k.key);}
     assert.deepEqual(r.keyLines,mockDefaultsReply(g,'ok').split('\r\n').filter(l=>l.startsWith('defaults_key:')));}
-  const pid=parse(mockDefaultsReply('pid'),'pid');assert.ok(pid.keyLines.includes('defaults_key: pid_yaw_d=5e-05'),'%.6g value kept verbatim');
+  const pid=parse(mockDefaultsReply('pid'),'pid');assert.ok(pid.keyLines.includes('defaults_key: pid_roll_d=5e-05'),'%.6g value kept verbatim');assert.ok(pid.keyLines.includes('defaults_key: pid_yaw_d=0'),'yaw D defaults to 0');
   assert.ok(pid.keyLines.includes('defaults_key: airmode=0'));
 });
 await test('N1: success needs the group\'s EXACT key set and count (swapped, missing+10, extra+12, empty 0, other group\'s keys) -> unknown',()=>{

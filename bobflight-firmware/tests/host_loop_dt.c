@@ -47,9 +47,10 @@ void dshot_write(const float m[4]){memcpy(motors,m,sizeof(motors));}
 #include "flight/pid.h"
 #include "flight/config.h"
 #include <math.h>
-static unsigned updates,sets,resets;static float measured_dt;
+static unsigned updates,sets,resets,floors;static float measured_dt,d_dt_floor;
 void pid_init(void){resets++;}
 void pid_set_dt(float dt){sets++;measured_dt=dt;}
+void pid_set_d_dt_floor(float dt){floors++;d_dt_floor=dt;}
 void pid_update(const float g[3],const float s[3],pid_axis_out_t *out){(void)g;(void)s;updates++;*out=(pid_axis_out_t){0};}
 void mixer_update(const pid_axis_out_t *p,float t,float out[4]){(void)p;for(unsigned i=0;i<4;i++)out[i]=t;}
 static float filter_dt;static unsigned filter_sets;
@@ -61,11 +62,12 @@ static int check_rate(uint32_t gyro_hz,uint32_t denom,float want_dt){
  const float want_filter_dt=1.f/(float)gyro_hz;unsigned long runs0;
  arm=ARM_DISARMED;rc[3]=0;rc[4]=0;now=1000;scheduler_init(gyro_hz,denom);
  run_until(now+20000);                      /* disarmed: witness low arm input */
- arm=ARM_ARMED;rc[4]=1;rc[3]=0.4f;updates=sets=filter_sets=0;runs0=scheduler_stats()->gyro_runs;
+ arm=ARM_ARMED;rc[4]=1;rc[3]=0.4f;updates=sets=floors=filter_sets=0;runs0=scheduler_stats()->gyro_runs;
  run_until(now+200000);
  /* S1: one filter update per gyro sample (not per PID cycle), at 1/gyro_hz. */
  CHECK(filter_sets==scheduler_stats()->gyro_runs-runs0&&near(filter_dt,want_filter_dt));
  CHECK(updates>0&&sets==updates&&near(measured_dt,want_dt));
+ CHECK(floors==updates&&near(d_dt_floor,want_dt)); /* D floor = nominal PID period */
  return 0;
 }
 int main(void){
@@ -75,8 +77,9 @@ int main(void){
  if(check_rate(1000,1,1000e-6f))return 1;  /* other boards / legacy */
  /* Runtime rate change: the next PID cycles follow the new period. */
  if(check_rate(8000,2,250e-6f))return 1;
- scheduler_set_rate(4000,2);updates=sets=0;run_until(now+100000);
+ scheduler_set_rate(4000,2);updates=sets=floors=0;run_until(now+100000);
  CHECK(near(filter_dt,250e-6f)&&updates>0&&near(measured_dt,500e-6f));
+ CHECK(near(d_dt_floor,500e-6f)); /* follows a runtime rate change */
  puts("PASS loop dt: real tasks under real scheduler use PID dt 250 us (8000/2), 500 us (4000/2), 1 ms (1000/1); the gyro LPF runs on every gyro sample at 125/250/1000 us; both follow runtime rate changes");
  return 0;
 }
