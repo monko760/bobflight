@@ -7,7 +7,7 @@ export const LEVEL_FALLBACK_LABELS = {
   notReported: "Not reported by this firmware.",
   notReportedMock: "Not reported — demo, no attitude estimator or hardware.",
   inactive: "Inactive at the last controller pass (it engages only while armed).",
-  activeAttitude: "ACTIVE — attitude unavailable: the manually selected Angle or Level (Horizon) mode and failsafe HOLD/LAND fly rate (Acro) control on the gyro until the estimate recovers. Sticks command rotation rates; centered sticks hold the current angle without self-leveling. The controller does not disarm for this in the air.",
+  activeAttitude: "ACTIVE — attitude unavailable: the selected Angle or Level (Horizon) mode and failsafe HOLD/LAND fly rate (Acro) control on the gyro until the estimate recovers. Sticks command rotation rates; centered sticks hold the current angle without self-leveling. The controller does not disarm for this in the air.",
   activeGravity: "ACTIVE — failsafe HOLD/LAND without qualified gravity: holding zero rotation rates at the failsafe throttle instead of leveling. The controller does not disarm for this in the air.",
 } as const;
 const ATTITUDE_STATE_LABELS: Record<string, string> = {
