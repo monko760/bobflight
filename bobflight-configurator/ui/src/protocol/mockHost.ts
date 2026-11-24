@@ -1,6 +1,6 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import { boardIdMockVersion, type BoardIdMockScenario } from "@bobflight/protocol";
-import { ARM_REFUSED_PREFIX, mockArmRefusal, mockArmSwitchEdge, type MockArmGateState } from "@bobflight/protocol";
+import { ARM_REFUSED_PREFIX, mockArmRefusal, mockArmSwitchEdge, mockLegacyArm, type ArmCliMockScenario, type MockArmGateState } from "@bobflight/protocol";
 import { MockPortsModes, isModeRangeCommand, isControlSourceCommand, mockGyroHealthLines, mockGyroHealthForcesUnhealthy, type GyroHealthMockScenario } from "@bobflight/protocol";
 /**
  * Browser-safe mock host matching BobFlightCliClient surface.
@@ -81,6 +81,10 @@ export class MockBobFlightHost implements BobFlightHost {
   private armed = false;
   /** N2: simulated radio ARM switch (off at connect); the only way this mock arms, as on the FC. */
   private armSwitchOn = false;
+  /** N2: "check" = N2+ firmware (`arm_cli: check`, `arm` never arms); "old-fc" = pre-N2 (no key, `arm` really arms). */
+  private armCli: ArmCliMockScenario = "check";
+  /** Every CLI line this mock received, in order (tests assert `arm` is never sent to old-fc). */
+  readonly commandLog: string[] = [];
   private bench = new MockMotorBench();
   /** Onboard Blackbox (status api 2). Default "none": honest no-SD-card reply. */
   readonly blackbox = new MockOnboardBlackbox("none");
@@ -107,7 +111,8 @@ export class MockBobFlightHost implements BobFlightHost {
   /** motor_direction + `mixer` (schema 10; same wire as protocol MockSerial). A running bench test refuses sets. */
   private readonly motorDirection: MockMotorDirection;
 
-  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario; gyroHealthScenario?: GyroHealthMockScenario; boardIdScenario?: BoardIdMockScenario }) {
+  constructor(opts?: { connectDelayMs?: number; gyroHealthy?: boolean; loopRateScenario?: LoopRateMockScenario; gyroNotchScenario?: GyroNotchMockScenario; rpmFilterScenario?: RpmFilterMockScenario; motorDirectionScenario?: MotorDirectionMockScenario; receiverLinkScenario?: ReceiverLinkMockScenario; gyroHealthScenario?: GyroHealthMockScenario; boardIdScenario?: BoardIdMockScenario; armCli?: ArmCliMockScenario }) {
+    this.armCli = opts?.armCli ?? "check";
     /* An explicit receiver link scenario also sets the status failsafe line it implies (FW: every loss reason runs the failsafe). */
     if (opts?.receiverLinkScenario) { this.receiver.setScenario(opts.receiverLinkScenario); this.failsafeActive = this.receiver.failsafeActive(); }
     this.motorDirection = new MockMotorDirection(opts?.motorDirectionScenario ?? "props-out");
@@ -223,6 +228,7 @@ export class MockBobFlightHost implements BobFlightHost {
     if (this.status !== "connected") {
       throw new Error("not connected");
     }
+    this.commandLog.push(cmd);
     this.emitLine(`> ${cmd}`);
     const response = this.handle(cmd);
     for (const line of response.split(/\r?\n/)) {
@@ -394,7 +400,7 @@ export class MockBobFlightHost implements BobFlightHost {
           "  help     - this text",
           "  version  - firmware version",
           "  status   - MCU, loops, arm, gyro, board",
-          "  arm      - arm check only: prints the first blocking check (arming needs the radio ARM switch)",
+          this.armCli === "check" ? "  arm      - arm check only: prints the first blocking check (arming needs the radio ARM switch)" : "  arm      - attempt arm (refuses if gyro unhealthy)",
           "  disarm   - disarm",
           "  reboot   - soft reset (host: exit loop flag)",
         ].join("\r\n");
@@ -417,11 +423,18 @@ export class MockBobFlightHost implements BobFlightHost {
           "rx: none unbound",
           "mmio: denied",
           `arm: ${arm}`,
+          ...(this.armCli === "check" ? ["arm_cli: check"] : []),
           `failsafe: ${failsafe}`,
           ...mockLoopStatusLines(this.loopRateScenario),
         ].join("\r\n");
       }
       case "arm":
+        if (this.armCli === "old-fc") {
+          // Pre-N2 firmware really arms on `arm` (why the Configurator never sends it there).
+          const r = mockLegacyArm(this.armGateState());
+          this.armed = r.armed;
+          return r.reply;
+        }
         // N2 (FW tasks.c arm_cli_refusal): same gate as the ARM switch; never arms.
         return `${ARM_REFUSED_PREFIX}${mockArmRefusal(this.armGateState())}`;
       case "disarm":
@@ -447,6 +460,11 @@ export class MockBobFlightHost implements BobFlightHost {
    * an off-to-on edge arms, and only when the gate passes; off disarms.
    * Returns the armed state afterwards.
    */
+  /** Swap the simulated firmware generation (e.g. reflashed/other board on the same port). */
+  setArmCliScenario(s: ArmCliMockScenario): void {
+    this.armCli = s;
+  }
+
   simulateArmSwitch(on: boolean): boolean {
     this.armed = mockArmSwitchEdge(this.armGateState(), on);
     this.armSwitchOn = on;

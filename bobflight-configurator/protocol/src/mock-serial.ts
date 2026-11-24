@@ -11,7 +11,7 @@ import { MockReceiver } from "./receiver-mock";
 import { MockOnboardBlackbox, type MockBlackboxCard } from "./blackbox-mock";
 import { mockLoopStatusLines, mockLoopRateBidir, MockLoopRateSetting, type LoopRateMockScenario } from "./loop-rate-mock";
 import { mockGyroHealthLines, mockGyroHealthForcesUnhealthy, type GyroHealthMockScenario } from "./gyro-health";
-import { ARM_REFUSED_PREFIX, mockArmRefusal, mockArmSwitchEdge, type MockArmGateState } from "./arm-gate";
+import { ARM_REFUSED_PREFIX, mockArmRefusal, mockArmSwitchEdge, mockLegacyArm, type ArmCliMockScenario, type MockArmGateState } from "./arm-gate";
 import type { PortInfo } from "./types";
 import {
   cloneDefaultSettingValues,
@@ -58,6 +58,8 @@ export interface MockSerialOptions {
   gyroHealthy?: boolean;
   /** N2: simulated radio ARM switch position at connect (default off). */
   armSwitchOn?: boolean;
+  /** N2: "check" (default, N2+ firmware: `status` has `arm_cli: check`, `arm` never arms) or "old-fc" (pre-N2: no key, `arm` really arms). */
+  armCli?: ArmCliMockScenario;
   failsafeActive?: boolean;
   boardId?: string;
   /** Explicit simulation only; default output-unavailable mock stays fail closed. */
@@ -103,6 +105,7 @@ export class MockSerial extends EventEmitter {
   private armed = false;
   /** N2: simulated radio ARM switch; the only way this mock arms, as on the FC. */
   private armSwitchOn: boolean;
+  private readonly armCli: ArmCliMockScenario;
   private rebootRequested = false;
   /** R0c RAM-only bidir flag (default off). */
   private dshotBidir = false;
@@ -138,6 +141,7 @@ export class MockSerial extends EventEmitter {
   ) {
     super();
     this.armSwitchOn = opts.armSwitchOn ?? false;
+    this.armCli = opts.armCli ?? "check";
     this.bench = new MockMotorBench(opts.benchReady ?? false);
     this.path = path;
     this.baudRate = baudRate;
@@ -322,7 +326,7 @@ export class MockSerial extends EventEmitter {
           "  help     - this text\r\n" +
           "  version  - firmware version\r\n" +
           "  status   - MCU, loops, arm, gyro, board\r\n" +
-          "  arm      - arm check only: prints the first blocking check (arming needs the radio ARM switch)\r\n" +
+          (this.armCli === "check" ? "  arm      - arm check only: prints the first blocking check (arming needs the radio ARM switch)\r\n" : "  arm      - attempt arm (refuses if gyro unhealthy)\r\n") +
           "  disarm   - disarm\r\n" +
           "  reboot   - soft reset (host: exit loop flag)\r\n" +
           "  get      - get <key>\r\n" +
@@ -348,12 +352,20 @@ export class MockSerial extends EventEmitter {
           `rx: none unbound\r\n` +
           `mmio: ${this.bench.ready ? "allowed (simulated)" : "denied"}\r\n` +
           `arm: ${arm}\r\n` +
+          (this.armCli === "check" ? "arm_cli: check\r\n" : "") +
           `failsafe: ${failsafe}\r\n` +
           mockLoopStatusLines(this.loopRateScenario).map((l) => `${l}\r\n`).join("")
       );
     } else if (line === "arm") {
-      // N2 (FW tasks.c arm_cli_refusal): same gate as the ARM switch; never arms.
-      this.emitData(`${ARM_REFUSED_PREFIX}${mockArmRefusal(this.armGateState())}\r\n`);
+      if (this.armCli === "old-fc") {
+        // Pre-N2 firmware really arms on `arm` (why the Configurator never sends it there).
+        const r = mockLegacyArm(this.armGateState());
+        this.armed = r.armed;
+        this.emitData(`${r.reply}\r\n`);
+      } else {
+        // N2 (FW tasks.c arm_cli_refusal): same gate as the ARM switch; never arms.
+        this.emitData(`${ARM_REFUSED_PREFIX}${mockArmRefusal(this.armGateState())}\r\n`);
+      }
     } else if (line === "disarm") {
       this.armed = false;
       this.emitData("disarmed\r\n");

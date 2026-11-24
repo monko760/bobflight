@@ -26,6 +26,7 @@ const KNOWN_KEYS = [
   "rx",
   "mmio",
   "arm",
+  "arm_cli",
   "failsafe",
   "loop",
 ] as const;
@@ -41,6 +42,7 @@ type KnownKey = (typeof KNOWN_KEYS)[number];
  */
 export function parseStatus(raw: string): ParsedStatus {
   const map: Partial<Record<KnownKey, string>> = {};
+  let armCliLines = 0;
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -49,6 +51,7 @@ export function parseStatus(raw: string): ParsedStatus {
     const key = trimmed.slice(0, idx).trim() as KnownKey;
     const value = trimmed.slice(idx + 1).trim();
     if ((KNOWN_KEYS as readonly string[]).includes(key)) {
+      if (key === "arm_cli") armCliLines++;
       map[key] = value;
     }
   }
@@ -82,6 +85,8 @@ export function parseStatus(raw: string): ParsedStatus {
     rx: map.rx,
     mmio: map.mmio,
     arm: map.arm,
+    // N2 capability: optional; a repeated line is not trusted (undefined).
+    arm_cli: armCliLines === 1 ? map.arm_cli : undefined,
     failsafe: map.failsafe,
     loop: map.loop,
     failClosed: failClosedReasons.length > 0,

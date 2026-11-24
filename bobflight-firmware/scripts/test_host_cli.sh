@@ -67,6 +67,8 @@ need() {
 need "BobFlight CLI"
 need "gyro_ok: no"
 need "arm: disarmed"
+# N2 capability: Configurators send `arm` only to firmware reporting this line.
+need "arm_cli: check"
 # Boot lockout: failsafe stays ACTIVE until the first valid RX frame
 # (failsafe_active() is true while no frame has ever been seen, failsafe.c).
 # The host CLI has no receiver, so `status` must report ACTIVE here; this is

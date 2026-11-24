@@ -34,8 +34,14 @@ export {
   parseArmReply,
   mockArmRefusal,
   mockArmSwitchEdge,
+  mockLegacyArm,
+  ARM_CLI_STATUS_KEY,
+  ARM_CLI_CHECK,
+  ARM_CLI_OLDER_FIRMWARE_TEXT,
+  ARM_CLI_MOCK_SCENARIOS,
+  armCliIsCheckOnly,
 } from "./arm-gate";
-export type { ArmRefusalToken, ArmReply, ArmReplyKind, MockArmGateState } from "./arm-gate";
+export type { ArmRefusalToken, ArmReply, ArmReplyKind, MockArmGateState, ArmCliMockScenario } from "./arm-gate";
 export {
   LineBuffer,
   ResponseCollector,

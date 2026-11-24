@@ -35,6 +35,8 @@ The CLI `arm` command cannot be a fresh switch edge, so it never arms. It replie
 
 So `arm` is now a pre-arm check. The Configurator Status page shows the reply verbatim with an explanation.
 
+Capability signal: N2+ firmware prints `arm_cli: check` in `status`, right after the `arm:` line. Firmware before N2 really arms on `arm`, so the Configurator sends `arm` (Status page "Arm check…" → "Confirm arm check" → "Run arm check", the CLI tab, and the protocol client's `arm()`) only after a fresh `status` that contains exactly one `arm_cli: check` line. When the key is absent, Arm check stays disabled and shows: "Older firmware: the CLI arm command can arm this board. Update firmware to use Arm check." A designed props-off USB arm path, if wanted, is a separate change.
+
 ## Configuration and compatibility
 
 No persistence layout, version, field or flash backend changed. Existing saved ARM assignments become authoritative for this receiver path. Existing Betaflight-style `diff all` and explicit `save` remain the way to review and retain configuration; do not silently overwrite saved settings with defaults.

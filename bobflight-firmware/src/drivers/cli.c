@@ -160,6 +160,9 @@ static void cmd_status(void)
              "rx: %s %s\r\n"
              "mmio: %s\r\n"
              "arm: %s\r\n"
+             /* N2 capability: CLI `arm` is check-only on this firmware (never
+              * arms). Configurators send `arm` only when they see this line. */
+             "arm_cli: check\r\n"
              "failsafe: %s\r\n"
              "loop: gyro=%lu Hz denom=%lu cascade=%lu bg=%lu\r\n"
              "%s"

@@ -22,6 +22,7 @@ import {
   encodeCommand,
 } from "./cli-framing";
 import { parseStatus, parseVersionLine } from "./parse-status";
+import { ARM_CLI_OLDER_FIRMWARE_TEXT, armCliIsCheckOnly } from "./arm-gate";
 import type { SerialPortLike, TransportFactory } from "./transport";
 import { DEFAULT_BAUD_RATE } from "./transport";
 import { AutoTransportFactory } from "./serial-backend";
@@ -398,8 +399,13 @@ export class BobFlightCliClient {
     return parseStatus(raw);
   }
 
-  /** UI-confirmed arm only — never called from connect(). */
+  /**
+   * UI-confirmed arm check only — never called from connect(). N2: re-reads
+   * `status` and sends `arm` only when it reports `arm_cli: check`; firmware
+   * without it really arms on `arm`, so this throws and sends nothing.
+   */
   async arm(opts?: SendCommandOptions): Promise<string> {
+    if (!armCliIsCheckOnly(await this.getStatus(opts))) throw new Error(ARM_CLI_OLDER_FIRMWARE_TEXT);
     return this.sendCommand("arm", opts);
   }
 

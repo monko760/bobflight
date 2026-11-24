@@ -18,6 +18,10 @@ Allowed differences, nothing else:
     host build prints (no gyro on the host: nothing to check, no samples, so
     health ok and count 0); any other value or position fails. The golden is
     not re-captured; the b77b845 bytes stay the reference for every other line.
+  * status (N2, feat/arm-gate-elrs-rfmode, frozen by the Config Lead): exactly
+    the line `arm_cli: check\r\n` inserted right after the golden's
+    `arm: ...\r\n` line (CLI `arm` is check-only; the Configurator sends
+    `arm` only when it sees this line). Every host build must print it.
 Golden: tests/golden/report_bytes_b77b845.json, captured from b77b845 host
 builds with:  python3 host_report_bytes_contract.py --capture <bobflight_host> <board>
 Usage (ctest):  python3 host_report_bytes_contract.py <bobflight_host> <board>"""
@@ -60,6 +64,14 @@ def s3_expected_status(golden_status):
     assert 'gyro_health: ' not in golden_status and 'gyro_sat_count: ' not in golden_status
     return golden_status[:m.end()] + S3_GYRO_STATUS_LINES + golden_status[m.end():]
 
+N2_ARM_CLI_LINE = 'arm_cli: check\r\n'
+
+def n2_expected_status(golden_status):
+    m = re.search(r'(?:^|\r\n)arm: (?:armed|disarmed)\r\n', golden_status)
+    assert m and golden_status.count('\r\narm: ') == 1, 'golden: one arm line'
+    assert 'arm_cli: ' not in golden_status, 'golden already has arm_cli'
+    return golden_status[:m.end()] + N2_ARM_CLI_LINE + golden_status[m.end():]
+
 def first_diff(a, b):
     for i, (x, y) in enumerate(zip(a, b)):
         if x != y:
@@ -75,7 +87,7 @@ def main():
     golden = json.load(open(GOLDEN))['tmotor_f7_v2' if board=='matek_f722_px' else board]
     if board=='matek_f722_px': golden={k:v.replace('tmotor_f7_v2','matek_f722_px') for k,v in golden.items()}
     got = capture(exe)
-    gs, ls = mask_counters(s3_expected_status(golden['status'])), mask_counters(got['status'])
+    gs, ls = mask_counters(n2_expected_status(s3_expected_status(golden['status']))), mask_counters(got['status'])
     if gs != ls:
         i = first_diff(gs, ls)
         raise AssertionError(f'{board} status differs from b77b845 at byte {i}:\n golden {gs[max(0,i-40):i+40]!r}\n got    {ls[max(0,i-40):i+40]!r}')
@@ -89,7 +101,7 @@ def main():
     if gf != lf:
         i = first_diff(gf, lf)
         raise AssertionError(f'{board} filters differs from b77b845 at byte {i}:\n golden {gf[max(0,i-40):i+40]!r}\n got    {lf[max(0,i-40):i+40]!r}')
-    print(f'PASS report bytes ({board}): status byte-identical to b77b845 + exactly the S3 gyro_health/gyro_sat_count lines after gyro_ok (timing counters digits-only); {note}')
+    print(f'PASS report bytes ({board}): status byte-identical to b77b845 + exactly the S3 gyro_health/gyro_sat_count lines after gyro_ok + the N2 arm_cli: check line after arm (timing counters digits-only); {note}')
 
 if __name__ == '__main__':
     main()

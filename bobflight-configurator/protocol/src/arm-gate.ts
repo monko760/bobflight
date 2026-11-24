@@ -8,13 +8,38 @@
  * from USB: `arm` runs the same gate as the radio ARM switch and replies
  * `arm refused: <token>` with the first blocking check (tasks.c
  * arm_cli_refusal). Only a fresh radio ARM switch edge (off, then on) arms.
- * Token names are pending the Config Lead freeze.
+ * Names frozen by the Config Lead (#111 review at 267e95a).
+ *
+ * Capability: firmware before N2 really arms on `arm`, so the Configurator
+ * sends `arm` only when `status` carries exactly one `arm_cli: check` line
+ * (N2+ firmware, cli.c cmd_status, right after `arm:`). Absent, duplicated or
+ * any other value: Arm check stays disabled and `arm` is never sent.
  *
  * Firmware before N2 replied `armed` or `arm refused (gyro unhealthy or
  * failsafe)`; those are recognised as legacy replies, never rewritten.
  */
 export const ARM_REFUSED_PREFIX = "arm refused: ";
 export const ARM_LEGACY_REFUSED = "arm refused (gyro unhealthy or failsafe)";
+
+/** `status` key and the only value that means "CLI `arm` is check-only". */
+export const ARM_CLI_STATUS_KEY = "arm_cli";
+export const ARM_CLI_CHECK = "check";
+/** Shown (and Arm check disabled) when `status` has no `arm_cli: check`. */
+export const ARM_CLI_OLDER_FIRMWARE_TEXT =
+  "Older firmware: the CLI arm command can arm this board. Update firmware to use Arm check.";
+
+/**
+ * Strict capability read from a parsed `status`: true only for the exact value
+ * `check` (parse-status keeps arm_cli undefined when the line is absent or
+ * repeated). null status (not read yet) is false: never send `arm` blind.
+ */
+export function armCliIsCheckOnly(status: { arm_cli?: string } | null | undefined): boolean {
+  return !!status && status.arm_cli === ARM_CLI_CHECK;
+}
+
+/** Mock FC firmware generation for `arm`: N2+ ("check") or pre-N2 ("old-fc"). */
+export const ARM_CLI_MOCK_SCENARIOS = ["check", "old-fc"] as const;
+export type ArmCliMockScenario = (typeof ARM_CLI_MOCK_SCENARIOS)[number];
 
 /** Every token the firmware can print, in the firmware's check order. */
 export const ARM_REFUSAL_TOKENS = [
@@ -112,6 +137,17 @@ export function mockArmRefusal(s: MockArmGateState): ArmRefusalToken {
   if (s.failsafeActive) return "failsafe";
   if (s.armSwitchOn) return "arm-switch-on";
   return "arm-switch-required";
+}
+
+/**
+ * Pre-N2 firmware `arm` (the "old-fc" mock), modelled honestly: it really
+ * arms when gyro and failsafe pass; with the ARM switch off the next PID
+ * cycle disarms again, with it on the arm sticks (the N2 bypass). This is
+ * why the Configurator must never send `arm` to such a board.
+ */
+export function mockLegacyArm(s: MockArmGateState): { reply: string; armed: boolean } {
+  if (!s.gyroOk || s.failsafeActive) return { reply: ARM_LEGACY_REFUSED, armed: s.armed };
+  return { reply: "armed", armed: s.armed || s.armSwitchOn };
 }
 
 /**

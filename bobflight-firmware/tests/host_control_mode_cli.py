@@ -33,4 +33,7 @@ assert 'arm: armed' not in text,text
 text=run(b'arm\narm\nstatus\n')
 assert text.count('arm refused: gyro-unhealthy\r\n')==2,text
 assert '\narmed\r\n' not in text and 'arm: disarmed' in text,text
+# N2 capability contract: the real `status` reports `arm_cli: check` exactly once,
+# right after the arm line (Configurators send `arm` only when they see it).
+assert text.count('arm_cli: ')==1 and '\r\narm: disarmed\r\narm_cli: check\r\n' in text,text
 print('PASS: real CLI mode query/switch, framing, malformed/overflow/NUL rejection, RAM-only restart and unchanged arm refusal')
