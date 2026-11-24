@@ -304,6 +304,22 @@ jobs:
       - name: Build
         run: npm run build
 
+  configurator-flashable-list:
+    name: Configurator — flashable list matches all-boards
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-configurator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: HEX builder, Flasher and target catalog match --list-flashable
+        run: npm run test:flashable-list
+
   target-tooling-windows:
     name: Target selection and publication (Windows)
     runs-on: windows-latest
