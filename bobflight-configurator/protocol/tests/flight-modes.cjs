@@ -64,6 +64,11 @@ assert.equal(canSelectControlMode({...s,flightEnabled:true},true,false),true); /
   if(b){assert.equal(b.props.disabled,true);await b.props.onClick();}assert.deepEqual(p.calls,[]);
  }
  const disconnected=page(s,false);assert.doesNotMatch(text(disconnected.tree),/Last snapshot:/);
+ function labeled(tree,prefix){return nodes(tree).filter(n=>(n.type==='input'||n.type==='select')&&String(n.props?.['aria-label']||'').startsWith(prefix));}
+ assert.equal(labeled(ready.tree,'ANGLE').length,0);assert.equal(labeled(ready.tree,'ACRO').length,0);assert.equal(labeled(ready.tree,'HORIZON').length,0);assert.equal(labeled(ready.tree,'ARM').length,0);
+ assert.match(text(ready.tree),/Unsupported for mode selection/);assert.match(text(ready.tree),/There is no control here/);
+ assert.ok(labeled(wired.tree,'ARM').length>=1);assert.equal(labeled(wired.tree,'ANGLE').length,0);assert.equal(labeled(wired.tree,'ACRO').length,0);assert.equal(labeled(wired.tree,'HORIZON').length,0);
+ assert.equal(nodes(ready.tree).some(n=>n.type==='button'&&/^Apply (ANGLE|ACRO|Level)/.test(text(n))),false);
  assert.match(text(page(old).tree),/Legacy firmware/);assert.equal(nodes(page(old).tree).some(n=>n.type==='button'&&text(n)==='Acro'),false);
  console.log('PASS unified flight modes: API2/legacy strict parsing, retired AUX refused, manual angle/acro/horizon allowlist and client roundtrip, real StoragePanel import plus ModesPage guard/readback/disconnect wiring');
 }

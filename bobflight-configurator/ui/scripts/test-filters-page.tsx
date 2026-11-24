@@ -9,6 +9,8 @@
  * the DOM nodes (the fake DOM has no event dispatch).
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { installFakeDom, type FakeElement } from "./fixtures/fakeDom";
@@ -289,6 +291,46 @@ async function main() {
     assert.equal(input("gyro_notch1_hz").value, "200", "edits discarded, FC value back");
     delete win.confirm;
     await t.done();
+  });
+
+  await test("disconnected Filters is blank: no demo 320/53 and no mockSettingsApi fallback", async () => {
+    const src = readFileSync(fileURLToPath(new URL("../src/pages/FiltersPage.tsx", import.meta.url)), "utf8");
+    assert.doesNotMatch(src, /loadFiltersViaFallback/);
+    assert.doesNotMatch(src, /using local mockSettingsApi fallback/);
+    assert.doesNotMatch(src, /mockSettingsApi\.(get|set|save|defaults)/);
+    const mock = new MockBobFlightHost({ connectDelayMs: 0 });
+    let connects = 0;
+    const host = {
+      getConnectionStatus: () => mock.getConnectionStatus(),
+      connect: async (opts: { path: string; baudRate: number }) => { connects += 1; return mock.connect(opts); },
+      onStatus: (cb: (s: "disconnected" | "connected") => void) => mock.onStatus(cb),
+      onLine: (fn: (line: string) => void) => mock.onLine(fn),
+      getAllSettings: async () => { throw new Error("disconnected page read settings"); },
+      getSetting: async () => { throw new Error("disconnected page read a key"); },
+      setSetting: async () => { throw new Error("disconnected page wrote a key"); },
+      sendCommand: async () => { throw new Error("disconnected page sent a command"); },
+      saveSettings: async () => { throw new Error("disconnected page saved"); },
+    };
+    (globalThis as Record<string, unknown>).__setupTestHost = {
+      host, connectionStatus: "disconnected", postFlashGate: false,
+    };
+    const root: Root = createRoot(container as never);
+    flushSync(() => root.render(<FiltersPage />));
+    await sleep(80);
+    assert.equal(connects, 0, "a disconnected Filters page must not open the mock port");
+    assert.equal(mock.getConnectionStatus(), "disconnected");
+    assert.equal(input("gyro_lpf_hz").value, "");
+    assert.notEqual(input("gyro_lpf_hz").value, "320");
+    assert.equal(input("dterm_lpf_hz").value, "");
+    assert.notEqual(input("dterm_lpf_hz").value, "53");
+    assert.ok(isDisabled(input("gyro_lpf_hz")));
+    assert.ok(isDisabled(input("dterm_lpf_hz")));
+    assert.ok(isDisabled(button("Save")));
+    const text = visibleText(container);
+    assert.match(text, /Disconnected\. Filter settings are not loaded/);
+    assert.doesNotMatch(text, /using local mockSettingsApi fallback/);
+    assert.doesNotMatch(text, /demo memory/);
+    root.unmount();
   });
 
   console.log(`PASS FiltersPage render: ${passed} tests`);

@@ -79,6 +79,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
   <button className="ghost" disabled={!connected||pending||blocked} onClick={()=>{requestRefresh({dirty:storageDirty(state),confirm:browserConfirm,refresh:()=>void run('refresh')});}}>Refresh storage</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('diff')}>Export changes</button>{' '}
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('dump')}>Export full configuration</button>
+  <p className="muted" data-testid="diff-same-output">Export changes sends <code>diff all</code>. On current firmware, <code>diff</code> and <code>diff all</code> print the same changed-settings report. There is no profile split.</p>
   {state&&<AccelCalSavedNote raw={storageRaw}/>}
   {state&&state.lastError!=='none'&&<p role="alert">{`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
   {state&&<p>Saved scope: {state.scope.replaceAll("_"," ").replaceAll(",",", ")}</p>}

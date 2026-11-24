@@ -11,20 +11,29 @@ This development change adds an **Onboard SD card** section to the existing Blac
 - Only an explicitly requested probe is polled, at most once per second, for at most 15 seconds. Initialization is not automatically retried.
 - Leaving the tab, disconnecting or entering the post-flash gate invalidates pending UI replies and stops status polling. Firmware independently cancels the probe if USB disconnects, arming/motor activity/calibration starts, or bootloader entry is pending.
 - USB bench recording and SD-panel operations are mutually excluded in the page. Existing bench JSON/CSV exports are unchanged.
+- **Probe card and list logs**, then **Download**, copies a root `BFLxxxxx.BBL` to the computer. See Log download. This is not a flight-qualified logger.
 
 Demo/older firmware is shown as unavailable, never as a successful physical-card test. No check is sent merely by opening the tab.
 
+## Log download
+
+`blackbox start` creates a unique `BFLxxxxx.BBL` in the FAT32 card root. The Blackbox tab lists those names and downloads one file over USB. The path is read-only: a fresh `sd probe`, then `sd read <sector>` for one 512-byte sector at a time with a CRC-32 check, then `sd cancel` once an SD command has gone out. The file is saved only after every sector verifies and the byte length matches the directory entry. This path does not write the card.
+
+**Probe card and list logs** and **Download** stay disabled until the controller is connected, post-flash checks are finished, the link can read SD sectors, onboard recording is stopped, the craft is disarmed, and no settings save, SD probe, or USB bench recorder holds the link. Firmware still refuses `sd read` while Blackbox recording owns the card, while armed or while a motor test or calibration is active, before a completed ready probe, and for a bad sector number. Host simulation has no SD backend and answers `sd read` with `sd_data_error: no hardware backend in host simulation`.
+
+This download is not flight qualification. The onboard writer is experimental pending physical timing validation. Physical card timing and throughput have not been measured. A demo port has no physical card.
+
+The existing USB bench JSON/CSV export is not an Explorer flight log.
+
 ## Not available yet
 
-**The firmware does not yet create onboard `.bbl` files, list files, or transfer them to the computer.** The download control is explicitly disabled. The existing USB bench JSON/CSV export is not an Explorer flight log.
-
-USB removable-drive mode is also not implemented. That needs a firmware USB mass-storage interface and exclusive ownership of the SD card. A future transition must stop and finalize logging before exposing the card, exclude flight operation while the computer owns it, and require safe eject before returning control. Read-only export should be the initial design, avoiding host filesystem writes. There is no mass-storage command behind this panel.
+USB removable-drive mode is not implemented. That needs a firmware USB mass-storage interface and exclusive ownership of the SD card. A future transition must stop and finalize logging before exposing the card, exclude flight operation while the computer owns it, and require safe eject before returning control. Read-only export should be the initial design, avoiding host filesystem writes. There is no mass-storage command behind this panel.
 
 The original binary encoder and bounded capture FIFO are groundwork. Earlier standalone C-encoder tests decoded 600 synthetic samples in Explorer with no corrupt frames. This does not demonstrate controller recording or complete Explorer UI semantics: BobFlight logs must not be falsely identified as Betaflight; legacy-computed setpoint/error graphs are not reliable for this format. Direct setpoint and `bobflightError` fields carry the intended values.
 
 ## Firmware behavior
 
-Commands: `sd probe`, `sd status`, `sd cancel`. Every reply ends with `sd_end: 1`.
+Commands: `sd probe`, `sd status`, `sd cancel`, and `sd read <sector>`. Probe, status, and cancel replies end with `sd_end: 1`. A sector read ends with `sd_data_end: 1`.
 
 The start guard requires disarmed state, no motor test, no calibration, USB connected, no pending bootloader entry and no already-running probe. The board must provide a supported SD capability and a high-resolution clock.
 
@@ -58,7 +67,7 @@ Before flashing, remove propellers, disconnect motor power, leave ARM inactive, 
 
 After reconnecting, verify version, board identity, `storage` and saved configuration against the backup. In Blackbox, click **Check SD card** once. Expect a completed probe, roughly the card's marketed capacity, and a filesystem hint; keep the raw reply. A refusal/error is not a reason to format the card or bypass a guard. Stop on unexpected motor activity, reset, lost configuration or unreliable USB. No arming or flight test is required for this diagnostic.
 
-The next implementation milestone is safe filesystem-backed file creation and recording, then verified file retrieval. It remains unfinished.
+Onboard `BFLxxxxx.BBL` creation, recording, and read-only retrieval over `sd read` are in this tree. They are not flight qualification, and a successful software check does not by itself prove a physical card.
 
 ## sdprobe2: physical GPIO input correction
 
