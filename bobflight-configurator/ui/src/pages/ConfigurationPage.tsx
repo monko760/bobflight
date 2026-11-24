@@ -2,10 +2,9 @@ import { useState } from "react";
 import { useHost } from "../hooks/useHost";
 
 /**
- * Configuration page — FW-locked surface.
- * Features / Orientation / Motor protocol / Mixer are honest-disabled:
- * FW has no Configuration get/set yet. Optional read-only crumbs from
- * existing CLI `status` only. Rate/PID editors stay on Rates/PID tabs.
+ * Configuration page — read-only status crumbs plus notes for settings that
+ * live on other tabs. No buttons for features, orientation, motor protocol,
+ * or mixer: those controls are not on this page.
  */
 
 const CONFIG_CRUMB_FIELDS = [
@@ -19,17 +18,27 @@ const CONFIG_CRUMB_FIELDS = [
 
 type ConfigCrumbField = (typeof CONFIG_CRUMB_FIELDS)[number];
 
-const CONFIG_DISABLED_REASON = "FW has no Configuration get/set yet.";
-
-const DISABLED_SECTIONS = [
-  { id: "features", title: "Features", action: "Edit features…" },
-  { id: "orientation", title: "Orientation", action: "Set orientation…" },
+const UNSUPPORTED_SECTIONS = [
+  {
+    id: "features",
+    title: "Features",
+    body: "Firmware has no features get/set command. Air mode is the PID tab setting airmode. There is no feature-flag control on this page.",
+  },
+  {
+    id: "orientation",
+    title: "Orientation",
+    body: "Board alignment is set on the Sensors tab (align_board_roll, align_board_pitch, align_board_yaw). This page does not edit it.",
+  },
   {
     id: "motor",
     title: "Motor protocol",
-    action: "Configure motor protocol…",
+    body: "DShot 300/600 is set on the Motors tab (dshot 300 or dshot 600). This page does not edit it.",
   },
-  { id: "mixer", title: "Mixer", action: "Configure mixer…" },
+  {
+    id: "mixer",
+    title: "Mixer",
+    body: "Firmware mixer is a read-only quad report. Motor direction is set on the Motors tab. There is no mixer-type control on this page.",
+  },
 ] as const;
 
 export function ConfigurationPage() {
@@ -70,24 +79,14 @@ export function ConfigurationPage() {
         <p className="fail">Disconnected — connect on the Connect page first.</p>
       )}
 
-      <div className="banner-warn" role="status">
-        Disabled: {CONFIG_DISABLED_REASON}
+      <div className="banner-warn" role="status" data-testid="configuration-unsupported">
+        Features, orientation, motor protocol, and mixer are not edited on this page.
       </div>
 
-      {DISABLED_SECTIONS.map((section) => (
-        <section key={section.id} style={{ marginTop: "1rem" }}>
+      {UNSUPPORTED_SECTIONS.map((section) => (
+        <section key={section.id} style={{ marginTop: "1rem" }} data-testid={`configuration-${section.id}`}>
           <h3>{section.title}</h3>
-          <div className="row" style={{ alignItems: "center" }}>
-            <button
-              type="button"
-              className="primary"
-              disabled
-              title={`Disabled: ${CONFIG_DISABLED_REASON}`}
-            >
-              {section.action}
-            </button>
-          </div>
-          <p className="muted">Disabled: {CONFIG_DISABLED_REASON}</p>
+          <p>{section.body}</p>
         </section>
       ))}
 

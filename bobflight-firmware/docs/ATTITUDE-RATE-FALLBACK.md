@@ -49,7 +49,10 @@ than level; that is the chosen trade-off against dropping the craft.
 On the ground nothing changes: leveled arming is still refused without valid
 attitude and within 20 degrees of level. Disarmed, no fallback is reported.
 
-## Readout (names pending Config Lead freeze)
+## Readout (names frozen with Config Lead)
+
+Adding a reason or `attitude_state` value is a contract change: the strict
+Configurator parser rejects the whole `modes` reply. Coordinate first.
 
 `modes` (modes_api 2, additive keys after `mode_conflict`):
 

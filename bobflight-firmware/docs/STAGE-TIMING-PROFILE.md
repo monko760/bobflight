@@ -17,7 +17,7 @@ No loop-rate defaults, PID gains, scheduler deadline/divider policy, motor limit
 calibration policy or board capabilities change. Existing safety and adaptive
 rate guards remain active. Profiling can itself cause a guard to reduce the loop
 rate; the profiler stops on that change and neither suppresses nor reverses it.
-This change is independent of Acro validity PR #103, which still requires review.
+This change is independent of Acro validity PR #103, which is merged on main.
 
 ## CLI and operation
 

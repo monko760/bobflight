@@ -2,7 +2,7 @@
 import type { CliCommand } from './types';
 export type ControlMode='angle'|'acro'|'horizon';
 export interface ModeRow {name:'ARM'|'ANGLE'|'ACRO'|'HORIZON';enabled:boolean;aux:number;minUs:number;maxUs:number;active:boolean}
-/** N1 leveled-mode rate fallback (names pending Config Lead freeze). */
+/** N1 leveled-mode rate fallback (frozen; a new reason or state value is a contract change). */
 export type LevelFallbackReason='none'|'attitude-invalid'|'failsafe-gravity-unqualified';
 export type AttitudeState='valid'|'uninitialized'|'accel-invalid'|'gravity-timeout'|'recovering';
 export const LEVEL_FALLBACK_REASONS:readonly LevelFallbackReason[]=['none','attitude-invalid','failsafe-gravity-unqualified'];
