@@ -23,8 +23,11 @@ this patch replaces it with mode-specific tests rather than removing coverage.
 
 - Keep gyro/time validity separate from attitude-estimator availability.
 - Acro uses valid finite body-rate samples without requiring the Euler solution.
-- Angle, Horizon and staged HOLD/LAND still require valid attitude. Failsafe
-  leveling also retains the existing qualified-gravity check.
+- Angle, Horizon and staged HOLD/LAND still require valid attitude to level.
+  Failsafe leveling also retains the existing qualified-gravity check.
+  Superseded in part by N1 ([ATTITUDE-RATE-FALLBACK.md](ATTITUDE-RATE-FALLBACK.md)):
+  without attitude they now fly rate control instead of disarming in the air,
+  and the quaternion estimator no longer has a pitch singularity.
 - A rejected/nonfinite gyro sample, zero/backward gyro timestamp, or a sample
   gap above the existing 10 ms bound disarms and invalidates attitude.
 - First-sample timing has an explicit initialized flag, so timestamp zero is

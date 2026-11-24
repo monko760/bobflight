@@ -627,6 +627,13 @@ if(BOBFLIGHT_HOST_SMOKE AND NOT CMAKE_CROSSCOMPILING)
   target_sources(bobflight_control_mode_test PRIVATE src/flight/mode_range.c src/flight/horizon.c)
   target_link_libraries(bobflight_control_mode_test m)
   add_test(NAME control_mode_routing COMMAND bobflight_control_mode_test)
+  add_executable(bobflight_attitude_flip_test
+    src/sched/scheduler.c src/sched/tasks.c src/flight/pid.c src/flight/filter.c src/flight/attitude.c
+    src/flight/rates.c src/flight/config.c src/flight/mode_range.c src/flight/horizon.c
+    tests/host_attitude_flip.c tests/scheduler_profile_hal_stub.c tests/pid_diag_stub.c tests/gyro_filter_dt_stub.c)
+  target_compile_definitions(bobflight_attitude_flip_test PRIVATE BOBFLIGHT_HOST=1 BOBFLIGHT_FLIGHT_ENABLE=1)
+  target_link_libraries(bobflight_attitude_flip_test m)
+  add_test(NAME attitude_flip_rate_fallback COMMAND bobflight_attitude_flip_test)
   add_test(NAME control_mode_cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_SOURCE_DIR}/tests/host_control_mode_cli.py $<TARGET_FILE:bobflight_host>)
   add_test(NAME loop_status_cli COMMAND ${Python3_EXECUTABLE}

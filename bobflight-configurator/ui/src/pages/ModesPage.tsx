@@ -1,5 +1,6 @@
 import {StoragePanel} from "../components/StoragePanel";
 import {ModeReceiver} from '../components/ModeReceiver';
+import {LevelFallbackReadout} from '../components/LevelFallbackReadout';
 /* SPDX-License-Identifier: Apache-2.0 */
 import {useEffect,useState} from 'react';
 import {parseModes,modeRangeCommand,controlModeCommand,canEditModeRanges,canSelectControlMode,type ModeRow} from '../protocol';
@@ -51,8 +52,9 @@ export function ModesPage(){
    <p>Last snapshot: {new Date(q.loadedAt).toLocaleTimeString()}. Armed: {s.armed?'yes':'no'}; motor bench: {s.benchActive?'active':'inactive'}; calibration: {s.apiVersion===1?'not reported':s.calibrationActive?'active':'inactive'}; receiver fresh: {s.rxFresh?'yes':'no'}. These are snapshots, not continuously updated indicators.</p>
    {s.apiVersion===2&&<fieldset disabled={!modeEditable}>
     <legend>Manual control mode</legend>
-    <p>Requested at snapshot: <strong>{modeLabel(s.requestedMode)}</strong>. Last controller pass: <strong>{modeLabel(s.effectiveMode)}</strong>. The controller can override the request during failsafe.</p>
+    <p>Requested at snapshot: <strong>{modeLabel(s.requestedMode)}</strong>. Last controller pass: <strong>{modeLabel(s.effectiveMode)}</strong>. The controller can override the request during failsafe or rate fallback.</p>
     <p>{descriptions.ANGLE} {descriptions.ACRO} {descriptions.HORIZON}</p>
+    <LevelFallbackReadout snapshot={s}/>
     <button disabled={!modeEditable||s.requestedMode==='angle'} onClick={()=>void selectMode('angle')}>Angle</button>{' '}
     <button disabled={!modeEditable||s.requestedMode==='acro'} onClick={()=>void selectMode('acro')}>Acro</button>{' '}
     <button disabled={!modeEditable||s.requestedMode==='horizon'} onClick={()=>void selectMode('horizon')}>Level (Horizon)</button>
@@ -80,7 +82,7 @@ export function ModesPage(){
    })}
   </>}
   <p>AUX1–12 use equivalent microseconds (900–2100), not measured PWM pulses. In the main image these control-mode ranges do not switch flight modes. Live switch positions update above; refresh modes to read the controller’s applied mode snapshot.</p>
-  <p>Apply on the ARM range, when that range is the live switch, updates the running configuration. Manual mode buttons update the selected mode. Save to controller retains those supported changes after a power cycle. Angle, Acro and Level ranges are not edited here. Acro uses the calibrated, healthy, fresh gyro without requiring the accelerometer; Angle and Level require qualified attitude. Keep props removed for this functional test.</p>
+  <p>Apply on the ARM range, when that range is the live switch, updates the running configuration. Manual mode buttons update the selected mode. Save to controller retains those supported changes after a power cycle. Angle, Acro and Level ranges are not edited here. Acro uses the calibrated, healthy, fresh gyro without requiring the accelerometer; Angle and Level require qualified attitude to arm, and the selected Angle or Level mode falls back to rate (Acro) control in the air while attitude is unavailable. Keep props removed for this functional test.</p>
   {reply&&<p role="status">{reply}</p>}
  </div>;
 }
