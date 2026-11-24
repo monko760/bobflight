@@ -314,21 +314,13 @@ export function SetupPage() {
         )}
       </section>
 
-      {/* Accel calibrate — honest disable only; no CLI yet */}
-      <section style={{ marginTop: "1.25rem" }}>
-        <h3>Accel calibrate</h3>
-        <div className="row" style={{ alignItems: "center" }}>
-          <button
-            type="button"
-            className="primary"
-            disabled
-            title="Disabled: FW CLI calibrate not exposed yet (waiting FW Lead)"
-          >
-            Calibrate accel…
-          </button>
-        </div>
-        <p className="muted">
-          Disabled: FW CLI calibrate not exposed yet (waiting FW Lead)
+      {/* Accel calibration lives on Sensors (`calibrate_accel`). No control on this page. */}
+      <section style={{ marginTop: "1.25rem" }} data-testid="setup-accel-cal">
+        <h3>Accelerometer calibration</h3>
+        <p>
+          Use the Sensors tab. It sends <code>calibrate_accel level</code> for level
+          calibration and the advanced six-face <code>calibrate_accel</code> commands.
+          This Setup page does not calibrate the accelerometer.
         </p>
       </section>
 

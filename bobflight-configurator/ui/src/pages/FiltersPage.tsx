@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHost } from "../hooks/useHost";
 import { canSaveStorage, SETTINGS_KEYS, type SettingsKey } from "../protocol";
-import { ensureMockConnected } from "../protocol/ensureConnected";
 import {
   FILTER_KEYS,
-  mockSettingsApi,
   validateFilterHz,
   type FilterKey,
 } from "../tuning/mockSettingsApi";
@@ -34,7 +32,6 @@ import {
   midSaveFailure,
   numberFromInput,
   storageSnapshotFromRaw,
-  withMidSave,
 } from "../tuning/saveHonesty";
 import {
   RpmCancelled,
@@ -66,8 +63,13 @@ function lpfFieldProblem(key: FilterKey, n: number): string | null {
   return null;
 }
 
+/** No live read: blank, not 0 and not the 320/53 demo defaults. */
 function emptyFilters(): FiltersConfig {
-  return { gyro_lpf_hz: 0, dterm_lpf_hz: 0 };
+  return { gyro_lpf_hz: Number.NaN, dterm_lpf_hz: Number.NaN };
+}
+
+function sameFilter(a: number, b: number): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b));
 }
 
 function formatSettingValue(n: number): string {
@@ -87,22 +89,6 @@ function mapFiltersFromAll(all: Record<string, string>): FiltersConfig {
   return next;
 }
 
-/** FALLBACK ONLY — local mockSettingsApi when host settings throw. */
-function loadFiltersViaFallback(): FiltersConfig {
-  const next = emptyFilters();
-  for (const key of FILTER_KEYS) {
-    const reply = mockSettingsApi.get(key);
-    const idx = reply.indexOf("=");
-    if (idx <= 0) {
-      throw new Error(reply === "unknown key" ? "unknown key" : reply);
-    }
-    const n = Number(reply.slice(idx + 1));
-    if (!Number.isFinite(n)) throw new Error(`get failed: ${reply}`);
-    next[key] = n;
-  }
-  return next;
-}
-
 function settingsErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   // The FC's own refusal line is shown verbatim (e.g. "set failed: gyro_notch1_hz must be ...").
@@ -118,7 +104,6 @@ export function FiltersPage() {
   const [values, setValues] = useState<FiltersConfig>(emptyFilters);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [usingFallback, setUsingFallback] = useState(false);
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   /** A save already sent `set` calls. Further saves stay off until a reload. */
@@ -159,6 +144,26 @@ export function FiltersPage() {
   /** A disconnect cut a load short: read the FC again once it reconnects. */
   const reloadOnConnect = useRef(false);
 
+  /** No live data: blank fields. Never the 320/53 demo memory. */
+  const blankUnread = useCallback(() => {
+    setValues(emptyFilters());
+    setLoadedValues(emptyFilters());
+    setNotchSnap(emptyNotchSnapshot());
+    setRpmSnap(emptyRpmSnapshot());
+    setRpmDraft({ harmonics: "", minHz: "", q: "" });
+    setDrafts({
+      1: { enabled: false, center: "", cutoff: "" },
+      2: { enabled: false, center: "", cutoff: "" },
+    });
+    setReady(false);
+    setFcRead(false);
+    setSettingsBusy(null);
+    setReadErr(null);
+    setErr(null);
+    setMsg(null);
+    setSaveBlocked(false);
+  }, []);
+
   /** Re-read the RPM filter (`get` x4 + `rpm_filter`); inputs return to what the FC holds. */
   const reloadRpm = useCallback(async (schema: number | null, signal?: AbortSignal) => {
     const snap = await readRpm(host, signal ?? rpmLife.current?.signal);
@@ -186,22 +191,25 @@ export function FiltersPage() {
     const signal = ctl.signal;
     // While the gate refuses getAllSettings nothing is known about the FC: values unknown, no fallback.
     const unknownFc = (message: string, final: boolean) => {
+      setValues(emptyFilters());
+      setLoadedValues(emptyFilters());
       setNotchSnap(emptyNotchSnapshot());
       setRpmSnap(emptyRpmSnapshot());
       setRpmDraft({ harmonics: "", minHz: "", q: "" });
-      setUsingFallback(false);
       setReady(false);
       setFcRead(false);
       setSettingsBusy({ message, final });
       if (final) setSaveBlocked(false);
     };
+    if (host.getConnectionStatus() !== "connected") {
+      blankUnread();
+      if (loadCtl.current === ctl) loadCtl.current = null;
+      return;
+    }
     setErr(null);
     setReadErr(null);
     setFcRead(false);
-    let linked = false;
     try {
-      await ensureMockConnected(host);
-      linked = true;
       let all: Record<string, string>;
       try {
         // Only the gate's own refusal is retried (nothing was sent); FC replies / transport errors are not.
@@ -219,7 +227,6 @@ export function FiltersPage() {
       const mapped = mapFiltersFromAll(all);
       setValues(mapped);
       setLoadedValues(mapped);
-      setUsingFallback(false);
       setReady(true);
       const notches = await reloadNotches();
       if (signal.aborted) return;
@@ -232,38 +239,17 @@ export function FiltersPage() {
       if (e instanceof RpmCancelled || signal.aborted) return; // unmounted, newer load or disconnect
       if (loadCtl.current === ctl) loadCtl.current = null;
       setSettingsBusy(null);
-      if (linked) {
-        // A controller is linked: its read failed. Never switch to demo memory; Defaults and Save stay off.
-        setNotchSnap(emptyNotchSnapshot());
-        setRpmSnap(emptyRpmSnapshot());
-        setRpmDraft({ harmonics: "", minHz: "", q: "" });
-        setUsingFallback(false);
-        setReady(false);
-        setSaveBlocked(false);
-        setReadErr(`Could not read the controller's filter settings (${settingsErrorMessage(e)}). Nothing was changed. Defaults and Save stay disabled until a read succeeds.`);
-        return;
-      }
-      try {
-        const fb = loadFiltersViaFallback();
-        setValues(fb);
-        setLoadedValues(fb);
-        // No FC behind the fallback: notch rows stay unknown (never 0/off).
-        setNotchSnap(emptyNotchSnapshot());
-        setRpmSnap(emptyRpmSnapshot());
-        setRpmDraft({ harmonics: "", minHz: "", q: "" });
-        setUsingFallback(true);
-        setReady(true);
-        setSaveBlocked(false);
-        setErr(
-          `Protocol settings unavailable (${settingsErrorMessage(e)}); using local mockSettingsApi fallback`,
-        );
-      } catch (fe) {
-        setErr(settingsErrorMessage(fe));
-        setReady(false);
-        setSaveBlocked(false);
-      }
+      // A controller is linked: its read failed. Never fill demo memory; Defaults and Save stay off.
+      setValues(emptyFilters());
+      setLoadedValues(emptyFilters());
+      setNotchSnap(emptyNotchSnapshot());
+      setRpmSnap(emptyRpmSnapshot());
+      setRpmDraft({ harmonics: "", minHz: "", q: "" });
+      setReady(false);
+      setSaveBlocked(false);
+      setReadErr(`Could not read the controller's filter settings (${settingsErrorMessage(e)}). Nothing was changed. Defaults and Save stay disabled until a read succeeds.`);
     }
-  }, [host, reloadNotches, reloadRpm]);
+  }, [host, reloadNotches, reloadRpm, blankUnread]);
 
   useEffect(() => {
     void load();
@@ -276,18 +262,19 @@ export function FiltersPage() {
       if (s === last) return;
       last = s;
       if (s === "connected") {
-        if (reloadOnConnect.current) { reloadOnConnect.current = false; void load(); }
+        reloadOnConnect.current = false;
+        void load();
         return;
       }
       const running = loadCtl.current;
       if (running && !running.signal.aborted) {
         running.abort();
         loadCtl.current = null;
-        reloadOnConnect.current = true;
-        setSettingsBusy(null);
       }
+      reloadOnConnect.current = true;
+      blankUnread();
     });
-  }, [host, load]);
+  }, [host, load, blankUnread]);
 
   function updateField(key: FilterKey, raw: string) {
     setValues((prev) => ({ ...prev, [key]: numberFromInput(raw) }));
@@ -335,30 +322,10 @@ export function FiltersPage() {
         }
       }
 
-      if (usingFallback) {
-        for (const key of FILTER_KEYS) {
-          const reply = mockSettingsApi.set(key, values[key]);
-          if (!reply.startsWith("ok ")) {
-            const line = reply === "unknown key" || reply === "set failed" ? reply : "set failed";
-            if (sent > 0) { setSaveBlocked(true); setErr(withMidSave(line)); }
-            else setErr(line);
-            return;
-          }
-          sent += 1;
-        }
-        const saveReply = mockSettingsApi.save();
-        if (saveReply !== "saved") {
-          setSaveBlocked(true);
-          setErr(withMidSave(saveReply === "save failed" ? "save failed" : saveReply));
-          return;
-        }
-        setMsg("saved");
-        setSavedRev((r) => r + 1);
-        await load();
+      if (host.getConnectionStatus() !== "connected") {
+        setErr("Disconnected. Nothing was saved.");
         return;
       }
-
-      await ensureMockConnected(host);
       for (const key of FILTER_KEYS) {
         await sendSet(() => host.setSetting(key as SettingsKey, formatSettingValue(values[key])));
       }
@@ -422,7 +389,7 @@ export function FiltersPage() {
 
   const rows = notchRows(notchSnap);
   const supported = notchesSupported(notchSnap);
-  const lpfDirty = FILTER_KEYS.some((k) => values[k] !== loadedValues[k]);
+  const lpfDirty = FILTER_KEYS.some((k) => !sameFilter(values[k], loadedValues[k]));
   const rpm = rpmView(rpmSnap, notchSnap.schema);
   const rpmDirty = rpmDirtyKeys(rpm, rpmDraft);
   const rpmHint = rpmDirty.length ? rpmDraftProblem(rpm, rpmDraft) : null;
@@ -434,7 +401,7 @@ export function FiltersPage() {
   const draftValid = filterDraftValid(values) && notchOk && !rpmHint;
   const storageSnap = storageSnapshotFromRaw(notchSnap.storageRaw);
   const canSave = ready && !settingsBusy && !saving && !saveBlocked && !postFlashGate && draftValid && pageDirty
-    && (usingFallback || canSaveStorage(storageSnap, connectionStatus === "connected", saving));
+    && canSaveStorage(storageSnap, connectionStatus === "connected", saving);
 
   function updateRpmDraft(patch: Partial<RpmDraft>) {
     setRpmDraft((prev) => ({ ...prev, ...patch }));
@@ -470,11 +437,17 @@ export function FiltersPage() {
       <p className="muted">
         Gyro and D-term low-pass, two manual gyro notches (FW schema 8) and the RPM filter (FW schema 9). Protocol{" "}
         <code>get/set/save</code> and <code>defaults filters</code> (this tab only). Keys: {protocolKeys.join(", ") || FILTER_KEYS.join(", ")}.
-        Range: <code>0</code> = off; else <code>10..1000</code> Hz. Defaults{" "}
-        <code>320</code> / <code>53</code>.
+        Range: <code>0</code> = off; else <code>10..1000</code> Hz. A controller that has been read uses firmware defaults of{" "}
+        <code>320</code> Hz and <code>53</code> Hz. Nothing is filled in until that read succeeds.
       </p>
 
-      {!ready && !err && !readErr && !settingsBusy?.final && (
+      {connectionStatus !== "connected" && (
+        <p className="banner-warn" data-testid="filters-disconnected">
+          Disconnected. Filter settings are not loaded. Connect on the Connect page. No demo values are shown.
+        </p>
+      )}
+
+      {connectionStatus === "connected" && !ready && !err && !readErr && !settingsBusy?.final && (
         <p className="muted">Connecting / loading settings…</p>
       )}
       {settingsBusy && <p className="fail" data-testid="settings-busy">{settingsBusy.message}</p>}
@@ -500,7 +473,7 @@ export function FiltersPage() {
                 step="1"
                 min={0}
                 max={1000}
-                disabled={!!settingsBusy}
+                disabled={!!settingsBusy || !ready}
                 value={settingsBusy ? "unknown" : (Number.isFinite(values[key]) ? values[key] : "")}
                 aria-invalid={ready && !settingsBusy && lpfFieldProblem(key, values[key]) !== null ? true : undefined}
                 onChange={(e) => updateField(key, e.target.value)}
@@ -517,7 +490,7 @@ export function FiltersPage() {
           Centre <code>0</code> = off, else <code>20..1000</code> Hz; cutoff (lower -3 dB edge) must be
           above 0 and below the centre. The FC checks the centre against the running loop rate and
           reports the result below; its reply is shown as sent.
-          {fcRead && !supported && !notchSnap.notRead && !usingFallback && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
+          {fcRead && !supported && !notchSnap.notRead && " This FC does not report gyro notches (older firmware): rows are read-only and unknown."}
         </p>
         {notchSnap.notRead && <p className="fail" data-testid="notch-not-read">{notchSnap.notRead}</p>}
         <table style={{ width: "100%", marginTop: "0.75rem" }}>
@@ -582,7 +555,7 @@ export function FiltersPage() {
           else <code>1..3</code>; minimum <code>50..200</code> Hz; Q <code>1..10</code> (sent ×100 as{" "}
           <code>rpm_filter_q_x100</code>). The FC trims harmonics to the loop rate and reports the state
           and each motor&apos;s tracked frequency below, exactly as sent.
-          {fcRead && !rpm.supported && !rpm.busy && !usingFallback && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
+          {fcRead && !rpm.supported && !rpm.busy && " This FC does not report the RPM filter (older firmware): values are read-only and unknown."}
         </p>
         {rpm.busy && <p className="fail" data-testid="rpm-busy">{rpm.busy}</p>}
         <div className="tuning-grid">
@@ -658,10 +631,9 @@ export function FiltersPage() {
           savedRevision={savedRev}
           pageDirty={pageDirty}
           disabled={!!settingsBusy || !ready || postFlashGate || saving}
-          localFallback={usingFallback ? async () => { mockSettingsApi.defaults("filters"); await load(); } : undefined}
         />
       </div>
-      {ready && !usingFallback && fcRead && <AccelCalSavedNote raw={notchSnap.storageRaw ?? ""} />}
+      {ready && fcRead && <AccelCalSavedNote raw={notchSnap.storageRaw ?? ""} />}
       {msg && <p className="muted">Last reply: {msg}</p>}
       {err && <p className="fail" data-testid="save-error">{err}</p>}
       {saveBlocked && !readErr && !settingsBusy?.final && (

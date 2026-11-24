@@ -19,6 +19,7 @@ import { PowerBatteryPage } from "../src/pages/PowerBatteryPage";
 import { SensorsPage } from "../src/pages/SensorsPage";
 import { ModesPage } from "../src/pages/ModesPage";
 import { PortsPage } from "../src/pages/PortsPage";
+import { ConfigurationPage } from "../src/pages/ConfigurationPage";
 import { SNAPSHOT_NOT_SENT_TEXT, SNAPSHOT_READBACK_NOT_SENT_TEXT, useConfigSnapshot } from "../src/pages/useConfigSnapshot";
 import { RatesPage } from "../src/pages/RatesPage";
 import { MotorsPage } from "../src/pages/MotorsPage";
@@ -946,6 +947,32 @@ async function main() {
     assert.ok(await waitFor(() => !!storageError() || /Saved to controller/.test(shown("storage-message") ?? ""), 3000));
     assert.equal(storageError(), "The controller replied “saved” but its storage status does not read back as saved.");
     assert.ok(!/Saved to controller flash and verified/.test(pageText()));
+    await r.done();
+  });
+
+  await test("honesty: Configuration and Ports hide unsupported editors; Modes does not offer dead range inputs", async () => {
+    const r = await rig();
+    r.render(<ConfigurationPage />);
+    await sleep(30);
+    assert.match(pageText(), /are not edited on this page/);
+    assert.match(pageText(), /Sensors tab/);
+    assert.match(pageText(), /Motors tab/);
+    assert.doesNotMatch(pageText(), /FW has no Configuration get\/set yet/);
+    assert.doesNotMatch(pageText(), /Edit features/);
+    assert.doesNotMatch(pageText(), /Set orientation/);
+    assert.doesNotMatch(pageText(), /Configure motor protocol/);
+    assert.doesNotMatch(pageText(), /Configure mixer/);
+    r.render(<PortsPage />);
+    assert.ok(await waitFor(() => pageText().includes("Unsupported roles"), 4000), pageText().slice(0, 400));
+    assert.match(pageText(), /GPS, MSP, VTX and telemetry roles are not in this firmware/);
+    assert.match(pageText(), /diff and diff all print the same changed-settings report/);
+    const fakeRoles = container.findAll((e) => (e.tagName === "INPUT" || e.tagName === "SELECT") && /gps|msp|vtx|telemetry/i.test(`${e.getAttribute("aria-label") ?? ""} ${visibleText(e)}`));
+    assert.equal(fakeRoles.length, 0, "unsupported port roles have no controls");
+    r.render(<ModesPage />);
+    assert.ok(await waitFor(() => pageText().includes("Unsupported for mode selection"), 4000), pageText().slice(0, 700));
+    const deadRanges = container.findAll((e) => (e.tagName === "INPUT" || e.tagName === "SELECT") && /^(ANGLE|ACRO|HORIZON) /.test(e.getAttribute("aria-label") ?? ""));
+    assert.equal(deadRanges.length, 0, "Angle/Acro/Level ranges are not editable");
+    assert.equal(container.findAll((e) => e.tagName === "BUTTON" && /Apply (ANGLE|ACRO|Level)/.test(visibleText(e))).length, 0);
     await r.done();
   });
 
