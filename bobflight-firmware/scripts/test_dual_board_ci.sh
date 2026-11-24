@@ -87,11 +87,12 @@ assert_host_cli() {
   local board="$1" out="$2" ok=0
   need_in "$out" "BobFlight CLI" || ok=1
   need_in "$out" "arm: disarmed" || ok=1
+  need_in "$out" "arm_cli: check" || ok=1
   # Boot lockout: failsafe is ACTIVE until the first valid RX frame
   # (failsafe_active(), failsafe.c); no receiver in the host CLI, so status
   # says ACTIVE. Expectation fix only; firmware output is unchanged.
   need_in "$out" "failsafe: ACTIVE" || ok=1
-  need_in "$out" "arm refused (gyro unhealthy or failsafe)" || ok=1
+  need_in "$out" "arm refused: gyro-unhealthy" || ok=1
   need_in "$out" "disarmed" || ok=1
   need_in "$out" "unknown — try help" || ok=1
   need_in "$out" "bobflight host smoke: ok (cascade exercised)" || ok=1

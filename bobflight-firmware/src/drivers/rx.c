@@ -24,13 +24,40 @@ static uint32_t g_stats_ms;
 /* Last valid RC frame, accepted or held back by the link gate. */
 static bool g_raw_seen;
 static uint32_t g_last_raw_frame;
+/* Arrival times of the last RX_LINK_RATE_FRAMES valid RC frames (accepted or
+ * held back), newest at g_rate_head-1; g_rate_count saturates at the size. */
+static uint32_t g_rate_ms[RX_LINK_RATE_FRAMES];
+static unsigned g_rate_head, g_rate_count;
+
+static void note_raw_frame(uint32_t now)
+{
+    g_raw_seen = true; g_last_raw_frame = now;
+    g_rate_ms[g_rate_head] = now;
+    g_rate_head = (g_rate_head + 1u) % RX_LINK_RATE_FRAMES;
+    if (g_rate_count < RX_LINK_RATE_FRAMES) g_rate_count++;
+}
+
+/* Slow (~4 Hz) link: the last RX_LINK_RATE_FRAMES valid RC frames span more
+ * than RX_LINK_RATE_SPAN_MS. Until that many frames have arrived since rx_init()
+ * the rate is unknown and treated as slow (fail closed). Measured from the
+ * frames themselves, never from the CRSF rf_mode byte, which is not a rate:
+ * TBS uses 0 for 4 fps while ExpressLRS 4.x uses 0 for 25 Hz (900 MHz). */
+static bool link_rate_low(void)
+{
+    if (g_rate_count < RX_LINK_RATE_FRAMES) return true;
+    /* Full ring: the oldest entry is at g_rate_head, the newest just before it. */
+    const uint32_t oldest = g_rate_ms[g_rate_head];
+    const uint32_t newest = g_rate_ms[(g_rate_head + RX_LINK_RATE_FRAMES - 1u) % RX_LINK_RATE_FRAMES];
+    return (uint32_t)(newest - oldest) > RX_LINK_RATE_SPAN_MS;
+}
 
 static rx_loss_reason_t link_gate(uint32_t now)
 {
     if (!g_stats_seen) return RX_LOSS_NONE; /* absent: frames-only, as before */
     if ((uint32_t)(now - g_stats_ms) > RX_LINK_STATS_STALE_MS) return RX_LOSS_STATS_STALE;
     if (g_stats.uplink_lq == 0u) return RX_LOSS_LQ_ZERO;
-    if (g_stats.rf_mode == CRSF_RF_PROFILE_4FPS) return RX_LOSS_RF_MODE_LOW; /* fresh only: stale returned above */
+    /* rf_mode is reported only (receiver/blackbox); it never closes the gate. */
+    if (link_rate_low()) return RX_LOSS_LINK_RATE_LOW;
     return RX_LOSS_NONE;
 }
 
@@ -43,6 +70,7 @@ void rx_init(void)
     memset(&g_stats, 0, sizeof(g_stats));
     g_stats_ms=0;
     g_raw_seen=false; g_last_raw_frame=0;
+    memset(g_rate_ms, 0, sizeof(g_rate_ms)); g_rate_head=0; g_rate_count=0;
     g_proto = &rx_crsf;
     if (g_proto->init) {
         (void)g_proto->init();
@@ -86,7 +114,7 @@ void rx_stub_set_channels(const float *ch, unsigned n, bool fresh)
     }
     if (fresh) {
         const uint32_t now = hal_millis();
-        g_raw_seen = true; g_last_raw_frame = now;
+        note_raw_frame(now);
         /* Stats say the link is gone: a valid-looking frame (e.g. a receiver
          * repeating held or preset controls) must not refresh anything. */
         if (link_gate(now) != RX_LOSS_NONE) return;
@@ -154,7 +182,7 @@ const char *rx_loss_reason_name(rx_loss_reason_t reason)
     case RX_LOSS_NO_FRAMES: return "no-frames";
     case RX_LOSS_LQ_ZERO: return "lq-zero";
     case RX_LOSS_STATS_STALE: return "stats-stale";
-    case RX_LOSS_RF_MODE_LOW: return "rf-mode-low";
+    case RX_LOSS_LINK_RATE_LOW: return "link-rate-low";
     default: return "no-frames";
     }
 }

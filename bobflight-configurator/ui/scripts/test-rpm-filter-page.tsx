@@ -228,7 +228,7 @@ async function main() {
 
   await test("refused set through Save (armed): FC line verbatim, inputs show what the FC holds, no save (R3)", async () => {
     const t = await rig("ok");
-    assert.equal((await t.mock.sendCommand("arm")).trim(), "armed");
+    assert.equal(t.mock.simulateArmSwitch(true), true, "N2: armed by the simulated radio ARM switch");
     await type(input("rpm_filter_harmonics"), "1");
     await type(input("rpm_filter_q"), "3.5");
     const before = t.ops.length;
@@ -469,7 +469,7 @@ async function main() {
 
   await test("motor_poles refused (armed): FC line verbatim and input back to the FC value (R3)", async () => {
     const t = await poleRig("ok");
-    await t.mock.sendCommand("arm");
+    t.mock.simulateArmSwitch(true);
     await type(input("motor_poles"), "12");
     await click(button("Set on controller"));
     assert.ok(await waitFor(() => testId("motor-poles-fc-line") !== null));
@@ -619,7 +619,7 @@ async function main() {
     const root: Root = createRoot(container as never);
     flushSync(() => root.render(<MotorPolesPanel host={t.host} fallback={fallbackEl} />));
     assert.ok(await waitFor(() => poles() === "14"));
-    await t.mock.sendCommand("arm");
+    t.mock.simulateArmSwitch(true);
     await type(input("motor_poles"), "12");
     const before = t.ops.length;
     const t0 = Date.now();

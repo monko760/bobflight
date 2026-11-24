@@ -32,6 +32,7 @@ bool hal_usb_cdc_connected(void) { return usb; }
 arm_state_t arming_state(void) { return arm; }
 void arming_disarm(void) { arm = ARM_DISARMED; }
 bool arming_try_arm(void) { return false; }
+const char *arming_block_reason(void){return "stub";}
 const float *rx_channels(void) { return rc; }
 bool rx_frame_fresh(void) { return true; }
 void rx_poll(void) {}

@@ -5,10 +5,13 @@
  * no radio, absent stats. Every other scenario is a test fixture that models
  * one firmware state; "unknown-token" carries future/invalid tokens and
  * "old-fc" omits the three keys (firmware before CRSF link statistics).
- * "rf-mode-low" is the CRSF 4 fps mode (rf_profile 0) treated as link loss:
- * LQ is still reported, the gate is closed and failsafe is active.
+ * "link-rate-low" (N2) is a ~4 Hz link measured from the RC frames (the last
+ * 8 frames span more than 1 s) treated as link loss: LQ is still reported, the
+ * gate is closed and failsafe is active. "rf-mode-0-ok" is ExpressLRS 4.x at
+ * 900 MHz 25 Hz, which reports rf_mode 0: a healthy link since N2.
+ * "old-rf-mode-low" is firmware before N2, which called any rf_mode 0 a loss.
  */
-export const RECEIVER_LINK_SCENARIOS = ["default", "present-ok", "absent", "lq-zero", "rf-mode-low", "stats-stale", "no-frames", "unknown-token", "old-fc"] as const;
+export const RECEIVER_LINK_SCENARIOS = ["default", "present-ok", "absent", "lq-zero", "link-rate-low", "rf-mode-0-ok", "old-rf-mode-low", "stats-stale", "no-frames", "unknown-token", "old-fc"] as const;
 export type ReceiverLinkMockScenario = typeof RECEIVER_LINK_SCENARIOS[number];
 interface LinkFixture { uart: string; link: string; age: string; frames: string; failsafe: string; lines: string[] }
 const FIXTURES: Record<ReceiverLinkMockScenario, LinkFixture> = {
@@ -16,7 +19,9 @@ const FIXTURES: Record<ReceiverLinkMockScenario, LinkFixture> = {
   "present-ok": { uart: "6", link: "live", age: "4", frames: "1834", failsafe: "0", lines: ["rx_link_stats: present", "rx_link_lq: 87", "rx_loss_reason: none"] },
   "absent": { uart: "6", link: "live", age: "4", frames: "1834", failsafe: "0", lines: ["rx_link_stats: absent", "rx_link_lq: unavailable", "rx_loss_reason: none"] },
   "lq-zero": { uart: "6", link: "lost", age: "612", frames: "1834", failsafe: "1", lines: ["rx_link_stats: present", "rx_link_lq: 0", "rx_loss_reason: lq-zero"] },
-  "rf-mode-low": { uart: "6", link: "lost", age: "420", frames: "1834", failsafe: "1", lines: ["rx_link_stats: present", "rx_link_lq: 64", "rx_loss_reason: rf-mode-low"] },
+  "link-rate-low": { uart: "6", link: "lost", age: "420", frames: "1834", failsafe: "1", lines: ["rx_link_stats: present", "rx_link_lq: 64", "rx_loss_reason: link-rate-low"] },
+  "rf-mode-0-ok": { uart: "6", link: "live", age: "38", frames: "1834", failsafe: "0", lines: ["rx_link_stats: present", "rx_link_lq: 92", "rx_loss_reason: none"] },
+  "old-rf-mode-low": { uart: "6", link: "lost", age: "420", frames: "1834", failsafe: "1", lines: ["rx_link_stats: present", "rx_link_lq: 64", "rx_loss_reason: rf-mode-low"] },
   "stats-stale": { uart: "6", link: "lost", age: "380", frames: "1834", failsafe: "1", lines: ["rx_link_stats: present", "rx_link_lq: unavailable", "rx_loss_reason: stats-stale"] },
   "no-frames": { uart: "6", link: "lost", age: "2400", frames: "1834", failsafe: "1", lines: ["rx_link_stats: present", "rx_link_lq: unavailable", "rx_loss_reason: no-frames"] },
   "unknown-token": { uart: "6", link: "live", age: "4", frames: "1834", failsafe: "0", lines: ["rx_link_stats: partial", "rx_link_lq: 87%", "rx_loss_reason: rf-jammed"] },

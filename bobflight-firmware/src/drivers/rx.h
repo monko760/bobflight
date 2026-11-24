@@ -37,27 +37,40 @@ const char *rx_protocol_name(void);
  * CRSF LINK_STATISTICS (frame type 0x14) link gate. No setting.
  * Until the first valid stats frame since rx_init() (boot, receiver_map or
  * receiver_uart change) the gate is open: loss detection is frames-only.
- * Once stats have been seen, an uplink LQ of 0, an rf_profile of 0 (CRSF
- * 4 fps mode) in the latest FRESH stats frame, or no stats frame for more
- * than RX_LINK_STATS_STALE_MS, closes the gate: valid RC frames are then NOT
- * accepted (channels, frame count and the failsafe loss timer are left
- * untouched), so the existing 250 ms failsafe timeout runs exactly as if the
- * frames had stopped. A link that drops to 4 fps mid-flight therefore goes
- * into failsafe instead of flying on. A fresh stats frame with LQ > 0 and
- * rf_profile != 0 reopens the gate; the next accepted RC frame then clears
- * failsafe under the existing rules (stats alone clear nothing; no automatic
- * re-arm: arming needs a new edge).
- * Reason priority: no-frames > lq-zero > rf-mode-low > stats-stale. Stale
- * stats carry no current LQ or rf_profile, so a stale link always reports
- * stats-stale (also when its last frame had LQ 0 or rf_profile 0).
+ * Once stats have been seen, the gate closes when the latest FRESH stats frame
+ * reports an uplink LQ of 0, when no stats frame arrived for more than
+ * RX_LINK_STATS_STALE_MS, or when the RC frames themselves arrive too slowly
+ * (the last RX_LINK_RATE_FRAMES valid frames span more than RX_LINK_RATE_SPAN_MS,
+ * i.e. a ~4 Hz link such as TBS Crossfire 4 fps; unknown until that many
+ * frames have arrived since rx_init(), and unknown counts as slow). While the
+ * gate is closed valid RC frames are NOT accepted (channels, frame count and
+ * the failsafe loss timer are left untouched), so the existing 250 ms failsafe
+ * timeout runs exactly as if the frames had stopped.
+ * The CRSF rf_mode byte is reported (receiver report, blackbox) but never
+ * closes the gate: it is a vendor-specific index, not a rate. TBS Crossfire
+ * uses 0 for 4 fps, while ExpressLRS 4.x uses 0 for its valid 900 MHz 25 Hz
+ * rate (ExpressLRS 3.x reports 25 Hz as 1). Treating rf_mode 0 as loss would
+ * failsafe a healthy 25 Hz ELRS link.
+ * A fresh stats frame with LQ > 0 and a normal frame rate reopen the gate; the
+ * next accepted RC frame then clears failsafe under the existing rules (stats
+ * alone clear nothing; no automatic re-arm: arming needs a new edge).
+ * Reason priority: no-frames > stats-stale > lq-zero > link-rate-low. Stale
+ * stats carry no current LQ, so a stale link always reports stats-stale (also
+ * when its last frame had LQ 0).
  */
 #define RX_LINK_STATS_STALE_MS 1000u
+/* ~4 Hz link policy (Oct 2 decision): the last 8 valid RC frames spanning
+ * more than 1000 ms (under ~8 frames per second) is a slow link and counts as
+ * loss. 8 frames take 280 ms at 25 Hz (560 ms at 25 Hz with every other packet
+ * lost) and 1750 ms at 4 Hz. */
+#define RX_LINK_RATE_FRAMES 8u
+#define RX_LINK_RATE_SPAN_MS 1000u
 typedef enum {
     RX_LOSS_NONE = 0,
-    RX_LOSS_NO_FRAMES,   /* no valid RC frame (accepted or gated) for >250 ms, or never */
-    RX_LOSS_LQ_ZERO,     /* stats seen, latest uplink LQ is 0 */
-    RX_LOSS_STATS_STALE, /* stats seen, none for >RX_LINK_STATS_STALE_MS */
-    RX_LOSS_RF_MODE_LOW  /* fresh stats, LQ > 0, latest rf_profile 0 (4 fps): "rf-mode-low" */
+    RX_LOSS_NO_FRAMES,    /* no valid RC frame (accepted or gated) for >250 ms, or never */
+    RX_LOSS_LQ_ZERO,      /* stats seen, latest uplink LQ is 0 */
+    RX_LOSS_STATS_STALE,  /* stats seen, none for >RX_LINK_STATS_STALE_MS */
+    RX_LOSS_LINK_RATE_LOW /* fresh stats, LQ > 0, RC frames too slow (~4 Hz): "link-rate-low" */
 } rx_loss_reason_t;
 
 typedef struct {

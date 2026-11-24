@@ -125,7 +125,8 @@ async function main() {
       const healthy = scenario === "ok" || scenario === "sat-big" || scenario === "missing";
       assert.equal(st.gyro_ok, healthy ? "yes" : "no", scenario);
       assert.equal(shouldDisableArm(st), !healthy, scenario);
-      assert.equal(await mock.sendCommand("arm"), healthy ? "armed" : "arm refused (gyro unhealthy or failsafe)", scenario);
+      assert.equal(await mock.sendCommand("arm"), healthy ? "arm refused: arm-switch-required" : "arm refused: gyro-unhealthy", scenario);
+      assert.equal(mock.simulateArmSwitch(true), healthy, `${scenario}: ARM switch edge arms only through the gate`);
       await mock.disconnect();
     }
   });

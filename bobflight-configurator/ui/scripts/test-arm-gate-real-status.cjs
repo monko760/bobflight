@@ -19,6 +19,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');const path=require('node:path');const {spawnSync}=require('node:child_process');
 const {loadUiTs}=require('../../protocol/tests/load-ui-ts.cjs');
+const P=require('../../protocol/dist');
 const ui=loadUiTs(path.resolve(__dirname,'../src/protocol/parseStatus.ts'),{'@bobflight/protocol':require('../../protocol/dist')});
 const fwRoot=path.resolve(__dirname,'../../../bobflight-firmware');
 const cli=fs.readFileSync(path.join(fwRoot,'src/drivers/cli.c'),'utf8');
@@ -67,6 +68,9 @@ function checkMmioDisplayOnly(label,raw){
 const fixtures=JSON.parse(fs.readFileSync(path.join(__dirname,'fixtures/host-status-real.json'),'utf8'));
 assert.deepEqual(Object.keys(fixtures).sort(),['dummy','kakute_f7_hdv','tmotor_f7_v2']);
 for(const [board,f] of Object.entries(fixtures))check(`fixture ${board}`,f.raw);
+/* N2 capability: the committed captures are pre-N2 firmware (b77b845): no arm_cli key, so Arm check stays off. */
+for(const [board,f] of Object.entries(fixtures)){assert.equal(/^arm_cli:/m.test(f.raw),false);assert.equal(P.armCliIsCheckOnly(ui.parseStatus(f.raw)),false,`fixture ${board}: older FW never check-only`);}
+console.log('PASS fixtures (pre-N2 captures): no arm_cli -> Arm check stays disabled');
 checkMmioDisplayOnly('fixture dummy',fixtures.dummy.raw);
 const bins=process.argv.slice(2);
 for(const d of ['build-contract','build-contract-tmotor','build-contract-dummy']){const p=path.join(fwRoot,d,'bobflight_host');if(!bins.length&&fs.existsSync(p))bins.push(p);}
@@ -75,6 +79,10 @@ for(const bin of bins){
  assert.equal(r.status,0,r.stdout+r.stderr);
  const o=r.stdout;const raw=o.slice(o.indexOf('board: '),o.indexOf('\r\n',o.indexOf('motor_output: '))+2);
  check(`live ${path.relative(fwRoot,bin)}`,raw);
+ /* N2 capability: the real firmware reports `arm_cli: check` once, right after `arm:`, and the Configurator reads it as check-only. */
+ assert.equal((raw.match(/^arm_cli: /gm)||[]).length,1,'live arm_cli once');assert.match(raw,/^arm: (?:armed|disarmed)\r\narm_cli: check\r$/m);
+ assert.equal(ui.parseStatus(raw).arm_cli,'check');assert.equal(P.armCliIsCheckOnly(ui.parseStatus(raw)),true,'live FW enables Arm check');
+ console.log(`PASS live ${path.relative(fwRoot,bin)}: status reports arm_cli: check (N2 capability) -> Arm check enabled`);
  if(/^mmio: denied\r$/m.test(raw))checkMmioDisplayOnly(`live ${path.relative(fwRoot,bin)}`,raw);
 }
 if(!bins.length)console.log('NOTE no host binary given or built; live capture skipped (fixtures only)');

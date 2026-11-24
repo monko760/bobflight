@@ -81,6 +81,19 @@ def s3_expected_status(golden):
     print('NOTE status: expected = b77b845 keys + S3 gyro_health, gyro_sat_count right after gyro_ok')
     return dict(golden, status=keys[:i] + S3_GYRO_STATUS_KEYS + keys[i:])
 
+# N2 (feat/arm-gate-elrs-rfmode, frozen by the Config Lead): `status` gains
+# exactly one key, arm_cli, immediately after arm (value pinned byte for byte
+# by host_report_bytes_contract.py: `arm_cli: check`).
+N2_ARM_CLI_STATUS_KEYS = ['arm_cli']
+
+def n2_expected_status(golden):
+    keys = golden['status']
+    assert keys.count('arm') == 1, keys
+    assert 'arm_cli' not in keys, 'golden already has arm_cli'
+    i = keys.index('arm') + 1
+    print('NOTE status: expected also has N2 arm_cli right after arm')
+    return dict(golden, status=keys[:i] + N2_ARM_CLI_STATUS_KEYS + keys[i:])
+
 def main():
     if sys.argv[1] == '--capture':
         exe, board = sys.argv[2], sys.argv[3]
@@ -90,7 +103,7 @@ def main():
     golden = json.load(open(GOLDEN))['tmotor_f7_v2' if board=='matek_f722_px' else board]
     golden = s2_expected_receiver(golden)
     got = capture(exe)
-    golden = s3_expected_status(golden)
+    golden = n2_expected_status(s3_expected_status(golden))
     notes = []
     for r in REPORTS:
         if golden[r] is None:

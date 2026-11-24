@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
-import { shouldDisableArm, type CliCommand } from "../protocol";
+import { ARM_CLI_OLDER_FIRMWARE_TEXT, armCliIsCheckOnly, parseArmReply, parseStatus, type ArmReply } from "@bobflight/protocol";
+import { shouldDisableArm, statusArmRefusal, type CliCommand } from "../protocol";
 
 type PendingAction = "arm" | "disarm" | "reboot" | null;
 
@@ -15,6 +16,7 @@ const STATUS_FIELDS = [
   "rx",
   "mmio",
   "arm",
+  "arm_cli",
   "failsafe",
   "loop",
 ] as const;
@@ -31,19 +33,37 @@ export function StatusPage() {
   const [pending, setPending] = useState<PendingAction>(null);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [armCheck, setArmCheck] = useState<ArmReply | null>(null);
 
   const connected = connectionStatus === "connected";
+  // N2 capability: only firmware reporting `arm_cli: check` is check-only.
+  // Older firmware really arms on `arm`, so Arm check is never offered there.
+  const armCliCheck = armCliIsCheckOnly(status);
+  const olderFirmware = !!status && !armCliCheck;
   const armDisabled =
-    !connected || busy || shouldDisableArm(status) || status?.arm === "armed";
+    !connected || busy || !armCliCheck || shouldDisableArm(status) || status?.arm === "armed";
+  const statusRefusal = armCliCheck ? statusArmRefusal(status) : null;
   const disarmDisabled = !connected || busy || status?.arm !== "armed";
 
   async function runConfirmed(cmd: CliCommand) {
     setBusy(true);
     setActionMsg(null);
     setLastError(null);
+    if (cmd === "arm") setArmCheck(null);
     try {
+      if (cmd === "arm") {
+        // Re-read `status` right before sending: the board may have changed
+        // since the last read. Never send `arm` without `arm_cli: check`.
+        const fresh = parseStatus(await host.sendCommand("status"));
+        if (!armCliIsCheckOnly(fresh)) {
+          setActionMsg(`arm not sent. ${ARM_CLI_OLDER_FIRMWARE_TEXT}`);
+          if (host.getConnectionStatus() === "connected") await refreshStatus();
+          return;
+        }
+      }
       const reply = await host.sendCommand(cmd);
       setActionMsg(reply.split(/\r?\n/).filter(Boolean).join(" | "));
+      if (cmd === "arm") setArmCheck(parseArmReply(reply));
       if (cmd !== "reboot" && host.getConnectionStatus() === "connected") {
         await refreshStatus();
       }
@@ -62,10 +82,10 @@ export function StatusPage() {
     { title: string; message: string; label: string; danger?: boolean }
   > = {
     arm: {
-      title: "Confirm arm",
+      title: "Confirm arm check",
       message:
-        "Send the exact CLI command 'arm'? This will only succeed if the flight controller is ready. Never auto-armed on connect.",
-      label: "Send arm",
+        "Run an arm check? The exact CLI command 'arm' is sent only after status is re-read and still reports arm_cli: check. This firmware never arms from USB: it runs the same checks as the radio ARM switch and replies with the first one that blocks arming. Arm with the radio ARM switch (off, then on). Never sent automatically.",
+      label: "Run arm check",
       danger: true,
     },
     disarm: {
@@ -135,9 +155,6 @@ export function StatusPage() {
               <li key={r}>{r}</li>
             ))}
           </ul>
-          {shouldDisableArm(status) && (
-            <p>Arm is disabled while gyro_ok:no or failsafe:ACTIVE.</p>
-          )}
         </div>
       )}
 
@@ -148,12 +165,14 @@ export function StatusPage() {
           disabled={armDisabled}
           onClick={() => setPending("arm")}
           title={
-            shouldDisableArm(status)
-              ? "Disabled: gyro_ok:no or failsafe:ACTIVE"
-              : undefined
+            olderFirmware
+              ? ARM_CLI_OLDER_FIRMWARE_TEXT
+              : statusRefusal
+                ? statusRefusal
+                : "Sends 'arm': the reply names the first check that blocks arming"
           }
         >
-          Arm…
+          Arm check…
         </button>
         <button
           type="button"
@@ -172,6 +191,33 @@ export function StatusPage() {
           Reboot…
         </button>
       </div>
+
+      {olderFirmware ? (
+        <p className="fail" data-testid="arm-cli-older" role="alert">
+          {ARM_CLI_OLDER_FIRMWARE_TEXT}
+        </p>
+      ) : (
+        <p className="muted" data-testid="arm-gate-note">
+          USB never arms: only the radio ARM switch arms (switch it off, then on),
+          through the same checks. Arm check sends <code>arm</code> and shows the
+          first check that blocks arming.
+        </p>
+      )}
+      {statusRefusal && (
+        <p className="muted" data-testid="arm-status-refusal">
+          Arm check: {statusRefusal}. Only a reply the board actually sends
+          is shown here.
+        </p>
+      )}
+
+      {armCheck && (
+        <div className={armCheck.kind === "legacy-armed" ? "fail" : "muted"} data-testid="arm-check-reply" role="status">
+          <div>
+            Last arm check reply: <code data-testid="arm-check-line">{armCheck.line || "(no reply)"}</code>
+          </div>
+          {armCheck.explanation && <div data-testid="arm-check-explanation">{armCheck.explanation}</div>}
+        </div>
+      )}
 
       {actionMsg && <p className="muted">Last action reply: {actionMsg}</p>}
 

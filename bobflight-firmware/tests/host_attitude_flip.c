@@ -35,6 +35,7 @@ bool hal_usb_cdc_connected(void){return true;}
 arm_state_t arming_state(void){return arm;}
 void arming_disarm(void){arm=ARM_DISARMED;}
 bool arming_try_arm(void){return false;}
+const char *arming_block_reason(void){return "stub";}
 bool gyro_flight_ready(void){return true;}
 void gyro_calibration_tick(void){}
 bool gyro_manual_calibration_active(void){return false;}

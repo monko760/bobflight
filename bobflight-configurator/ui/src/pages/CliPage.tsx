@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
+import { ARM_CLI_OLDER_FIRMWARE_TEXT, armCliIsCheckOnly, parseStatus } from "@bobflight/protocol";
 import {
   ALLOWED_CLI_COMMANDS, parseCliInput, isBootloaderCommand,
   type CliCommand,
@@ -46,6 +47,16 @@ export function CliPage() {
     setPending(null);
     setInput("");
     try {
+      if (cmd === "arm") {
+        // N2: firmware before N2 really arms on `arm`. Read `status` first and
+        // send `arm` only when it reports `arm_cli: check` (check-only).
+        if (!armCliIsCheckOnly(parseStatus(await host.sendCommand("status")))) {
+          appendCli(`[blocked] arm not sent. ${ARM_CLI_OLDER_FIRMWARE_TEXT}`);
+          setUiMessage(ARM_CLI_OLDER_FIRMWARE_TEXT);
+          if (host.getConnectionStatus() === "connected") await refreshStatus();
+          return;
+        }
+      }
       const reply = await host.sendCommand(cmd);
       if (isBootloaderCommand(cmd) && /bl: resetting to ST ROM bootloader/.test(reply)) {
         appendCli("[bootloader] Reset acknowledged; verify STM32 DFU 0483:DF11 separately. Serial disconnect alone does not prove DFU.");
@@ -111,9 +122,9 @@ export function CliPage() {
       {pending && (
         <ConfirmDialog
           open
-          title={`Confirm ${pending}`}
-          message={isBootloaderCommand(pending) ? `Remove propellers; USB only. Request ST ROM bootloader entry? No automatic save. Unsaved calibration/settings and RAM-only values are lost on reset.${pending === 'bl discard' ? ' DISCARD explicitly accepts losing unsaved configuration; it does not bypass firmware safety checks.' : ' Back up diff all and save supported settings first; dirty configuration will be refused.'} Verify actual STM32 DFU separately; USB disconnect alone is not proof.` : pending === 'bench_switch' ? 'Confirm all propellers are removed. This enables AUX1 to spin all four motors at 8% for up to three seconds. Keep throttle low. This is a bench test, not flight arming.' : `Send the exact CLI command '${pending}'?`}
-          confirmLabel={`Send ${pending}`}
+          title={pending === "arm" ? "Confirm arm check" : `Confirm ${pending}`}
+          message={isBootloaderCommand(pending) ? `Remove propellers; USB only. Request ST ROM bootloader entry? No automatic save. Unsaved calibration/settings and RAM-only values are lost on reset.${pending === 'bl discard' ? ' DISCARD explicitly accepts losing unsaved configuration; it does not bypass firmware safety checks.' : ' Back up diff all and save supported settings first; dirty configuration will be refused.'} Verify actual STM32 DFU separately; USB disconnect alone is not proof.` : pending === 'bench_switch' ? 'Confirm all propellers are removed. This enables AUX1 to spin all four motors at 8% for up to three seconds. Keep throttle low. This is a bench test, not flight arming.' : pending === "arm" ? "Run an arm check? The exact CLI command 'arm' is sent only if status reports arm_cli: check (current firmware never arms from USB and replies with the first check that blocks arming). Older firmware can arm on this command, so it is never sent to it." : `Send the exact CLI command '${pending}'?`}
+          confirmLabel={pending === "arm" ? "Run arm check" : `Send ${pending}`}
           danger={pending === "arm" || pending === "reboot" || pending === "bench_switch" || isBootloaderCommand(pending)}
           onCancel={() => setPending(null)}
           onConfirm={() => void send(pending)}

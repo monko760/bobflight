@@ -269,33 +269,88 @@ int main(int argc,char **argv){
   REQUIRE(rx_loss_reason()==RX_LOSS_STATS_STALE&&rx_link_lq()==-1&&rx_link_stats_present());
   for(unsigned i=0;i<2000;i++){feed(f,26);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active());}
   printf("Stats stale: disarmed %u ms after the last LINK_STATISTICS frame (1000 ms stale + 250 ms failsafe)\n",dt);
- }else if(!strcmp(name,"link-rf-mode-low")){
-  /* Link drops to CRSF 4 fps (rf_profile 0) mid-flight with LQ still > 0 and valid frames still
-   * arriving -> existing failsafe -> DROP ~250 ms later, exactly like LQ 0. */
+ }else if(!strcmp(name,"link-rf0-25hz")){
+  /* N2: ExpressLRS 4.x reports its valid 900 MHz 25 Hz rate as rf_mode 0. With LQ 90 and a
+   * frame every 40 ms the craft stays armed for 5 s: rf_mode 0 is not link loss. */
+  uint8_t f[26];start_link(f,90);
+  for(unsigned i=0;i<5000;i++){if(i%40==0)feed(f,26);if(i%200==0)stats_rf(90,0);step();
+   REQUIRE(arming_state()==ARM_ARMED&&!failsafe_active()&&rx_loss_reason()==RX_LOSS_NONE);}
+  REQUIRE(all(encode(.8f))&&rx_link_lq()==90);
+  /* LQ 0 with rf_mode 0 is still loss: DROP ~250 ms later. */
+  stats_rf(0,0);uint32_t t0=hal_millis();uint32_t dt=UINT32_MAX;
+  for(unsigned i=0;i<1000&&dt==UINT32_MAX;i++){if(i%40==0)feed(f,26);step();if(arming_state()!=ARM_ARMED)dt=hal_millis()-t0;}
+  REQUIRE(dt<=252&&all(0)&&failsafe_active()&&rx_loss_reason()==RX_LOSS_LQ_ZERO);
+  printf("rf_mode 0 at 25 Hz, LQ 90: armed for 5 s, no failsafe; LQ 0 then disarmed %u ms later\n",dt);
+ }else if(!strcmp(name,"link-rate-low")){
+  /* ~4 Hz policy (Oct 2), now measured from the RC frames: LQ 90, rf_mode 2 (150 fps), but a
+   * frame only every 200 ms (each inside the 250 ms frame timeout) -> the gate closes once
+   * the last 8 frames span more than 1000 ms -> existing failsafe -> DROP. */
   uint8_t f[26],low[26],arm[26];start_link(f,90);rcframe_v(low,172,172);rcframe_v(arm,172,1811);
-  stats_rf(90,0);uint32_t t0=hal_millis();
-  uint32_t dt=frames_until_disarm(f,t0,1000);
-  REQUIRE(dt>=250&&dt<=252);REQUIRE(all(0)&&failsafe_active()&&failsafe_stage()==FAILSAFE_STAGE_PROCEDURE);
-  REQUIRE(rx_loss_reason()==RX_LOSS_RF_MODE_LOW&&rx_link_lq()==90&&!rx_frame_fresh());
-  REQUIRE(!strcmp(rx_loss_reason_name(rx_loss_reason()),"rf-mode-low"));
-  /* Arm gate: failsafe stays ACTIVE and a deliberate low -> high arm edge does not arm. */
-  for(unsigned i=0;i<20;i++){feed(i<10?low:arm,26);if(i%10==0)stats_rf(90,0);step();
-   REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active()&&rx_loss_reason()==RX_LOSS_RF_MODE_LOW);}
-  /* No shortcut out of failsafe: 2 s more of valid frames at 4 fps keep it ACTIVE. */
-  for(unsigned i=0;i<2000;i++){feed(f,26);if(i%20==0)stats_rf(90,0);step();
-   REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active());}
-  /* rf back to 150 fps but LQ 0: still closed (lq-zero), still ACTIVE. */
-  stats_rf(0,2);feed(f,26);step();REQUIRE(failsafe_active()&&rx_loss_reason()==RX_LOSS_LQ_ZERO&&!rx_frame_fresh());
-  /* rf 1 + LQ 80 with NO RC frame: stats alone clear nothing (existing rule: an accepted frame clears). */
-  stats_rf(80,1);step();step();REQUIRE(failsafe_active()&&failsafe_stage()==FAILSAFE_STAGE_PROCEDURE&&!rx_frame_fresh());
-  /* The first accepted RC frame clears failsafe (existing failsafe_note_rx_frame rule), not earlier. */
-  feed(f,26);step();REQUIRE(!failsafe_active()&&rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE&&rx_link_lq()==80);
-  /* No automatic re-arm: arm switch still high for 2 s stays disarmed. */
-  for(unsigned i=0;i<2000;i++){feed(f,26);if(i%20==0)stats_rf(80,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));}
+  uint32_t t0=hal_millis(),dt=UINT32_MAX;
+  for(unsigned i=0;i<2000&&dt==UINT32_MAX;i++){if(i%200==0)feed(f,26);if(i%20==0)stats_rf(90,2);step();if(arming_state()!=ARM_ARMED)dt=hal_millis()-t0;}
+  REQUIRE(dt!=UINT32_MAX&&dt>=1000&&dt<=1052);REQUIRE(all(0)&&failsafe_active()&&failsafe_stage()==FAILSAFE_STAGE_PROCEDURE);
+  REQUIRE(rx_loss_reason()==RX_LOSS_LINK_RATE_LOW&&rx_link_lq()==90&&!rx_frame_fresh());
+  REQUIRE(!strcmp(rx_loss_reason_name(rx_loss_reason()),"link-rate-low"));
+  /* 2 s more at ~4 Hz (rf_mode 0 too): stays disarmed and ACTIVE; a low -> high edge does not arm. */
+  for(unsigned i=0;i<2000;i++){if(i%200==0)feed(i<1000?low:arm,26);if(i%20==0)stats_rf(90,(uint8_t)(i<1000?2:0));step();
+   REQUIRE(arming_state()==ARM_DISARMED&&all(0)&&failsafe_active()&&rx_loss_reason()==RX_LOSS_LINK_RATE_LOW);}
+  /* Normal rate again: an accepted frame clears failsafe; switch still high never re-arms. */
+  for(unsigned i=0;i<2000;i++){feed(f,26);if(i%20==0)stats_rf(80,0);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));}
+  REQUIRE(!failsafe_active()&&rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE);
   for(unsigned i=0;i<5;i++){feed(low,26);step();}
   for(unsigned i=0;i<5;i++){feed(arm,26);step();}
   REQUIRE(arming_state()==ARM_ARMED);
-  printf("rf_profile 0 (4 fps): disarmed %u ms after the stats frame, failsafe ACTIVE, arm edge refused; cleared only by rf!=0+LQ>0 stats AND an accepted frame; explicit low->high re-arms\n",dt);
+  printf("~4 Hz frames with LQ 90: disarmed %u ms after the rate dropped, failsafe ACTIVE; normal rate + accepted frame clears; explicit low->high re-arms\n",dt);
+ }else if(!strcmp(name,"cli-arm-switch-on")){
+  /* N2: the old CLI `arm` called arming_try_arm() directly. With the ARM switch already on
+   * (no witnessed low) every arming_try_arm() check passes, so USB would have armed. */
+  controls(0,1);step();step();REQUIRE(arming_state()==ARM_DISARMED);
+  REQUIRE(arming_block_reason()==NULL); /* the bypass the old command used */
+  REQUIRE(!strcmp(arm_cli_refusal(),"arm-switch-on"));
+  for(unsigned i=0;i<50;i++){controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));}
+  /* Switch arming unchanged: low -> high arms; then the CLI says already-armed and changes nothing. */
+  controls(0,-1);step();REQUIRE(!strcmp(arm_cli_refusal(),"arm-switch-required"));
+  controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+  REQUIRE(!strcmp(arm_cli_refusal(),"already-armed")&&arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"cli-arm-tilted")){
+  accel[1]=.5f;accel[2]=.8660254f;
+  for(unsigned i=0;i<1000;i++){controls(0,-1);step();}
+  REQUIRE(attitude_ready()&&fabsf(attitude_degrees()[0])>=20.f);
+  REQUIRE(!strcmp(arm_cli_refusal(),"tilted"));controls(0,-1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  /* Acro is rate-only: no tilt precondition, so only the switch edge is missing. */
+  REQUIRE(control_mode_set(CONTROL_MODE_ACRO));REQUIRE(!strcmp(arm_cli_refusal(),"arm-switch-required"));
+  REQUIRE(control_mode_set(CONTROL_MODE_ANGLE));REQUIRE(!strcmp(arm_cli_refusal(),"tilted"));
+  /* Switch path refuses the same tilt; level again it arms on a fresh edge. */
+  controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED);
+  accel[1]=0;accel[2]=1;for(unsigned i=0;i<1000;i++){controls(0,-1);step();}
+  REQUIRE(!strcmp(arm_cli_refusal(),"arm-switch-required"));
+  controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"cli-arm-uncalibrated")){
+  controls(0,-1);step();cal_ready=false;
+  REQUIRE(!strcmp(arm_cli_refusal(),"gyro-not-calibrated"));
+  controls(0,1);step();REQUIRE(arming_state()==ARM_DISARMED); /* switch path: same check */
+  cal_ready=true;controls(0,-1);step();cal_active=true;
+  REQUIRE(!strcmp(arm_cli_refusal(),"calibration-running"));
+  cal_active=false;controls(0,-1);step();REQUIRE(!strcmp(arm_cli_refusal(),"arm-switch-required"));
+  controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+ }else if(!strcmp(name,"cli-arm-gate")){
+  /* Every refusal token in priority order; the CLI never changes the arm state. */
+  REQUIRE(!strcmp(arm_cli_refusal(),"failsafe")); /* boot lockout: no frame yet */
+  controls(0,-1);step();
+  gyro_ok=false;REQUIRE(!strcmp(arm_cli_refusal(),"gyro-unhealthy"));gyro_ok=true;
+  controls(.4f,-1);step();REQUIRE(!strcmp(arm_cli_refusal(),"throttle-not-low"));
+  controls(0,-1);step();REQUIRE(bench_motor_pulse(1,8));REQUIRE(!strcmp(arm_cli_refusal(),"motors-active"));
+  REQUIRE(bench_motor_test(0));step();
+  REQUIRE(mode_range_set(MODE_ARM,false,1,1751,2100));controls(0,-1);step();
+  REQUIRE(!strcmp(arm_cli_refusal(),"arm-switch-unavailable"));
+  REQUIRE(mode_range_set(MODE_ARM,true,1,1751,2100));controls(0,-1);step();
+  age_to(251);REQUIRE(!strcmp(arm_cli_refusal(),"failsafe")||!strcmp(arm_cli_refusal(),"arm-switch-unavailable"));
+  controls(0,-1);step();
+  /* Gate passes except for the switch edge: still refused, still disarmed after the PID cycle. */
+  for(unsigned i=0;i<10;i++){REQUIRE(!strcmp(arm_cli_refusal(),"arm-switch-required"));controls(0,-1);step();REQUIRE(arming_state()==ARM_DISARMED&&all(0));}
+  /* Only the switch arms, and only when the shared gate passes. */
+  controls(0,1);step();REQUIRE(arming_state()==ARM_ARMED);
+  REQUIRE(!strcmp(arm_cli_refusal(),"already-armed"));
  }else if(!strcmp(name,"link-absent")){
   /* No stats ever: frames-only exactly as today (frozen frames keep it armed; stopping drops). */
   uint8_t f[26];start_link(f,-1);

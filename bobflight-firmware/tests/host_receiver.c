@@ -80,46 +80,81 @@ static void link_gate_checks(void){
     rx_init();assert(!rx_link_stats_present()&&rx_link_lq()==-1);
     feed(f,26);rx_poll();assert(rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE);
 }
-/* rf_profile 0 (CRSF 4 fps) as link loss: rf-mode-low. */
+/* N2: rf_mode is a vendor index, not a rate (TBS 0 = 4 fps, ExpressLRS 4.x
+ * 0 = 900 MHz 25 Hz), so it never closes the gate. The ~4 Hz policy is kept by
+ * measuring the RC frames: the last RX_LINK_RATE_FRAMES valid frames spanning
+ * more than RX_LINK_RATE_SPAN_MS is link-rate-low. Only with stats present (as before). */
+static unsigned feed_every(uint8_t *f,unsigned ms,unsigned gap,unsigned stats_gap,uint8_t lq,uint8_t rf,rx_loss_reason_t expect){
+    /* Advance `ms` in 5 ms polls, an RC frame every `gap` ms and stats every
+     * `stats_gap` ms; every poll must report `expect`. Returns frames fed. */
+    unsigned fed=0;
+    for(unsigned t=0;t<ms;t+=5){
+        if(t%stats_gap==0)stats_rf(lq,rf);
+        if(t%gap==0){feed(f,26);fed++;}
+        now+=5;rx_poll();
+        assert(rx_loss_reason()==expect);
+    }
+    return fed;
+}
 static void rf_mode_checks(void){
     uint8_t f[26],g[26];frame(f);frame_roll(g,992);
     now=200000;used=0;rx_init();
-    /* Stats absent: never rf-mode-low. No frames -> no-frames; frames -> none (frames-only, unchanged). */
+    /* Stats absent: frames-only, unchanged. */
     assert(!rx_link_stats_present()&&rx_loss_reason()==RX_LOSS_NO_FRAMES);
     run_ms(100,f);assert(rx_loss_reason()==RX_LOSS_NONE&&!rx_link_stats_present()&&rx_frame_fresh());
-    /* rf 2 (150 fps), rf 1 (50 fps) and an out-of-enum 7: the link is fine, every frame accepted. */
-    const uint8_t ok_rf[3]={2,1,7};
-    for(unsigned i=0;i<3;i++){stats_rf(80,ok_rf[i]);uint32_t n=notes;run_ms(100,f);
+    /* rf 0 (ELRS 4.x 25 Hz), 1, 2 and an out-of-table 7 with good LQ: no loss, every frame accepted. */
+    const uint8_t rfs[4]={0,1,2,7};
+    for(unsigned i=0;i<4;i++){stats_rf(80,rfs[i]);uint32_t n=notes;run_ms(100,f);
         assert(notes==n+10&&rx_loss_reason()==RX_LOSS_NONE&&rx_link_lq()==80&&rx_frame_fresh());}
-    /* rf 0 (4 fps): the gate closes like LQ 0; valid frames refresh nothing; LQ is still shown. */
-    stats_rf(80,0);rx_poll();
-    uint32_t n1=notes,c1=rx_frame_count();assert(rx_channels()[0]==-1);
-    run_ms(240,g);
-    assert(notes==n1&&rx_frame_count()==c1&&rx_channels()[0]==-1);
-    assert(rx_loss_reason()==RX_LOSS_RF_MODE_LOW&&rx_link_lq()==80&&rx_link_stats_present());
-    assert(!strcmp(rx_loss_reason_name(RX_LOSS_RF_MODE_LOW),"rf-mode-low"));
-    run_ms(20,g);assert(!rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_RF_MODE_LOW);
-    /* Priority lq-zero > rf-mode-low: LQ 0 with rf 0 is lq-zero; LQ 0 with rf 2 too. */
-    stats_rf(0,0);rx_poll();assert(rx_loss_reason()==RX_LOSS_LQ_ZERO&&rx_link_lq()==0);
+    /* ELRS 900 MHz 25 Hz: rf_mode 0, LQ 90, a frame every 40 ms, stats every 200 ms, 5 s: never a loss. */
+    {uint32_t n=notes;unsigned fed=feed_every(f,5000,40,200,90,0,RX_LOSS_NONE);
+     assert(fed==125&&notes==n+125&&rx_frame_fresh()&&rx_link_lq()==90);}
+    /* 25 Hz at LQ 50 (every other packet lost: a frame every 80 ms): still no loss. */
+    {uint32_t n=notes;unsigned fed=feed_every(f,2000,80,200,50,0,RX_LOSS_NONE);assert(notes==n+fed&&rx_frame_fresh());}
+    /* LQ 0 is loss whatever the rf_mode: frames refresh nothing. */
+    stats_rf(0,0);rx_poll();
+    {uint32_t n=notes,c=rx_frame_count();run_ms(240,g);
+     assert(notes==n&&rx_frame_count()==c&&rx_loss_reason()==RX_LOSS_LQ_ZERO&&rx_link_lq()==0);}
+    run_ms(20,g);assert(!rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_LQ_ZERO);
     stats_rf(0,2);rx_poll();assert(rx_loss_reason()==RX_LOSS_LQ_ZERO);
-    /* LQ back but still 4 fps: still closed (rf-mode-low), frames still refresh nothing. */
-    stats_rf(60,0);uint32_t n2=notes;run_ms(50,g);assert(notes==n2&&rx_loss_reason()==RX_LOSS_RF_MODE_LOW&&rx_link_lq()==60);
-    /* Recovery: LQ > 0 AND rf != 0 reopens the gate; the next frame is accepted. */
-    stats_rf(60,1);run_ms(10,g);assert(notes==n2+1&&rx_frame_fresh()&&rx_channels()[0]==0&&rx_loss_reason()==RX_LOSS_NONE);
-    /* rf 0 that goes stale is stats-stale, not rf-mode-low (stale stats have no current rf_profile):
-     * exactly 1000 ms is still rf-mode-low, 1001 ms is stats-stale. */
+    /* Recovery with rf_mode 0 and LQ > 0: the gate reopens, the next frame is accepted. */
+    stats_rf(60,0);{uint32_t n=notes;run_ms(10,g);assert(notes==n+1&&rx_frame_fresh()&&rx_channels()[0]==0&&rx_loss_reason()==RX_LOSS_NONE);}
+    /* Stale stats are loss whatever the rf_mode: exactly 1000 ms is fine, 1001 ms is stats-stale. */
     stats_rf(60,0);rx_poll();uint32_t t=now;
-    while(now-t<1000u){now+=5;if((now-t)%10==0)feed(f,26);rx_poll();assert(rx_loss_reason()==RX_LOSS_RF_MODE_LOW);}
-    feed(f,26);now+=1;rx_poll();assert(rx_loss_reason()==RX_LOSS_STATS_STALE&&rx_link_lq()==-1);
-    run_ms(200,f);assert(rx_loss_reason()==RX_LOSS_STATS_STALE);
-    /* Same for LQ 0 that goes stale (existing rule, unchanged). */
-    stats_rf(0,0);rx_poll();t=now;run_ms(1000,f);assert(rx_loss_reason()==RX_LOSS_LQ_ZERO);
-    feed(f,26);now+=1;rx_poll();assert(rx_loss_reason()==RX_LOSS_STATS_STALE);
-    /* no-frames beats rf-mode-low and lq-zero once raw frames stop for >250 ms. */
-    stats_rf(60,0);feed(f,26);rx_poll();assert(rx_loss_reason()==RX_LOSS_RF_MODE_LOW);
-    run_ms(250,NULL);assert(rx_loss_reason()==RX_LOSS_RF_MODE_LOW);run_ms(5,NULL);assert(rx_loss_reason()==RX_LOSS_NO_FRAMES);
-    stats_rf(0,0);rx_poll();assert(rx_loss_reason()==RX_LOSS_NO_FRAMES);
-    /* Re-initialisation forgets rf_profile with the rest of the stats. */
+    while(now-t<1000u){now+=5;if((now-t)%10==0)feed(f,26);rx_poll();assert(rx_loss_reason()==RX_LOSS_NONE);}
+    {uint32_t n=notes;feed(f,26);now+=1;rx_poll();assert(notes==n&&rx_loss_reason()==RX_LOSS_STATS_STALE&&rx_link_lq()==-1);}
+    run_ms(300,f);assert(rx_loss_reason()==RX_LOSS_STATS_STALE&&!rx_frame_fresh());
+    /* ~4 Hz policy unchanged: a frame every 200 ms (each one inside the 250 ms frame
+     * timeout) with fresh LQ 80 stats is link-rate-low, whatever the rf_mode; the
+     * frames refresh nothing, so the existing failsafe timeout runs. */
+    for(unsigned i=0;i<3;i++){
+        const uint8_t rf=(uint8_t)(i==0?0:i==1?1:2);
+        now+=1000;used=0;rx_init();
+        uint32_t n=notes,c=rx_frame_count();
+        stats_rf(80,rf);rx_poll();
+        unsigned fed=feed_every(g,2000,200,100,80,rf,RX_LOSS_LINK_RATE_LOW);
+        assert(fed==10&&notes==n&&rx_frame_count()==c&&!rx_frame_fresh()&&rx_link_lq()==80);
+        assert(!strcmp(rx_loss_reason_name(RX_LOSS_LINK_RATE_LOW),"link-rate-low"));
+    }
+    /* The same link back at 25 Hz: the first fast frame is still held back (the
+     * last 8 frames span more than 1000 ms); after 8 fast frames the gate is open. */
+    {uint32_t n=notes;stats_rf(80,0);feed(f,26);now+=5;rx_poll();assert(notes==n&&rx_loss_reason()==RX_LOSS_LINK_RATE_LOW);
+     for(unsigned i=0;i<7;i++){run_ms(35,NULL);stats_rf(80,0);feed(f,26);now+=5;rx_poll();}
+     assert(notes>n&&rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE);}
+    /* Unknown rate fails closed: with stats seen first, frames 1..7 after rx_init are held back;
+     * the 8th (25 Hz) is accepted. */
+    now+=1000;used=0;rx_init();
+    {uint32_t n=notes;stats_rf(80,0);rx_poll();
+     for(unsigned i=0;i<7;i++){feed(f,26);now+=5;rx_poll();assert(notes==n&&rx_loss_reason()==RX_LOSS_LINK_RATE_LOW);run_ms(35,NULL);}
+     feed(f,26);now+=5;rx_poll();assert(notes==n+1&&rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE);}
+    /* Priority: lq-zero beats link-rate-low; no-frames beats everything. */
+    now+=1000;used=0;rx_init();stats_rf(0,2);rx_poll();feed(f,26);now+=5;rx_poll();
+    assert(rx_loss_reason()==RX_LOSS_LQ_ZERO);
+    run_ms(255,NULL);assert(rx_loss_reason()==RX_LOSS_NO_FRAMES);
+    /* Stats absent: a 4 Hz frame stream stays frames-only exactly as before. */
+    now+=1000;used=0;rx_init();
+    for(unsigned i=0;i<10;i++){feed(f,26);now+=5;rx_poll();assert(rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE);run_ms(195,NULL);}
+    /* Re-initialisation forgets the stats and the frame history. */
     rx_init();feed(f,26);rx_poll();assert(rx_frame_fresh()&&rx_loss_reason()==RX_LOSS_NONE&&!rx_link_stats_present());
 }
 

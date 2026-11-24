@@ -149,6 +149,12 @@ export interface ParsedStatus {
   rx?: string;
   mmio?: string;
   arm?: "armed" | "disarmed" | string;
+  /**
+   * N2+ firmware: `check` (CLI `arm` never arms). Absent on older firmware,
+   * and undefined when the line is repeated. Verbatim otherwise; only the
+   * exact value `check` enables Arm check (armCliIsCheckOnly).
+   */
+  arm_cli?: "check" | string;
   failsafe?: "ACTIVE" | "ok" | string;
   loop?: string;
   /** True when Arm is blocked: gyro_ok:no and/or failsafe:ACTIVE (Lead). */

@@ -1,6 +1,6 @@
 # Configured ARM switch integration
 
-The configured ARM range now drives the existing guarded receiver arm/disarm path instead of hardcoded AUX1 thresholds. **The bench lockout remains enabled, flight enable remains OFF, and this is not flight qualification.** Direct CLI `arm`/`disarm` behavior is unchanged. Control-mode routing is still separately restricted; this does not enable Acro/Horizon flight.
+The configured ARM range now drives the existing guarded receiver arm/disarm path instead of hardcoded AUX1 thresholds. **The bench lockout remains enabled, flight enable remains OFF, and this is not flight qualification.** Direct CLI `disarm` behavior is unchanged; CLI `arm` changed in N2 (below). Control-mode routing is still separately restricted; this does not enable Acro/Horizon flight.
 
 ## Behavior
 
@@ -12,6 +12,30 @@ The configured ARM range now drives the existing guarded receiver arm/disarm pat
 - Runtime ARM input does not use the bench-output preview mask: that output-pending flag is also true during normal armed output. The controller therefore does not disarm itself merely for producing a motor command.
 
 Outside-range means any valid position outside the interval, not necessarily the lowest physical switch position. For a middle-position ARM range, both outer positions are inactive. This is an intentional change from the old fixed AUX1 low/high thresholds.
+
+## N2: CLI `arm` uses the same gate and never arms
+
+Before N2 the CLI `arm` command called `arming_try_arm()` directly. That skipped the fresh-switch-edge, calibration and tilt checks of the switch path, and because the PID loop keeps an arm only while the ARM switch is active, the only time a USB arm stuck was with the ARM switch **already on**: a USB arm with no switch flip.
+
+Now both paths read one gate. `arming_block_reason()` (arming.c) holds every check `arming_try_arm()` applies; `arm_gate_block()` (tasks.c) adds calibration, attitude-ready and tilt (leveled modes only) and is what the switch edge in `loop_pid` evaluates before `arming_try_arm()`. Switch arming behavior is unchanged.
+
+The CLI `arm` command cannot be a fresh switch edge, so it never arms. It replies `arm refused: <token>` with the first blocking check, in this order:
+
+| Token | Meaning |
+|---|---|
+| `already-armed` | already armed (by the switch); nothing changed |
+| `motors-active` | a bench motor test/session is running |
+| `calibration-running` | manual sensor calibration is running |
+| `bench-build`, `no-motor-output`, `receiver-stale`, `gravity-not-ready`, `gyro-not-ready`, `gyro-unhealthy`, `failsafe`, `throttle-not-low` | the `arming_try_arm()` checks (the first three and the readiness pair only on MCU builds) |
+| `dshot-unhealthy` | motor output unhealthy (the PID loop would disarm) |
+| `arm-switch-unavailable` | ARM range disabled/invalid or no fresh receiver value |
+| `arm-switch-on` | the ARM switch is already on: switch it off, then on |
+| `gyro-not-calibrated`, `attitude-not-ready`, `tilted` | the switch-edge checks |
+| `arm-switch-required` | every check passes; arm with the radio ARM switch (off, then on) |
+
+So `arm` is now a pre-arm check. The Configurator Status page shows the reply verbatim with an explanation.
+
+Capability signal: N2+ firmware prints `arm_cli: check` in `status`, right after the `arm:` line. Firmware before N2 really arms on `arm`, so the Configurator sends `arm` (Status page "Arm check…" → "Confirm arm check" → "Run arm check", the CLI tab, and the protocol client's `arm()`) only after a fresh `status` that contains exactly one `arm_cli: check` line. When the key is absent, Arm check stays disabled and shows: "Older firmware: the CLI arm command can arm this board. Update firmware to use Arm check." A designed props-off USB arm path, if wanted, is a separate change.
 
 ## Configuration and compatibility
 

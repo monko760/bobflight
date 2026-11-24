@@ -67,12 +67,15 @@ need() {
 need "BobFlight CLI"
 need "gyro_ok: no"
 need "arm: disarmed"
+# N2 capability: Configurators send `arm` only to firmware reporting this line.
+need "arm_cli: check"
 # Boot lockout: failsafe stays ACTIVE until the first valid RX frame
 # (failsafe_active() is true while no frame has ever been seen, failsafe.c).
 # The host CLI has no receiver, so `status` must report ACTIVE here; this is
 # the expectation only, firmware output is unchanged (it always said ACTIVE).
 need "failsafe: ACTIVE"
-need "arm refused (gyro unhealthy or failsafe)"
+# N2: CLI arm never arms; the host has no gyro, so the first blocking check is gyro-unhealthy.
+need "arm refused: gyro-unhealthy"
 need "disarmed"
 need "unknown — try help"
 need "bobflight host smoke: ok (cascade exercised)"

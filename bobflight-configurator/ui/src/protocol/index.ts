@@ -9,7 +9,7 @@ export type {
   WebSerialRequestPortOptions,
 } from "./types";
 export { ALLOWED_CLI_COMMANDS, SETTINGS_KEYS, parseCliInput, isBootloaderCommand } from "./types";
-export { parseStatus, parseVersionLine, shouldDisableArm } from "./parseStatus";
+export { parseStatus, parseVersionLine, shouldDisableArm, statusArmRefusal } from "./parseStatus";
 export { MockBobFlightHost } from "./mockHost";
 export {
   createHost,

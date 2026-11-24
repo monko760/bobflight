@@ -212,6 +212,45 @@ void loop_filter(void)
     gyro_filter(g_gyro_raw, g_gyro_filt);
 }
 
+/* N2: the one arm gate. The radio ARM switch edge in loop_pid and the CLI
+ * `arm` refusal both read it, so USB can never skip a check the switch needs.
+ * Acro is rate-only: no attitude/tilt precondition. Leveled modes keep the
+ * full attitude and tilt qualification. Returns the first failing check as a
+ * stable token, or NULL when the switch edge may arm. */
+static const char *arm_gate_block(void)
+{
+    if(!gyro_calibrated())return "gyro-not-calibrated";
+    if(control_mode_requested()!=CONTROL_MODE_ACRO){
+        if(!attitude_ready())return "attitude-not-ready";
+        const float *angles=attitude_degrees();
+        if(!(fabsf(angles[0])<20.f && fabsf(angles[1])<20.f))return "tilted";
+    }
+    return arming_block_reason();
+}
+
+/* CLI `arm`: loop_pid owns the arm state every PID cycle and disarms whenever
+ * the ARM switch is invalid or inactive, and arms only on a fresh witnessed
+ * inactive-to-active switch edge. A USB command cannot be that edge, so it
+ * never arms: with the switch on it is refused (the old bypass), and with the
+ * switch off any arm would be undone on the next PID cycle. It reports the
+ * first check that blocks arming, in the order a pilot would fix them, and
+ * "arm-switch-required" when only the switch edge is missing. */
+const char *arm_cli_refusal(void)
+{
+    if(arming_state()==ARM_ARMED)return "already-armed";
+    if(bench_motor_active())return "motors-active";
+    if(gyro_manual_calibration_active())return "calibration-running";
+    const char *why=arming_block_reason();
+    if(why)return why;
+    if(!dshot_is_healthy())return "dshot-unhealthy";
+    bool arm_on=false;
+    if(!mode_range_arm_input(&arm_on))return "arm-switch-unavailable";
+    if(arm_on)return "arm-switch-on";
+    why=arm_gate_block();
+    if(why)return why;
+    return "arm-switch-required";
+}
+
 void loop_pid(void)
 {
     const uint64_t pid_now=hal_micros();
@@ -266,11 +305,7 @@ void loop_pid(void)
     else if(!arm_requested) {arming_disarm();arm_low_seen=true;}
     else if(arm_low_seen && arming_state()!=ARM_ARMED) {
         arm_low_seen=false; /* Every attempt requires a fresh valid inactive-to-active range edge. */
-        const float *angles=attitude_degrees();
-        /* Acro is rate-only: no attitude/tilt precondition. Leveled modes
-         * keep the full attitude and tilt qualification. */
-        const bool acro = requested_mode==CONTROL_MODE_ACRO;
-        if(gyro_calibrated() && (acro || (attitude_ready() && fabsf(angles[0])<20.f && fabsf(angles[1])<20.f)) && arming_try_arm())arm_low_seen=false;
+        if(arm_gate_block()==NULL)(void)arming_try_arm();
     }
     /* Preserve the existing leveling override during staged failsafe; any
      * leveled demand without attitude flies rate (Acro) until it recovers.

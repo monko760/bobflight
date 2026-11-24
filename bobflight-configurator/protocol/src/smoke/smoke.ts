@@ -129,15 +129,30 @@ async function main(): Promise<void> {
   const armResp = await client.arm();
   console.log("arm (explicit API):", JSON.stringify(armResp.trim()));
   assert(
-    armResp.includes("arm refused (gyro unhealthy or failsafe)"),
-    "arm refuse string"
+    armResp.trim() === "arm refused: gyro-unhealthy",
+    "N2 arm refuse string (first blocking check)"
   );
+  assert(client.getSentCommands().slice(-2).join(",") === "status,arm", "arm() re-reads status (arm_cli: check) before arm");
 
   await client.disconnect();
   offStatus();
   assert(client.getConnectionStatus() === "disconnected", "disconnected");
 
   console.log("statuses seen:", statuses.join(" -> "));
+
+  // N2 capability: pre-N2 firmware (no `arm_cli: check`) really arms on `arm`;
+  // arm() must refuse without sending it.
+  {
+    const old = new BobFlightCliClient(new MockTransportFactory({ armCli: "old-fc", gyroHealthy: true }));
+    await old.connect({ path: MOCK_PORT_PATH, baudRate: 115200 });
+    let err = "";
+    try { await old.arm(); } catch (e) { err = e instanceof Error ? e.message : String(e); }
+    assert(err === "Older firmware: the CLI arm command can arm this board. Update firmware to use Arm check.", `old-fc arm() refused: ${err}`);
+    assert(!old.getSentCommands().includes("arm"), "old-fc: arm never sent");
+    assert((await old.getStatus()).arm === "disarmed", "old-fc: still disarmed");
+    await old.disconnect();
+    console.log("OK: old-fc (no arm_cli) arm() refused, arm never sent");
+  }
   console.log("=== SMOKE PASS ===");
 }
 

@@ -41,6 +41,10 @@ const char *control_level_fallback_name(void);
 /** Fallback engagements while armed since boot. */
 uint32_t control_level_fallback_count(void);
 
+/* N2: CLI `arm` never arms (only a fresh radio ARM switch edge does); this
+ * returns the token printed after "arm refused: " (never NULL). */
+const char *arm_cli_refusal(void);
+
 void loop_gyro(void);
 void loop_filter(void);
 void loop_pid(void);
