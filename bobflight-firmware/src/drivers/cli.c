@@ -100,7 +100,7 @@ static void cmd_help(void)
         "  motor_pulse <1..4> <0..100> - one-second adjustable props-off pulse\r\n"
         "  motor_seq - spin motors in order RR FR RL FL (1s each)\r\n"
         "  dshot [300|600] - show or switch DShot bit rate\r\n"
-        "  arm      - attempt arm (refuses if gyro unhealthy)\r\n"
+        "  arm      - arm check only: prints the first blocking check (arming needs the radio ARM switch)\r\n"
         "  disarm   - disarm\r\n"
         "  pid_diag [status|start|start rx|stop] - 60s zero-output rate/PID diagnostic\r\n"
         "  timing   - read clock and scheduler task health (not sensor sample rate)\r\n"
@@ -536,11 +536,10 @@ static void handle_line(char *line)
     } else if (cmd_defaults(line)) {
         /* D1: `defaults pid|rates|filters` resets that group only (RAM, no save). */
     } else if (strcmp(line, "arm") == 0) {
-        if (arming_try_arm()) {
-            cli_write_str("armed\r\n");
-        } else {
-            cli_write_str("arm refused (gyro unhealthy or failsafe)\r\n");
-        }
+        /* N2: same gate as the ARM switch; USB never arms by itself. */
+        cli_write_str("arm refused: ");
+        cli_write_str(arm_cli_refusal());
+        cli_write_str("\r\n");
     } else if (strcmp(line, "disarm") == 0) {
         (void)bench_motor_test(0);
         arming_disarm();

@@ -29,7 +29,9 @@ const EXPECTED: Record<ReceiverLinkMockScenario, Row> = {
   "present-ok": ["present", "87", "none"],
   "absent": ["absent", "unavailable", "none"],
   "lq-zero": ["present", "0", "lq-zero"],
-  "rf-mode-low": ["present", "64", "rf-mode-low"],
+  "link-rate-low": ["present", "64", "link-rate-low"],
+  "rf-mode-0-ok": ["present", "92", "none"],
+  "old-rf-mode-low": ["present", "64", "rf-mode-low"],
   "stats-stale": ["present", "unavailable", "stats-stale"],
   "no-frames": ["present", "unavailable", "no-frames"],
   "unknown-token": ["partial", "unknown", "rf-jammed"],
@@ -117,9 +119,9 @@ async function main() {
   await test("rx_loss_reason is rendered verbatim with no token allowlist: every FW token (read from rx.c) and unknown ones", () => {
     const rxC = readFileSync(new URL("../../../bobflight-firmware/src/drivers/rx.c", import.meta.url), "utf8");
     const fwTokens = [...rxC.matchAll(/case RX_LOSS_[A-Z_]+: return "([a-z-]+)";/g)].map((m) => m[1]);
-    assert.deepEqual([...fwTokens].sort(), ["lq-zero", "no-frames", "none", "rf-mode-low", "stats-stale"], "FW rx_loss_reason tokens");
+    assert.deepEqual([...fwTokens].sort(), ["link-rate-low", "lq-zero", "no-frames", "none", "stats-stale"], "FW rx_loss_reason tokens (N2: rf-mode-low retired)");
     const base = new MockReceiver("present-ok").handle("receiver", false, false)!;
-    for (const tok of [...fwTokens, "rf-mode-lower", "rf_mode_low", "RF-MODE-LOW", "mode-7"]) {
+    for (const tok of [...fwTokens, "rf-mode-low", "rf-mode-lower", "rf_mode_low", "RF-MODE-LOW", "mode-7"]) {
       const r = parseReceiver(base.replace("rx_loss_reason: none", `rx_loss_reason: ${tok}`));
       assert.equal(r.rx_loss_reason, tok, "parser keeps the token verbatim");
       assert.equal(staticCells(renderToStaticMarkup(<ReceiverLinkReadout reading={r} />)).rx_loss_reason, tok, `${tok} rendered verbatim`);
@@ -135,13 +137,16 @@ async function main() {
       assert.equal(st.failsafe, lost ? "ACTIVE" : "ok", `${sc}: status failsafe`);
       assert.equal(shouldDisableArm(st), lost, `${sc}: Arm ${lost ? "blocked" : "open"}`);
       if (lost) assert.ok(st.failClosedReasons.includes("failsafe:ACTIVE"), `${sc}: fail-closed reason failsafe:ACTIVE`);
+      /* N2: USB `arm` never arms; it names the first blocking check. Only the ARM switch arms. */
       const armReply = String(await m.sendCommand("arm" as CliCommand));
-      assert.equal(/^armed/.test(armReply), !lost, `${sc}: mock arm ${lost ? "refused" : "accepted"}: ${armReply}`);
-      if (sc === "rf-mode-low") {
-        assert.equal(lost, true, "rf-mode-low is a loss: failsafe 1");
-        assert.deepEqual(KEYS.map((k) => staticCells(renderToStaticMarkup(<ReceiverLinkReadout reading={rx} />))[k]), ["present", "64", "rf-mode-low"]);
+      assert.equal(armReply, lost ? "arm refused: failsafe" : "arm refused: arm-switch-required", `${sc}: mock arm reply`);
+      assert.equal(m.simulateArmSwitch(true), !lost, `${sc}: ARM switch edge ${lost ? "refused" : "arms"}`);
+      if (sc === "link-rate-low") {
+        assert.equal(lost, true, "link-rate-low (~4 Hz) is a loss: failsafe 1");
+        assert.deepEqual(KEYS.map((k) => staticCells(renderToStaticMarkup(<ReceiverLinkReadout reading={rx} />))[k]), ["present", "64", "link-rate-low"]);
       }
-      if (["lq-zero", "rf-mode-low", "stats-stale", "no-frames"].includes(sc)) assert.equal(lost, true, `${sc}: every loss reason blocks Arm`);
+      if (sc === "rf-mode-0-ok") assert.equal(lost, false, "N2: rf_mode 0 (ExpressLRS 4.x 25 Hz) with good LQ is not a loss");
+      if (["lq-zero", "link-rate-low", "old-rf-mode-low", "stats-stale", "no-frames"].includes(sc)) assert.equal(lost, true, `${sc}: every loss reason blocks Arm`);
       await m.disconnect();
     });
   }
@@ -180,7 +185,7 @@ async function main() {
   context.connectionStatus = "connected";
   flushSync(() => root.render(<ReceiverPage />));
   const blockedNote = () => container.textContent.includes("Apply all edits on this page before saving");
-  const order: ReceiverLinkMockScenario[] = ["present-ok", "lq-zero", "rf-mode-low", "stats-stale", "no-frames", "absent", "unknown-token", "old-fc", "present-ok"];
+  const order: ReceiverLinkMockScenario[] = ["present-ok", "lq-zero", "link-rate-low", "rf-mode-0-ok", "stats-stale", "no-frames", "absent", "unknown-token", "old-fc", "present-ok"];
   for (const sc of order) {
     await test(`ReceiverPage follows each new receiver reply: ${sc}`, async () => {
       mock.setMockGates({ receiverLinkScenario: sc });
@@ -190,6 +195,15 @@ async function main() {
       if (sc !== "old-fc") assert.equal(blockedNote(), false, `${sc}: link state must not feed StoragePanel blocked`);
     });
   }
+  await test("N2 wording: rf_mode is not a loss signal; slow links are link-rate-low; nothing calls RF mode 0 lost", () => {
+    const help = (k: string) => visibleText(container.findAll((e) => e.getAttribute("data-rx-link-help") === k)[0]);
+    assert.match(help("loss"), /LQ 0, no statistics for more than 1 second, or a link too slow to fly/);
+    assert.match(help("loss"), /link-rate-low/);
+    assert.match(help("rf-mode"), /not a loss signal/);
+    assert.match(help("rf-mode"), /RF mode 0, which is a healthy link/);
+    assert.doesNotMatch(container.textContent, /rf.?mode 0[^.]*\blost\b/i, "no text calls RF mode 0 lost");
+    assert.doesNotMatch(container.textContent, /4 ?fps/i, "no rf_profile 4 fps wording");
+  });
   await test("valid diagnostics enable CRSF without a new Apply/Save or protocol command", () => {
     const select = protocolSelect();
     assert.ok(!disabled(select));

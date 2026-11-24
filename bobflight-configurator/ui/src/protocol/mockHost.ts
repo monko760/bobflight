@@ -1,5 +1,6 @@
 /* Copyright 2026 Robert Leclercq. SPDX-License-Identifier: Apache-2.0 */
 import { boardIdMockVersion, type BoardIdMockScenario } from "@bobflight/protocol";
+import { ARM_REFUSED_PREFIX, mockArmRefusal, mockArmSwitchEdge, type MockArmGateState } from "@bobflight/protocol";
 import { MockPortsModes, isModeRangeCommand, isControlSourceCommand, mockGyroHealthLines, mockGyroHealthForcesUnhealthy, type GyroHealthMockScenario } from "@bobflight/protocol";
 /**
  * Browser-safe mock host matching BobFlightCliClient surface.
@@ -51,7 +52,6 @@ import { ALLOWED_CLI_COMMANDS } from "./types";
 import { parseStatus, parseVersionLine } from "./parseStatus";
 
 const MOCK_BANNER = "BobFlight 0.1.0-skeleton ready";
-const ARM_REFUSE = "arm refused (gyro unhealthy or failsafe)";
 
 const MOCK_PORTS: PortInfo[] = [
   {
@@ -79,6 +79,8 @@ export class MockBobFlightHost implements BobFlightHost {
   private statusListeners = new Set<(s: ConnectionStatus) => void>();
   private dshotBidir = false;
   private armed = false;
+  /** N2: simulated radio ARM switch (off at connect); the only way this mock arms, as on the FC. */
+  private armSwitchOn = false;
   private bench = new MockMotorBench();
   /** Onboard Blackbox (status api 2). Default "none": honest no-SD-card reply. */
   readonly blackbox = new MockOnboardBlackbox("none");
@@ -188,6 +190,7 @@ export class MockBobFlightHost implements BobFlightHost {
     }
     this.lastError = null;
     this.armed = false;
+    this.armSwitchOn = false;
     this.dshotBidir = mockLoopRateBidir(this.loopRateScenario); // RAM-only; bidir scenarios start on
     if (this.rpmFilterScenario !== undefined) this.dshotBidir = MockRpmFilter.scenarioBidir(this.rpmFilterScenario);
     this.bench.reset();
@@ -391,7 +394,7 @@ export class MockBobFlightHost implements BobFlightHost {
           "  help     - this text",
           "  version  - firmware version",
           "  status   - MCU, loops, arm, gyro, board",
-          "  arm      - attempt arm (refuses if gyro unhealthy)",
+          "  arm      - arm check only: prints the first blocking check (arming needs the radio ARM switch)",
           "  disarm   - disarm",
           "  reboot   - soft reset (host: exit loop flag)",
         ].join("\r\n");
@@ -419,11 +422,8 @@ export class MockBobFlightHost implements BobFlightHost {
         ].join("\r\n");
       }
       case "arm":
-        if (this.gyroOk() && !this.failsafeActive) {
-          this.armed = true;
-          return "armed";
-        }
-        return ARM_REFUSE;
+        // N2 (FW tasks.c arm_cli_refusal): same gate as the ARM switch; never arms.
+        return `${ARM_REFUSED_PREFIX}${mockArmRefusal(this.armGateState())}`;
       case "disarm":
         this.armed = false;
         return "disarmed";
@@ -436,6 +436,21 @@ export class MockBobFlightHost implements BobFlightHost {
       default:
         return "unknown — try help";
     }
+  }
+
+  private armGateState(): MockArmGateState {
+    return { armed: this.armed, benchActive: this.bench.active, gyroOk: this.gyroOk(), failsafeActive: this.failsafeActive, armSwitchOn: this.armSwitchOn };
+  }
+
+  /**
+   * N2 test/demo hook: move the simulated radio ARM switch. Like the FC, only
+   * an off-to-on edge arms, and only when the gate passes; off disarms.
+   * Returns the armed state afterwards.
+   */
+  simulateArmSwitch(on: boolean): boolean {
+    this.armed = mockArmSwitchEdge(this.armGateState(), on);
+    this.armSwitchOn = on;
+    return this.armed;
   }
 
   /** FW contract: any non-ok gyro_health also makes gyro_ok no (and refuses arm). */

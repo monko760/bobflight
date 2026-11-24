@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useHost } from "../hooks/useHost";
-import { shouldDisableArm, type CliCommand } from "../protocol";
+import { parseArmReply, type ArmReply } from "@bobflight/protocol";
+import { shouldDisableArm, statusArmRefusal, type CliCommand } from "../protocol";
 
 type PendingAction = "arm" | "disarm" | "reboot" | null;
 
@@ -31,19 +32,23 @@ export function StatusPage() {
   const [pending, setPending] = useState<PendingAction>(null);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [armCheck, setArmCheck] = useState<ArmReply | null>(null);
 
   const connected = connectionStatus === "connected";
   const armDisabled =
     !connected || busy || shouldDisableArm(status) || status?.arm === "armed";
+  const statusRefusal = statusArmRefusal(status);
   const disarmDisabled = !connected || busy || status?.arm !== "armed";
 
   async function runConfirmed(cmd: CliCommand) {
     setBusy(true);
     setActionMsg(null);
     setLastError(null);
+    if (cmd === "arm") setArmCheck(null);
     try {
       const reply = await host.sendCommand(cmd);
       setActionMsg(reply.split(/\r?\n/).filter(Boolean).join(" | "));
+      if (cmd === "arm") setArmCheck(parseArmReply(reply));
       if (cmd !== "reboot" && host.getConnectionStatus() === "connected") {
         await refreshStatus();
       }
@@ -62,9 +67,9 @@ export function StatusPage() {
     { title: string; message: string; label: string; danger?: boolean }
   > = {
     arm: {
-      title: "Confirm arm",
+      title: "Confirm arm check",
       message:
-        "Send the exact CLI command 'arm'? This will only succeed if the flight controller is ready. Never auto-armed on connect.",
+        "Send the exact CLI command 'arm'? Current firmware never arms from USB: it runs the same checks as the radio ARM switch and replies with the first one that blocks arming. Arm with the radio ARM switch (off, then on). Firmware before this change may arm on this command. Never sent automatically.",
       label: "Send arm",
       danger: true,
     },
@@ -136,7 +141,10 @@ export function StatusPage() {
             ))}
           </ul>
           {shouldDisableArm(status) && (
-            <p>Arm is disabled while gyro_ok:no or failsafe:ACTIVE.</p>
+            <p>
+              Arm check is disabled while gyro_ok:no or failsafe:ACTIVE; the
+              flight controller replies <code>{statusRefusal}</code>.
+            </p>
           )}
         </div>
       )}
@@ -148,12 +156,12 @@ export function StatusPage() {
           disabled={armDisabled}
           onClick={() => setPending("arm")}
           title={
-            shouldDisableArm(status)
-              ? "Disabled: gyro_ok:no or failsafe:ACTIVE"
-              : undefined
+            statusRefusal
+              ? `Disabled: the flight controller replies "${statusRefusal}"`
+              : "Sends 'arm': the reply names the first check that blocks arming"
           }
         >
-          Arm…
+          Arm check…
         </button>
         <button
           type="button"
@@ -172,6 +180,27 @@ export function StatusPage() {
           Reboot…
         </button>
       </div>
+
+      <p className="muted" data-testid="arm-gate-note">
+        USB never arms: only the radio ARM switch arms (switch it off, then on),
+        through the same checks. Arm check sends <code>arm</code> and shows the
+        first check that blocks arming.
+      </p>
+      {statusRefusal && (
+        <p className="muted" data-testid="arm-status-refusal">
+          Arm check now: <code>{statusRefusal}</code> —{" "}
+          {parseArmReply(statusRefusal).explanation}
+        </p>
+      )}
+
+      {armCheck && (
+        <div className={armCheck.kind === "legacy-armed" ? "fail" : "muted"} data-testid="arm-check-reply" role="status">
+          <div>
+            Last arm check reply: <code data-testid="arm-check-line">{armCheck.line || "(no reply)"}</code>
+          </div>
+          {armCheck.explanation && <div data-testid="arm-check-explanation">{armCheck.explanation}</div>}
+        </div>
+      )}
 
       {actionMsg && <p className="muted">Last action reply: {actionMsg}</p>}
 

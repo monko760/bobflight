@@ -129,8 +129,8 @@ async function main(): Promise<void> {
   const armResp = await client.arm();
   console.log("arm (explicit API):", JSON.stringify(armResp.trim()));
   assert(
-    armResp.includes("arm refused (gyro unhealthy or failsafe)"),
-    "arm refuse string"
+    armResp.trim() === "arm refused: gyro-unhealthy",
+    "N2 arm refuse string (first blocking check)"
   );
 
   await client.disconnect();

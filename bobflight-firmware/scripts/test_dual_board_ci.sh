@@ -91,7 +91,7 @@ assert_host_cli() {
   # (failsafe_active(), failsafe.c); no receiver in the host CLI, so status
   # says ACTIVE. Expectation fix only; firmware output is unchanged.
   need_in "$out" "failsafe: ACTIVE" || ok=1
-  need_in "$out" "arm refused (gyro unhealthy or failsafe)" || ok=1
+  need_in "$out" "arm refused: gyro-unhealthy" || ok=1
   need_in "$out" "disarmed" || ok=1
   need_in "$out" "unknown — try help" || ok=1
   need_in "$out" "bobflight host smoke: ok (cascade exercised)" || ok=1

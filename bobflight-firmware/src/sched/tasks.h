@@ -30,6 +30,10 @@ const char *control_requested_name(void);
 const char *control_effective_name(void);
 bool control_mode_conflict(void);
 
+/* N2: CLI `arm` never arms (only a fresh radio ARM switch edge does); this
+ * returns the token printed after "arm refused: " (never NULL). */
+const char *arm_cli_refusal(void);
+
 void loop_gyro(void);
 void loop_filter(void);
 void loop_pid(void);

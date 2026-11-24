@@ -39,7 +39,8 @@
     "test:hex-builder": "esbuild scripts/test-hex-builder.tsx --bundle --platform=node --format=esm --packages=external --outfile=scripts/test-hex-builder.bundle.mjs --jsx=automatic && node scripts/test-hex-builder.bundle.mjs",
     "test:board-identity": "node scripts/run-board-identity.mjs",
     "test:defaults-scoped": "node scripts/run-defaults-scoped.mjs",
-    "test:gate-fifo": "node scripts/run-gate-fifo.mjs"
+    "test:gate-fifo": "node scripts/run-gate-fifo.mjs",
+    "test:status-arm": "node scripts/run-status-arm.mjs"
   },
   "dependencies": {
     "@bobflight/protocol": "file:../protocol",

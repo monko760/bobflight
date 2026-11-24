@@ -72,7 +72,8 @@ need "arm: disarmed"
 # The host CLI has no receiver, so `status` must report ACTIVE here; this is
 # the expectation only, firmware output is unchanged (it always said ACTIVE).
 need "failsafe: ACTIVE"
-need "arm refused (gyro unhealthy or failsafe)"
+# N2: CLI arm never arms; the host has no gyro, so the first blocking check is gyro-unhealthy.
+need "arm refused: gyro-unhealthy"
 need "disarmed"
 need "unknown — try help"
 need "bobflight host smoke: ok (cascade exercised)"

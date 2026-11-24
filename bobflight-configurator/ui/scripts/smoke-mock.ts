@@ -66,8 +66,8 @@ async function main(): Promise<void> {
   const armResp = await client.sendCommand("arm");
   console.log("arm:", JSON.stringify(armResp.trim()));
   assert(
-    armResp.includes("arm refused (gyro unhealthy or failsafe)"),
-    "arm refuse",
+    armResp.trim() === "arm refused: gyro-unhealthy",
+    "N2 arm refuse: same gate as the ARM switch, first blocking check",
   );
 
   await client.disconnect();

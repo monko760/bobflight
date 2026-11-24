@@ -26,6 +26,17 @@ export {
 
 export { parseStatus, parseVersionLine } from "./parse-status";
 export {
+  ARM_REFUSED_PREFIX,
+  ARM_LEGACY_REFUSED,
+  ARM_REFUSAL_TOKENS,
+  ARM_REFUSAL_TEXT,
+  isArmRefusalToken,
+  parseArmReply,
+  mockArmRefusal,
+  mockArmSwitchEdge,
+} from "./arm-gate";
+export type { ArmRefusalToken, ArmReply, ArmReplyKind, MockArmGateState } from "./arm-gate";
+export {
   LineBuffer,
   ResponseCollector,
   encodeCommand,

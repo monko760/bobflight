@@ -28,6 +28,11 @@ arm_state_t arming_state(void);
  * Leveled modes (Angle/Horizon) still require qualified gravity. */
 bool arming_rate_only(void);
 bool arming_try_arm(void);   /* false if gyro / failsafe / throttle high */
+/* First check arming_try_arm() would fail, as a stable lowercase token
+ * ("bench-build", "no-motor-output", "receiver-stale", "gravity-not-ready",
+ * "gyro-not-ready", "gyro-unhealthy", "failsafe", "throttle-not-low"), or
+ * NULL when it would arm. Never changes the arm state. */
+const char *arming_block_reason(void);
 void arming_disarm(void);
 void arming_set_gyro_healthy(bool healthy);
 

@@ -98,7 +98,8 @@ export function ReceiverPage() {
     </div>
     <h3>CRSF link statistics</h3>
     <ReceiverLinkReadout reading={responding?reading:null}/>
-    <p className="muted">Once the receiver has sent link statistics, the firmware treats LQ 0, or no statistics for more than 1 second, as receiver loss: the existing failsafe cuts the motors about 250 ms later and the board does not re-arm by itself. “absent” means none were seen since boot, so loss detection uses channel frames only.</p>
+    <p className="muted" data-rx-link-help="loss">Once the receiver has sent link statistics, the firmware treats LQ 0, no statistics for more than 1 second, or a link too slow to fly (fewer than 8 channel frames per second, such as a ~4 Hz mode: <code>link-rate-low</code>) as receiver loss: the existing failsafe cuts the motors about 250 ms later and the board does not re-arm by itself. “absent” means none were seen since boot, so loss detection uses channel frames only.</p>
+    <p className="muted" data-rx-link-help="rf-mode">The RF mode number a receiver reports is not a loss signal: ExpressLRS 4.x reports its 900 MHz 25 Hz rate as RF mode 0, which is a healthy link. Firmware before this change reported <code>rf-mode-low</code> for RF mode 0; update the firmware if you see it.</p>
     <h3>Receiver connection</h3>
     <p><label htmlFor="receiver-protocol">Receiver protocol</label>{" "}
       <select id="receiver-protocol" aria-describedby="receiver-protocol-help" value="CRSF" disabled={!editable}

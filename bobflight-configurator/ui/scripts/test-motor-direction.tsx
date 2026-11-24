@@ -288,9 +288,9 @@ async function main() {
     });
   }
 
-  await test("real armed FC (mock armed via `arm`): the existing armed line verbatim", async () => {
+  await test("real armed FC (mock armed by its simulated ARM switch): the existing armed line verbatim", async () => {
     const t = await panelRig("props-out");
-    await t.mock.sendCommand("arm");
+    assert.equal(t.mock.simulateArmSwitch(true), true);
     await choose("props-in");
     await click(setButton());
     assert.ok(await waitFor(() => testId("motor-direction-fc-line") !== null));
@@ -559,7 +559,7 @@ async function main() {
     const t = await motorsPage(false);
     assert.ok(await waitFor(() => lockLine() === null && !isDisabled(select())), `idle unlock: ${lockLine()}`);
     await choose("props-in");
-    await t.mock.sendCommand("arm" as CliCommand);
+    assert.equal(t.mock.simulateArmSwitch(true), true);
     assert.ok(await waitFor(() => lockLine() === "Locked: the controller reports arm: armed (must be disarmed)."), String(lockLine()));
     await assertLockedNoSet(t, "armed");
     await t.mock.sendCommand("disarm" as CliCommand);
@@ -707,7 +707,7 @@ async function main() {
     const t = await gatedHost("props-out");
     const root = mountPanel(t.host);
     assert.ok(await waitFor(() => held() === "props-out" && mixerCells().mixer === "props-out"));
-    await t.mock.sendCommand("arm" as CliCommand);
+    assert.equal(t.mock.simulateArmSwitch(true), true);
     await choose("props-in");
     const before = t.ops.length;
     const t0 = Date.now();

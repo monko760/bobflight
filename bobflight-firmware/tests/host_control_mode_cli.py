@@ -29,4 +29,8 @@ assert modes(run(b'control_mode\n'))==['angle']
 text=run(b'control_mode acro\nstatus\narm\nstatus\n')
 assert 'arm: disarmed' in text and 'arm refused' in text,text
 assert 'arm: armed' not in text,text
+# N2: the real cli.c `arm` line prints the shared gate's first blocking token and never arms.
+text=run(b'arm\narm\nstatus\n')
+assert text.count('arm refused: gyro-unhealthy\r\n')==2,text
+assert '\narmed\r\n' not in text and 'arm: disarmed' in text,text
 print('PASS: real CLI mode query/switch, framing, malformed/overflow/NUL rejection, RAM-only restart and unchanged arm refusal')

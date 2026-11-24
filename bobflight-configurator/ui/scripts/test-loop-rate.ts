@@ -238,7 +238,7 @@ async function main() {
     const spy: LoopRateSettingHost = { sendCommand: c => { sent.push(c); return host.sendCommand(c); }, saveSettings: async () => {} };
     const before = await readLoopRateSetting(spy);
     assert.deepEqual(before.get, { kind: "value", value: "4000" });
-    assert.equal(await host.sendCommand("arm"), "armed");
+    assert.equal(host.simulateArmSwitch(true), true, "N2: armed by the simulated radio ARM switch");
     sent.length = 0;
     const after = await selectLoopRate(spy, { ...before, message: "stale message" }, "8000");
     assert.deepEqual(after.get, { kind: "value", value: "4000" });

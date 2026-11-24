@@ -142,7 +142,9 @@ await test('mock FC + client: each group resets only its keys, frozen shape, no 
 });
 await test('mock FC: armed / bench refusals and every scenario through the client',async()=>{
   const client=await connect({gyroHealthy:true});
-  assert.equal((await client.sendCommand('arm')).trim(),'armed');
+  assert.equal((await client.sendCommand('arm')).trim(),'arm refused: arm-switch-required','N2: USB never arms');
+  assert.equal(port.simulateArmSwitch(true),true,'armed by the simulated radio ARM switch');
+  assert.equal((await client.sendCommand('arm')).trim(),'arm refused: already-armed');
   const a=await client.restoreDefaultsGroup('pid');assert.deepEqual({kind:a.kind,line:a.line},{kind:'error',line:ERR.armed});
   await client.sendCommand('disarm');
   for(const s of ['bench_active','calibration_active','unknown_group','group_required','future_error','blackbox_refused']){port.defaultsScenario=s;const r=await client.restoreDefaultsGroup('rates');assert.equal(r.kind,'error',s);assert.equal(r.line,ERR[s]);}

@@ -249,6 +249,8 @@ jobs:
         run: node ui/scripts/test-receiver.cjs ../bobflight-firmware/build-contract/bobflight_host waiting
       - name: Receiver CRSF link statistics readout (mocks, verbatim tokens, ReceiverPage render) tests
         run: npm --prefix ui run test:receiver-link
+      - name: Status Arm check (CLI arm never arms; firmware refusal tokens, verbatim reply, disabled reason, honest mock ARM switch)
+        run: npm --prefix ui run test:status-arm
       - name: Live receiver switch identification in Modes
         run: node ui/scripts/test-mode-receiver.cjs
       - name: Receiver switch bench CLI guards
