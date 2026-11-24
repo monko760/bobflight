@@ -253,6 +253,8 @@ jobs:
         run: npm --prefix ui run test:status-arm
       - name: Live receiver switch identification in Modes
         run: node ui/scripts/test-mode-receiver.cjs
+      - name: Modes tab leveled-mode rate fallback readout (N1; mocks report nothing)
+        run: npm --prefix ui run test:level-fallback
       - name: Receiver switch bench CLI guards
         run: node ui/scripts/test-switch-bench.cjs
       - name: Motor bench UI safety tests
@@ -305,6 +307,22 @@ jobs:
         run: npm --prefix protocol run smoke:flasher
       - name: Build
         run: npm run build
+
+  configurator-flashable-list:
+    name: Configurator — flashable list matches all-boards
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bobflight-configurator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: HEX builder, Flasher and target catalog match --list-flashable
+        run: npm run test:flashable-list
 
   target-tooling-windows:
     name: Target selection and publication (Windows)

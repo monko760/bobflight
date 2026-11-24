@@ -86,7 +86,7 @@ export function CliPage() {
         <code>get dshot_telem_m1</code>…<code>get dshot_telem_m4</code>,{" "}
         <code>get dshot_bidir</code>, <code>set dshot_bidir on</code> |{" "}
         <code>set dshot_bidir off</code>. Arm / disarm / reboot and bl
-        (including bl discard) always ask for confirmation.
+        (including bl discard) always ask for confirmation. On current firmware, <code>diff</code> and <code>diff all</code> print the same changed-settings report (no profile split). This box lists <code>diff all</code>.
       </p>
       <pre className="console" ref={logRef}>
         {cliLines.length === 0 ? (

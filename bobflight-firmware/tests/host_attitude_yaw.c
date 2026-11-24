@@ -30,16 +30,17 @@ int main(void){
  /* Yaw does not leak into the existing outer-loop yaw rate setpoint. */
  float sticks[4]={0,0,.5f,0},out[3];attitude_setpoint(sticks,out);NEAR(out[2],100);
  sticks[2]=0;attitude_setpoint(sticks,out);NEAR(out[2],0);
- /* Bad timing, nonfinite input and existing singularity gate do not invent yaw. */
+ /* Bad timing and nonfinite input do not invent yaw. */
  const float before=attitude_degrees()[2];
  CHECK(!attitude_update(gyro,acc,.1f));NEAR(attitude_degrees()[2],before);
  CHECK(!attitude_update(gyro,acc,0));NEAR(attitude_degrees()[2],before);
  gyro[2]=NAN;CHECK(!attitude_update(gyro,acc,.001f));NEAR(attitude_degrees()[2],before);
  gyro[2]=INFINITY;CHECK(!attitude_update(gyro,acc,.001f));NEAR(attitude_degrees()[2],before);
+ /* N1: vertical gravity is a valid seed, no pitch-singularity give-up. */
  gyro[0]=gyro[1]=gyro[2]=0;acc[0]=-1;acc[1]=acc[2]=0;
- CHECK(!attitude_update(gyro,acc,.001f));CHECK(!attitude_ready());NEAR(attitude_degrees()[2],before);
+ CHECK(attitude_update(gyro,acc,.001f));CHECK(attitude_ready());NEAR(attitude_degrees()[1],90);
  /* Reboot resets the relative reference; invalid acceleration cannot seed it. */
  attitude_init();NEAR(attitude_degrees()[2],0);acc[0]=0;
  CHECK(!attitude_update(gyro,acc,.001f));NEAR(attitude_degrees()[2],0);
- puts("PASS gyro-relative yaw: 1/4/8kHz, both signs/wraps, banked transform, invalid samples, reboot, unchanged yaw control");return 0;
+ puts("PASS gyro-relative yaw: 1/4/8kHz, both signs/wraps, banked transform, invalid samples, vertical seed, reboot, unchanged yaw control");return 0;
 }

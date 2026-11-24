@@ -2,7 +2,27 @@
 import type { CliCommand } from './types';
 export type ControlMode='angle'|'acro'|'horizon';
 export interface ModeRow {name:'ARM'|'ANGLE'|'ACRO'|'HORIZON';enabled:boolean;aux:number;minUs:number;maxUs:number;active:boolean}
-export interface ParsedModes {raw:string;apiVersion:1|2;calibrationActive:boolean;controlSource?:'manual'|'aux';requestedMode?:ControlMode;effectiveMode?:ControlMode;modeConflict?:boolean;armSemantics?:'preview'|'configured'; persistence:'session'|'flash';semantics:'control'|'preview'|'bench-control';flightEnabled:boolean;armed:boolean;benchActive:boolean;rxFresh:boolean;modes:ModeRow[];channels?:number[];source?:string}
+/** N1 leveled-mode rate fallback (frozen; a new reason or state value is a contract change). */
+export type LevelFallbackReason='none'|'attitude-invalid'|'failsafe-gravity-unqualified';
+export type AttitudeState='valid'|'uninitialized'|'accel-invalid'|'gravity-timeout'|'recovering';
+export const LEVEL_FALLBACK_REASONS:readonly LevelFallbackReason[]=['none','attitude-invalid','failsafe-gravity-unqualified'];
+export const ATTITUDE_STATES:readonly AttitudeState[]=['valid','uninitialized','accel-invalid','gravity-timeout','recovering'];
+/** Present only when the firmware reports all four keys; older firmware and the offline mock omit them. */
+export interface LevelFallbackStatus {active:boolean;reason:LevelFallbackReason;count:number;attitudeState:AttitudeState}
+const LEVEL_FALLBACK_KEYS=['level_fallback','level_fallback_reason','level_fallback_count','attitude_state'];
+export function parseLevelFallback(f:Map<string,string>,effective:ControlMode):LevelFallbackStatus|undefined{
+ const present=LEVEL_FALLBACK_KEYS.filter(k=>f.has(k));
+ if(present.length===0)return undefined;
+ if(present.length!==LEVEL_FALLBACK_KEYS.length)throw Error('Incomplete level fallback report');
+ const active=bit(field(f,'level_fallback')),reason=field(f,'level_fallback_reason'),attitudeState=field(f,'attitude_state');
+ if(!(LEVEL_FALLBACK_REASONS as readonly string[]).includes(reason))throw Error('Invalid level fallback reason');
+ if(!(ATTITUDE_STATES as readonly string[]).includes(attitudeState))throw Error('Invalid attitude state');
+ if(active!==(reason!=='none'))throw Error('Contradictory level fallback indication');
+ if(active&&effective!=='acro')throw Error('Level fallback must fly rate (acro) control');
+ const count=uint(field(f,'level_fallback_count'),0,4294967295);
+ return {active,reason:reason as LevelFallbackReason,count,attitudeState:attitudeState as AttitudeState};
+}
+export interface ParsedModes {raw:string;levelFallback?:LevelFallbackStatus;apiVersion:1|2;calibrationActive:boolean;controlSource?:'manual'|'aux';requestedMode?:ControlMode;effectiveMode?:ControlMode;modeConflict?:boolean;armSemantics?:'preview'|'configured'; persistence:'session'|'flash';semantics:'control'|'preview'|'bench-control';flightEnabled:boolean;armed:boolean;benchActive:boolean;rxFresh:boolean;modes:ModeRow[];channels?:number[];source?:string}
 export function uint(s:string,lo:number,hi:number):number {if(!/^(0|[1-9]\d*)$/.test(s))throw Error('Expected canonical unsigned integer');const n=Number(s);if(!Number.isSafeInteger(n)||n<lo||n>hi)throw Error('Integer outside supported bounds');return n;}
 export function bit(s:string):boolean {return uint(s,0,1)===1;}
 export function snapshot(raw:string,kind:string,rowKey:string,versions:number[]=[1]):{fields:Map<string,string>;rows:string[];apiVersion:number} {
@@ -41,7 +61,8 @@ export function parseModes(raw:string):ParsedModes {
    if(requested!==expected)throw Error('Contradictory AUX selection');
   }
   if(base.flightEnabled&&source==='aux')throw Error('AUX mode routing is unavailable in this firmware');
-  return {...base,calibrationActive:bit(field(f,'calibration_active')),armSemantics,controlSource:source,requestedMode:requested as ControlMode,effectiveMode:effective as ControlMode,modeConflict:conflict};
+  const levelFallback=parseLevelFallback(f,effective as ControlMode);
+  return {...base,calibrationActive:bit(field(f,'calibration_active')),armSemantics,controlSource:source,requestedMode:requested as ControlMode,effectiveMode:effective as ControlMode,modeConflict:conflict,...(levelFallback?{levelFallback}:{})};
  }
  return base;
 }

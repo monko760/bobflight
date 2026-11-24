@@ -34,7 +34,8 @@ static float sample_dt;
 /* PID uses its own invocation clock, never the latest gyro sample interval. */
 static uint64_t last_pid_us;
 static bool have_pid_time;
-/* Rate control needs valid gyro/time; leveled modes also need attitude. */
+/* Rate control needs valid gyro/time; leveled modes also need attitude and
+ * fall back to rate control while it is unavailable (N1). */
 static bool sample_ok,attitude_ok,arm_low_seen;
 static uint32_t arm_revision_seen;
 static unsigned bench_motor;
@@ -85,6 +86,16 @@ static float bench_switch_output(void){
 }
 static control_mode_t g_control_mode = CONTROL_MODE_ANGLE;
 static control_mode_t g_effective_mode = CONTROL_MODE_ANGLE;
+/* N1: leveled control (Angle, Horizon, staged HOLD/LAND) without a trusted
+ * attitude flies rate control on the valid gyro instead of disarming. */
+static level_fallback_t g_level_fallback = LEVEL_FALLBACK_NONE;
+static uint32_t g_level_fallback_count;
+level_fallback_t control_level_fallback(void) { return g_level_fallback; }
+const char *control_level_fallback_name(void) {
+    return g_level_fallback == LEVEL_FALLBACK_ATTITUDE ? "attitude-invalid" :
+        g_level_fallback == LEVEL_FALLBACK_GRAVITY ? "failsafe-gravity-unqualified" : "none";
+}
+uint32_t control_level_fallback_count(void) { return g_level_fallback_count; }
 static bool g_control_aux;
 static const char *mode_name(control_mode_t mode) {
     return mode == CONTROL_MODE_ACRO ? "acro" : mode == CONTROL_MODE_HORIZON ? "horizon" : "angle";
@@ -272,12 +283,19 @@ void loop_pid(void)
     }
     const control_mode_t requested_mode=control_mode_requested();
     const bool needs_attitude=fs_flying || requested_mode!=CONTROL_MODE_ACRO;
-    if(!sample_ok || (needs_attitude && !attitude_ok) || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
-    else if(fs_flying) {arm_low_seen=false;
-        /* Staged HOLD/LAND fly leveled output: without qualified gravity that
-         * would be fake leveling, so fail closed and stop the motors. */
-        if(!gyro_flight_ready()) arming_disarm();
-    }
+    /* N1: leveled demand without trusted attitude becomes rate control. Staged
+     * HOLD/LAND additionally keep the qualified-gravity check: leveling on an
+     * unqualified accelerometer would be fake leveling, so they hold zero body
+     * rates at the failsafe throttle instead (never a disarm in the air). */
+    level_fallback_t fallback=LEVEL_FALLBACK_NONE;
+    if(needs_attitude && !attitude_ok) fallback=LEVEL_FALLBACK_ATTITUDE;
+    else if(fs_flying && !gyro_flight_ready()) fallback=LEVEL_FALLBACK_GRAVITY;
+    /* Gyro/time faults still disarm every mode (#103); Acro needs only these. */
+    if(!sample_ok || !dshot_is_healthy() || !pid_time_ok) {arming_disarm();arm_low_seen=false;}
+    /* On the ground, leveled arming is still refused without attitude. */
+    else if(fallback==LEVEL_FALLBACK_ATTITUDE && arming_state()!=ARM_ARMED) {arming_disarm();arm_low_seen=false;}
+    /* Failsafe's own stage timers (DROP / land timer) are what stop motors. */
+    else if(fs_flying) {arm_low_seen=false;}
     /* HOLD/LAND above owns stale-link output. Otherwise an invalid input must
      * not create the inactive witness needed for a later arm request. */
     else if(!arm_input_valid || gyro_manual_calibration_active() ||
@@ -289,8 +307,16 @@ void loop_pid(void)
         arm_low_seen=false; /* Every attempt requires a fresh valid inactive-to-active range edge. */
         if(arm_gate_block()==NULL)(void)arming_try_arm();
     }
-    /* Preserve the existing leveling override during staged failsafe. */
-    g_effective_mode = fs_flying ? CONTROL_MODE_ANGLE : requested_mode;
+    /* Preserve the existing leveling override during staged failsafe; any
+     * leveled demand without attitude flies rate (Acro) until it recovers.
+     * Failsafe sticks are centered, so its fallback holds zero body rates.
+     * Only an armed craft flies the fallback; disarmed, the requested mode is
+     * reported unchanged and arming stays refused above. */
+    if(arming_state()!=ARM_ARMED) fallback=LEVEL_FALLBACK_NONE;
+    if(fallback!=LEVEL_FALLBACK_NONE && g_level_fallback==LEVEL_FALLBACK_NONE) g_level_fallback_count++;
+    g_level_fallback = fallback;
+    g_effective_mode = fallback!=LEVEL_FALLBACK_NONE ? CONTROL_MODE_ACRO :
+        fs_flying ? CONTROL_MODE_ANGLE : requested_mode;
     if (g_effective_mode == CONTROL_MODE_ACRO)
         rates_update(sticks,g_setpoint);
     else if (g_effective_mode == CONTROL_MODE_HORIZON)

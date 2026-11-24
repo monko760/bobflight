@@ -93,13 +93,17 @@ int main(void){
     CHECK(control_mode_requested()==CONTROL_MODE_HORIZON);
     CHECK(control_mode_set(CONTROL_MODE_ANGLE));
     CHECK(arm==ARM_DISARMED);
-    /* Staged failsafe must fail closed when leveling is unqualified,
-     * and keep flying level output when gravity is qualified. */
-    arm=ARM_ARMED;rc[3]=0.4f;rc[4]=1;
-    gyro_flight=false;override=true;tick(1000);
-    CHECK(arm==ARM_DISARMED);
-    arm=ARM_ARMED;gyro_flight=true;tick(1000);
-    CHECK(arm==ARM_ARMED);
+    /* N1: staged failsafe never levels on unqualified gravity (no fake
+     * leveling) and never disarms for it in the air either: it holds zero
+     * body rates (rate fallback), and levels again once gravity qualifies. */
+    rc[3]=0.4f;rc[4]=1;tick(1000); /* consume the mode_range_init revision while disarmed */
+    arm=ARM_ARMED;gyro_flight=false;override=true;tick(1000);
+    CHECK(arm==ARM_ARMED);CHECK(control_level_fallback()==LEVEL_FALLBACK_GRAVITY);
+    CHECK(strcmp(control_level_fallback_name(),"failsafe-gravity-unqualified")==0);
+    CHECK(strcmp(control_effective_name(),"acro")==0);CHECK(control_level_fallback_count()==1);
+    gyro_flight=true;tick(1000);
+    CHECK(arm==ARM_ARMED);CHECK(control_level_fallback()==LEVEL_FALLBACK_NONE);
+    CHECK(strcmp(control_effective_name(),"angle")==0);CHECK(control_level_fallback_count()==1);
     override=false;arm=ARM_DISARMED;
     /* Real mixer/DShot endpoint: no gyro required, flight stays disarmed. */
     gyro_ok=false;rc[3]=0;rc[4]=1;CHECK(!bench_switch_start());
@@ -218,9 +222,11 @@ int main(void){
     healthy=false;tick(1000);CHECK(arm==ARM_DISARMED);
     for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
     CHECK(prime(CONTROL_MODE_ACRO));loop_pid();CHECK(arm==ARM_DISARMED);
-    /* Acro is gyro-only even when the Euler estimator cannot initialize or
-     * reaches either pitch singularity. Leveled modes still fail closed. */
+    /* Acro is gyro-only even when the estimator cannot initialize. N1: the
+     * quaternion estimator seeds at either vertical pose (no singularity), and
+     * leveled modes without attitude fly rate fallback instead of disarming. */
     const control_mode_t modes[]={CONTROL_MODE_ACRO,CONTROL_MODE_ANGLE,CONTROL_MODE_HORIZON};
+    const char *mode_names[]={"acro","angle","horizon"};
     const float invalid_attitudes[][3]={{1,0,0},{-1,0,0},{0,0,0},{NAN,0,1},{0,INFINITY,1}};
     for(unsigned m=0;m<3;m++)for(unsigned pose=0;pose<5;pose++){
         gyro_ok=true;gyro_flight=true;fresh=true;
@@ -228,16 +234,40 @@ int main(void){
         CHECK(prime(modes[m]));
         memcpy(accel,invalid_attitudes[pose],sizeof accel);attitude_init();
         if(modes[m]==CONTROL_MODE_ACRO)gyro_flight=false;
+        const bool vertical=pose<2,fallback=!vertical && modes[m]!=CONTROL_MODE_ACRO;
         unsigned filtered=filter_calls;tick(1000);
-        CHECK(!attitude_ready());CHECK(filter_calls==filtered+1);
-        CHECK(arm==(modes[m]==CONTROL_MODE_ACRO?ARM_ARMED:ARM_DISARMED));
-        CHECK((motors[0]>0)==(modes[m]==CONTROL_MODE_ACRO));
+        CHECK(attitude_ready()==vertical);CHECK(filter_calls==filtered+1);
+        CHECK(arm==ARM_ARMED);CHECK(motors[0]>0);
+        CHECK(control_level_fallback()==(fallback?LEVEL_FALLBACK_ATTITUDE:LEVEL_FALLBACK_NONE));
+        CHECK(strcmp(control_effective_name(),fallback?"acro":mode_names[m])==0);
+        /* Recovery: gravity returns, the estimate seeds and leveling resumes. */
+        accel[0]=accel[1]=0;accel[2]=1;tick(1000);
+        CHECK(attitude_ready());CHECK(arm==ARM_ARMED);
+        CHECK(control_level_fallback()==LEVEL_FALLBACK_NONE);
+        CHECK(strcmp(control_effective_name(),mode_names[m])==0);
     }
-    /* HOLD/LAND need leveling even when the selected pilot mode is Acro. */
+    /* Ground: leveled arming is still refused without attitude; disarmed,
+     * no fallback is reported or counted and the requested mode is shown. */
+    {
+        const uint32_t engaged=control_level_fallback_count();
+        arm=ARM_DISARMED;tick(1000); /* stop frame clears pending output */
+        accel[0]=accel[1]=accel[2]=0;
+        CHECK(control_mode_set(CONTROL_MODE_ANGLE));attitude_init();rc[4]=0;tick(1000);rc[4]=1;tick(1000);
+        CHECK(arm==ARM_DISARMED);CHECK(!attitude_ready());CHECK(control_level_fallback()==LEVEL_FALLBACK_NONE);
+        CHECK(strcmp(control_effective_name(),"angle")==0);CHECK(control_level_fallback_count()==engaged);
+        accel[2]=1;
+    }
+    /* HOLD/LAND without attitude, even when the pilot mode is Acro: no disarm,
+     * zero-rate hold at the failsafe throttle, leveled again on recovery. */
     accel[0]=accel[1]=0;accel[2]=1;
     CHECK(prime(CONTROL_MODE_ACRO));override=true;gyro_flight=true;
-    accel[0]=1;accel[2]=0;attitude_init();tick(1000);
-    CHECK(arm==ARM_DISARMED);for(unsigned i=0;i<4;i++)CHECK(motors[i]==0);
+    accel[2]=0;attitude_init();tick(1000);
+    CHECK(arm==ARM_ARMED);CHECK(control_level_fallback()==LEVEL_FALLBACK_ATTITUDE);
+    CHECK(strcmp(control_effective_name(),"acro")==0);
+    CHECK(NEAR(captured.roll,-0.001f*gyro[0]));CHECK(NEAR(captured.pitch,-0.001f*gyro[1]));
+    accel[2]=1;tick(1000);
+    CHECK(arm==ARM_ARMED);CHECK(control_level_fallback()==LEVEL_FALLBACK_NONE);
+    CHECK(strcmp(control_effective_name(),"angle")==0);
     override=false;
     /* Actual gyro faults are still fatal to every mode, and invalid samples
      * never advance the filter chain or contaminate persistent DSP state. */

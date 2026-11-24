@@ -13,5 +13,9 @@ export function PortsPage(){
  {s&&<><p>{s.board} {s.source==='mock'?'— DEMO, no physical UARTs':''}</p><p>Last snapshot: {new Date(q.loadedAt).toLocaleTimeString()}. Armed: {s.armed?'yes':'no'}; motor bench: {s.benchActive?'active':'inactive'}.</p>
  <table><thead><tr><th>Port</th><th>TX pin</th><th>RX pin</th><th>Role</th></tr></thead><tbody>{s.ports.map(p=><tr key={p.id}><td>{p.label}</td><td>{p.txPin}</td><td>{p.rxPin}</td><td>{p.role}</td></tr>)}</tbody></table>
  <p><label>CRSF receiver UART <select aria-label="CRSF receiver UART" disabled={!editable} value={uart??0} onChange={e=>setUart(Number(e.target.value))}><option value={0} disabled>No receiver UART</option>{s.ports.filter(p=>p.id!==0).map(p=><option key={p.id} value={p.id} disabled={!p.selectable}>{p.label}</option>)}</select></label>{' '}<button disabled={!editable||uart===null||!s.ports.some(p=>p.id===uart&&p.selectable)} onClick={()=>void apply()}>Apply UART</button></p></>}
- <p>Edits apply immediately; Save to controller makes supported settings persistent. GPS, MSP, VTX and telemetry roles are not implemented.</p>{reply&&<p role="status">{reply}</p>}</div>;
+ <section data-testid="ports-unsupported-roles">
+  <h3>Unsupported roles</h3>
+  <p>GPS, MSP, VTX and telemetry roles are not in this firmware. The table lists only roles the controller reports: cli, crsf, or none. There is no control on this page for the unsupported roles.</p>
+ </section>
+ <p>The CRSF receiver UART edit applies immediately. Save to controller makes that supported setting persistent.</p>{reply&&<p role="status">{reply}</p>}</div>;
 }

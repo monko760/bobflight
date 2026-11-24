@@ -89,6 +89,20 @@ async function main() {
       `${card("Selected (controller RAM)")} / ${card("Applied at boot")}`);
     root.unmount(); await mock.disconnect();
   });
+  await test("Setup accelerometer note points at the Sensors tab and has no calibrate control", async () => {
+    const { mock } = await rig();
+    const root: Root = createRoot(container as never);
+    openSetup(root);
+    const text = container.textContent;
+    assert.match(text, /Use the Sensors tab/);
+    assert.match(text, /calibrate_accel level/);
+    assert.match(text, /This Setup page does not calibrate the accelerometer/);
+    assert.doesNotMatch(text, /waiting FW Lead/);
+    assert.doesNotMatch(text, /Calibrate accel/);
+    const calibrate = container.findAll((e) => e.tagName === "BUTTON" && /calibrat/i.test(e.textContent));
+    assert.equal(calibrate.length, 0, "Setup must not offer a calibrate button");
+    root.unmount(); await mock.disconnect();
+  });
   console.log(`PASS Setup loop-rate poll render: ${passed} tests`);
 }
 const guard = setTimeout(() => { console.error("timeout"); process.exit(1); }, 20000);
