@@ -83,8 +83,8 @@ bobflight-firmware/docs/SETTINGS-PERSISTENCE.md.
 Storage schema 14 is read (1024-byte payload; bytes 0..255 are the schema 13 layout). Firmware
 migrates a saved schema 13 record in RAM and reports `stored_schema: 13` until the next Save
 rewrites it as schema 14 (`STORAGE_CARRY_OVER_TEXT`, `STORAGE_DOWNGRADE_NOTE`). A controller that
-still reports `schema: 13` gets `StorageFirmwareUpdateError` (update firmware; saved settings carry
-over), never "Fresh install required". Exports carry `# schema: 14`; imports accept 13 and 14.
+still reports `schema: 13` gets `StorageFirmwareUpdateError` (`STORAGE_FIRMWARE_UPDATE_TEXT`: after
+the firmware update, saved schema 13 settings carry over), never "Fresh install required". Exports carry `# schema: 14`; imports accept 13 and 14.
 There are no loaders or migrations for schemas 1..12 (`StorageFreshInstallError`). Layout and `defaults pid|rates|filters` are in
 `bobflight-firmware/docs/SETTINGS-PERSISTENCE.md`. `pid_yaw_d` is stored with
 the other PID gains (bytes 36..71); default `0` (was `0.00005` until 2026-11), validate `0..10` finite.

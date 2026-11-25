@@ -26,6 +26,8 @@ export const STORED_SCHEMA_VALUES=['14','13','none'] as const;
 export type StoredSchema=typeof STORED_SCHEMA_VALUES[number];
 /** Frozen N3 UI wording (Config Lead). Shown when stored_schema is 13. */
 export const STORAGE_CARRY_OVER_TEXT='Saved settings from schema 13 carry over; the next Save rewrites them as schema 14.';
+/** Config Lead wording for schema 13 firmware (StorageFirmwareUpdateError). Old firmware cannot write schema 14. */
+export const STORAGE_FIRMWARE_UPDATE_TEXT='After the firmware update, saved schema 13 settings carry over and the next Save rewrites them as schema 14.';
 /** Frozen N3 downgrade note, shown with the carry-over line when stored_schema is 13. */
 export const STORAGE_DOWNGRADE_NOTE='After this Save, older (schema 13) firmware would load the previous saved copy; after a second Save it would start from defaults. Back up with diff all first.';
 /** Frozen N3 wording for last_error newer_settings. */
@@ -53,7 +55,7 @@ export class StorageFreshInstallError extends Error {
  * Schema 14 firmware migrates the saved schema 13 record, so updating firmware keeps the settings.
  */
 export class StorageFirmwareUpdateError extends Error {
- constructor(readonly schema:number,readonly raw:string){super(`Firmware update needed: the controller reports storage schema ${schema}; this Configurator needs storage schema ${STORAGE_SCHEMA}. ${STORAGE_CARRY_OVER_TEXT}`);this.name='StorageFirmwareUpdateError';}
+ constructor(readonly schema:number,readonly raw:string){super(`Firmware update needed: the controller reports storage schema ${schema}; this Configurator needs storage schema ${STORAGE_SCHEMA}. ${STORAGE_FIRMWARE_UPDATE_TEXT}`);this.name='StorageFirmwareUpdateError';}
 }
 /** Storage schema this Configurator reads. */
 export const STORAGE_SCHEMA=14;

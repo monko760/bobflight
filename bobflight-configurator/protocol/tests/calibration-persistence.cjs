@@ -4,9 +4,10 @@ const {loadUiTs}=require('./load-ui-ts.cjs');
 function storage(schema=14,scope=p.STORAGE_SCOPE_V14,stored='14'){return `storage_api: 1\nbackend: flash\nschema: ${schema}\nstate: saved\ndirty: 0\ngeneration: 2\nlast_error: none\nscope: ${scope}\narmed: 0\nbench_active: 0\ncalibration_active: 0\nflight_enabled: 0\naccel_cal_saved: no\nstored_schema: ${stored}\nstorage_end: 1\n`;}
 const current=p.parseStorage(storage());assert.equal(current.schema,14);assert.equal(current.storedSchema,'14');assert.equal(p.STORAGE_PAYLOAD_BYTES_V13,256);assert(p.canSaveStorage(current,true,false));
 for(let v=1;v<13;v++)assert.throws(()=>p.parseStorage(storage(v)),/Fresh install/);
-// N3: schema 13 firmware is a firmware update (its saved settings carry over), never 'Fresh install required'.
+// N3: schema 13 firmware is a firmware update (settings carry over after the update), never 'Fresh install required'.
 {let err;try{p.parseStorage(storage(13,p.STORAGE_SCOPE_V13));}catch(e){err=e;}assert(err instanceof p.StorageFirmwareUpdateError,String(err));assert.doesNotMatch(err.message,/Fresh install/i);
- assert.equal(err.message,'Firmware update needed: the controller reports storage schema 13; this Configurator needs storage schema 14. '+p.STORAGE_CARRY_OVER_TEXT);}
+ assert.equal(p.STORAGE_FIRMWARE_UPDATE_TEXT,'After the firmware update, saved schema 13 settings carry over and the next Save rewrites them as schema 14.');
+ assert.equal(err.message,'Firmware update needed: the controller reports storage schema 13; this Configurator needs storage schema 14. After the firmware update, saved schema 13 settings carry over and the next Save rewrites them as schema 14.');}
 // N3 stored_schema 13 (migrated, not yet rewritten) is a normal saved snapshot; Save stays available.
 {const migrated=p.parseStorage(storage(14,p.STORAGE_SCOPE_V14,'13'));assert.equal(migrated.storedSchema,'13');assert(p.canSaveStorage(migrated,true,false));}
 // newer_settings: error state over a schema 14 record, Save refused; any other pairing is contradictory.

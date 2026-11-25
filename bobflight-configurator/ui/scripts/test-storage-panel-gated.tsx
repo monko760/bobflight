@@ -851,6 +851,7 @@ async function main() {
       r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 13").replace(/stored_schema: [^\r]+\r\n/, "")]);
       r.render(<StoragePanel requiredScope="receiver_map" />);
       assert.ok(await waitFor(() => !!storageError()));
+      assert.equal(storageError(), "Firmware update needed: the controller reports storage schema 13; this Configurator needs storage schema 14. After the firmware update, saved schema 13 settings carry over and the next Save rewrites them as schema 14.");
       assert.ok(!/Fresh install/i.test(pageText()), "schema 13 is not a fresh install");
       assert.ok(isDisabled(button("Save to controller")));
       await r.done();
@@ -914,7 +915,7 @@ async function main() {
     const r = await rig();
     r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 13").replace(/stored_schema: [^\r]+\r\n/, "")]);
     r.render(<RatesPage />);
-    const want = "Firmware update needed: the controller reports storage schema 13; this Configurator needs storage schema 14. Saved settings from schema 13 carry over; the next Save rewrites them as schema 14.";
+    const want = "Firmware update needed: the controller reports storage schema 13; this Configurator needs storage schema 14. After the firmware update, saved schema 13 settings carry over and the next Save rewrites them as schema 14.";
     assert.ok(await waitFor(() => pageText().includes(want), 4000), pageText().slice(0, 400));
     assert.ok(!/Fresh install/i.test(pageText()), pageText().slice(0, 400));
     assert.ok(isDisabled(button("Save to controller")));

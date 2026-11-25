@@ -8,7 +8,7 @@ import {ScopedDefaults} from '../components/ScopedDefaults';
 import {AccelCalSavedNote} from '../components/AccelCalSavedNote';
 const errorText=(e:unknown)=>e instanceof Error?e.message:String(e);
 /** Why the `storage` capability read gave no usable snapshot. "Fresh install required" only for a well-formed
- * older schema (<13) that was actually read; schema 13 firmware is "Firmware update needed" (its settings carry
+ * older schema (<13) that was actually read; schema 13 firmware is "Firmware update needed" (after the firmware update, saved schema 13 settings carry
  * over); an unreadable / scope-mismatched / newer reply, a gate rejection (nothing sent) or a client error leaves
  * capability unverified with the reason. */
 export function ratesCapabilityError(e:unknown):string{
