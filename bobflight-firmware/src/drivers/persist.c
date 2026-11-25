@@ -1,9 +1,18 @@
 /* SPDX-License-Identifier: Apache-2.0
- * Fresh-install schema13, 256 bytes. No legacy rates or configuration migration.
+ * Settings schema 14 (N3), 1024 bytes, append-only over schema 13.
+ * Bytes 0..255 are the schema 13 layout, byte for byte and validated the same way:
  * Rates0..35; PID36..71; UART72; map/mode-count/source/mode76..79;
  * mode rows80..111; accel/calibration112..143; power144..171; DShot172;
  * idle176/180; LPF184/188; loop192; notches196..211; RPM212..227;
  * direction228; mounting232..243; calibration-frame244..255.
+ * Extension: 256 = layout_bytes (LE32): how many leading payload bytes the
+ * writer's layout defines (N3 writes 260). Later settings (N4..N9) append at the
+ * current layout_bytes and raise it; bytes from layout_bytes to 1023 must be zero.
+ * Loading a shorter layout fills the missing fields from defaults; a longer one
+ * (written by newer firmware) is refused as newer_settings and never overwritten.
+ * Migration 13->14: a schema 13 record keeps every byte 0..255; layout_bytes and
+ * any new fields come from defaults. The schema 13 record stays in flash until
+ * the next save writes schema 14 to the other slot.
  */
 #include "drivers/persist.h"
 #include "drivers/power.h"
@@ -26,11 +35,18 @@
 #define BASE_BYTES 112u
 #define PAYLOAD_BYTES CONFIG_STORE_PAYLOAD_BYTES
 #define MOTOR_DIRECTION_OFFSET 228u
+#define V13_BYTES CONFIG_STORE_PAYLOAD_BYTES_V13
+#define LAYOUT_OFFSET 256u
+/* Bytes this firmware's layout defines. Each appended setting raises this. */
+#define LAYOUT_BYTES 260u
+_Static_assert(LAYOUT_OFFSET==V13_BYTES,"schema 14 extension starts right after the schema 13 bytes");
+_Static_assert(LAYOUT_BYTES<=PAYLOAD_BYTES&&LAYOUT_BYTES%4u==0u,"layout must fit the schema 14 payload");
 _Static_assert(MODE_COUNT == 2 || MODE_COUNT == 4, "Update persistence schema for new mode model");
 _Static_assert(sizeof(float)==4 && FLT_RADIX==2 && FLT_MANT_DIG==24, "binary32 config required");
 static const char *keys[18]={"rate_max_roll","rate_max_pitch","rate_max_yaw","rate_center_roll","rate_center_pitch","rate_center_yaw","rate_expo_roll","rate_expo_pitch","rate_expo_yaw","pid_roll_p","pid_roll_i","pid_roll_d","pid_pitch_p","pid_pitch_i","pid_pitch_d","pid_yaw_p","pid_yaw_i","pid_yaw_d"};
 static uint8_t saved[PAYLOAD_BYTES];
-static bool have_saved,load_error;
+static bool have_saved,load_error,newer_layout;
+static uint32_t stored_schema;
 static const char *last_error="none";
 static void put32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(i*8));}
 static uint32_t get32(const uint8_t *p){uint32_t v=0;for(unsigned i=0;i<4;i++)v|=(uint32_t)p[i]<<(i*8);return v;}
@@ -101,6 +117,21 @@ static bool motor_direction_valid(const uint8_t *p){
  return true;
 }
 static bool extras_valid(const uint8_t *p){power_config_t c=power_decode(p);return power_config_valid(&c)&&(get32(p+172)==300||get32(p+172)==600)&&flight_idle_valid(p)&&rpm_valid(p)&&motor_direction_valid(p);}
+/* Schema 14 extension check. Returns NULL when valid, else the last_error token. */
+static const char *extension_error(const uint8_t *p){
+ uint32_t n=get32(p+LAYOUT_OFFSET);
+ if(n<LAYOUT_OFFSET+4u||n>PAYLOAD_BYTES||n%4u)return "invalid_settings";
+ for(uint32_t i=n;i<PAYLOAD_BYTES;i++)if(p[i])return "invalid_settings";
+ if(n>LAYOUT_BYTES)return "newer_settings";
+ return NULL;
+}
+/* Fill every field the stored layout lacks from defaults, then claim this layout.
+ * Schema 13 (stored layout 256) and every shorter schema 14 layout go through here. */
+static void extension_upgrade(uint8_t *p,uint32_t stored_layout){
+ (void)stored_layout; /* N3 defines no extension field yet; N4+ append "if(stored_layout<=off)put(default)". */
+ put32(p+LAYOUT_OFFSET,LAYOUT_BYTES);
+}
+static void encode_extension(uint8_t *p){put32(p+LAYOUT_OFFSET,LAYOUT_BYTES);}
 static bool encode(uint8_t p[PAYLOAD_BYTES]){
  const board_t *b=board_get();if(!b)return false;memset(p,0,PAYLOAD_BYTES);
  for(unsigned i=0;i<18;i++){float v;uint32_t bits;if(!config_get_key(keys[i],&v))return false;memcpy(&bits,&v,4);put32(p+i*4,bits);}
@@ -132,7 +163,8 @@ static bool encode(uint8_t p[PAYLOAD_BYTES]){
  {static const char *const rk[4]={"rpm_filter_harmonics","rpm_filter_min_hz","rpm_filter_q_x100","motor_poles"};
   for(unsigned i=0;i<4;i++){float r;if(!config_get_key(rk[i],&r))return false;putfloat(p+212+i*4,r);}}
  put32(p+MOTOR_DIRECTION_OFFSET,(uint32_t)config_motor_direction());
- float values[18];mode_config_t modes[MODE_COUNT];return decode(p,values,modes)&&accel_decode_valid(p)&&extras_valid(p);
+ encode_extension(p);
+ float values[18];mode_config_t modes[MODE_COUNT];return decode(p,values,modes)&&accel_decode_valid(p)&&extras_valid(p)&&!extension_error(p);
 }
 static const char *store_error(config_store_result_t r){switch(r){case CONFIG_STORE_EMPTY:return "empty";case CONFIG_STORE_UNSUPPORTED:return "unsupported";case CONFIG_STORE_INVALID:return "invalid_record";case CONFIG_STORE_INCOMPATIBLE:return "fresh_install_required";case CONFIG_STORE_IO_ERROR:return "storage_io";default:return "none";}}
 static bool safe_to_change(void){
@@ -141,11 +173,22 @@ static bool safe_to_change(void){
  if(gyro_manual_calibration_active()){last_error="calibration_active";return false;}
  return true;
 }
-void persist_init(void){config_init();loop_rate_setting_defaults();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;last_error="none";memset(saved,0,sizeof(saved));}
+void persist_init(void){config_init();loop_rate_setting_defaults();mode_range_init();(void)crsf_set_map("AETR");have_saved=false;load_error=false;newer_layout=false;stored_schema=0;last_error="none";memset(saved,0,sizeof(saved));}
 bool persist_load(void){
  if(!safe_to_change())return false;
+ newer_layout=false;stored_schema=0;
  uint8_t p[PAYLOAD_BYTES];config_store_result_t r=config_store_load(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);load_error=r!=CONFIG_STORE_EMPTY&&r!=CONFIG_STORE_UNSUPPORTED;return false;}
+ const uint32_t schema=config_store_loaded_schema();
+ if(schema==CONFIG_STORE_SCHEMA_V13){
+  /* Store zero-fills beyond 256; anything else is not a schema 13 image. */
+  for(unsigned i=V13_BYTES;i<PAYLOAD_BYTES;i++)if(p[i]){last_error="invalid_settings";load_error=true;return false;}
+  extension_upgrade(p,LAYOUT_OFFSET);
+ }else if(schema==CONFIG_STORE_SCHEMA){
+  const char *e=extension_error(p);
+  if(e){last_error=e;load_error=true;newer_layout=!strcmp(e,"newer_settings");stored_schema=schema;return false;}
+  extension_upgrade(p,get32(p+LAYOUT_OFFSET));
+ }else{last_error="invalid_record";load_error=true;return false;}
  float values[18];mode_config_t modes[MODE_COUNT];
  if(!decode(p,values,modes)||!extras_valid(p)){last_error="invalid_settings";load_error=true;return false;}
  if(!accel_decode_valid(p)){last_error="invalid_settings";load_error=true;return false;}
@@ -179,18 +222,21 @@ bool persist_load(void){
  if(!control_source_set(p[78]!=0)){last_error="control_source_failed";load_error=true;return false;}
 #endif
  {float bias[3]={0},scale[3]={1,1,1};if(p[112])accel_values(p,bias,scale);gyro_restore_accel_calibration(bias,scale,p[112]!=0);}
- failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;last_error="none";
+ failsafe_reset_rx_link();rx_init();memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;stored_schema=schema;last_error="none";
  return true;
 }
 bool persist_save(void){
  if(!safe_to_change())return false;
+ /* Never overwrite settings written by newer firmware (fields this build cannot keep). */
+ if(newer_layout){last_error="newer_settings";return false;}
  uint8_t p[PAYLOAD_BYTES];if(!encode(p)){last_error="invalid_settings";return false;}
  config_store_result_t r=config_store_save(board_tag(),p,sizeof(p));
  if(r!=CONFIG_STORE_OK){last_error=store_error(r);return false;}
  uint8_t check[PAYLOAD_BYTES];r=config_store_load(board_tag(),check,sizeof(check));
  if(r!=CONFIG_STORE_OK||memcmp(p,check,sizeof(p))){last_error="verify_failed";return false;}
- memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;last_error="none";return true;
+ memcpy(saved,p,sizeof(saved));have_saved=true;load_error=false;stored_schema=config_store_loaded_schema();last_error="none";return true;
 }
+const char *persist_stored_schema(void){return stored_schema==CONFIG_STORE_SCHEMA?"14":stored_schema==CONFIG_STORE_SCHEMA_V13?"13":"none";}
 bool persist_dirty(void){uint8_t now[PAYLOAD_BYTES];return !have_saved||!encode(now)||memcmp(now,saved,sizeof(saved))!=0;}
 const char *persist_last_error(void){return last_error;}
 const char *persist_backend(void){return config_store_backend();}

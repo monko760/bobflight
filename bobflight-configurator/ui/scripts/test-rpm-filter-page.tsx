@@ -37,7 +37,7 @@ import { RPM_GATE_ATTEMPTS, RPM_GATE_DELAY_MS, readRpm, rpmView, type RpmSnapsho
 import { CommandGate, GATE_BUSY_MESSAGE, isGateBusy } from "../src/protocol/commandGate";
 import { MockBobFlightHost } from "../src/protocol/mockHost";
 import { RPM_FILTER_MOCK_SCENARIOS, type RpmFilterMockScenario } from "../../protocol/src/rpm-filter-mock";
-import { STORAGE_SCOPE_V13 } from "../../protocol/src/storage";
+import { STORAGE_SCOPE_V14 } from "../../protocol/src/storage";
 import type { CliCommand, SettingsKey } from "../src/protocol";
 
 const { container } = installFakeDom();
@@ -100,7 +100,7 @@ async function click(el: FakeElement) { flushSync(() => reactProps(el).onClick({
 
 // ---- host rig -----------------------------------------------------------------
 const storageReply = (schema: number) => ["storage_api: 1", "backend: flash", `schema: ${schema}`, "state: saved", "dirty: 0",
-  "generation: 2", "last_error: none", `scope: ${schema === 13 ? STORAGE_SCOPE_V13 : "unsupported"}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n") + "\r\n";
+  "generation: 2", "last_error: none", `scope: ${schema === 14 ? STORAGE_SCOPE_V14 : "unsupported"}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", ...(schema === 14 ? ["accel_cal_saved: no", "stored_schema: 14"] : []), "storage_end: 1"].join("\r\n") + "\r\n";
 
 interface RigOpts { rpmReport?: string; schema?: number; getValue?: Partial<Record<string, string>>; }
 async function mockHost(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
@@ -122,7 +122,7 @@ async function mockHost(scenario: RpmFilterMockScenario, o: RigOpts = {}) {
     sendCommand: async (cmd: CliCommand) => {
       ops.push(cmd);
       if (cmd === "rpm_filter" && o.rpmReport !== undefined) return o.rpmReport;
-      if (cmd === "storage") { loads++; return storageReply(o.schema ?? (scenario === "old-fc" ? 8 : 13)); }
+      if (cmd === "storage") { loads++; return storageReply(o.schema ?? (scenario === "old-fc" ? 8 : 14)); }
       const gate = gates.get(cmd);
       if (gate) await gate;
       return mock.sendCommand(cmd);

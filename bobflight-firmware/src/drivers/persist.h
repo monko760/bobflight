@@ -18,6 +18,9 @@ const char *persist_last_error(void);
 const char *persist_backend(void);
 uint32_t persist_generation(void);
 const char *persist_state(void);
+/* `storage` line stored_schema: 14 | 13 (read and migrated; rewritten as 14 on
+ * the next save) | none (nothing loaded or saved). */
+const char *persist_stored_schema(void);
 #ifdef __cplusplus
 }
 #endif

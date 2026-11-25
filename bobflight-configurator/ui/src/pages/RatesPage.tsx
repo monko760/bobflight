@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
-import {parseStorage,canSaveStorage,isGateNotSent,StorageFreshInstallError,type StorageSnapshot} from '../protocol';
+import {parseStorage,canSaveStorage,isGateNotSent,StorageFreshInstallError,StorageFirmwareUpdateError,STORAGE_SCHEMA,type StorageSnapshot} from '../protocol';
 import {RATES_DEFAULTS,getRates,type RatesConfig} from '../tuning/mockTuningStore';
 import {mockSettingsApi,type RateKey} from '../tuning/mockSettingsApi';
 import {AXES,rateAtStick,rateDraftValid,rateSaveEntries,readRateSettings} from '../tuning/actualRates';
@@ -8,10 +8,12 @@ import {ScopedDefaults} from '../components/ScopedDefaults';
 import {AccelCalSavedNote} from '../components/AccelCalSavedNote';
 const errorText=(e:unknown)=>e instanceof Error?e.message:String(e);
 /** Why the `storage` capability read gave no usable snapshot. "Fresh install required" only for a well-formed
- * older schema (<13) that was actually read; an unreadable / scope-mismatched / newer reply, a gate rejection
- * (nothing sent) or a client error leaves capability unverified with the reason. */
+ * older schema (<13) that was actually read; schema 13 firmware is "Firmware update needed" (after the firmware update, saved schema 13 settings carry
+ * over); an unreadable / scope-mismatched / newer reply, a gate rejection (nothing sent) or a client error leaves
+ * capability unverified with the reason. */
 export function ratesCapabilityError(e:unknown):string{
- if(e instanceof StorageFreshInstallError)return `${e.message}. Actual rates need storage schema 13.`;
+ if(e instanceof StorageFreshInstallError)return `${e.message}. Actual rates need storage schema ${STORAGE_SCHEMA}.`;
+ if(e instanceof StorageFirmwareUpdateError)return e.message;
  const reason=isGateNotSent(e)?'another command was using the connection, so storage status was not read (nothing was sent)':errorText(e);
  return `Storage capability unverified: ${reason}. Saving is disabled. Reload controller to try again.`;
 }
@@ -35,10 +37,10 @@ export function RatesPage(){
    try{raw=await host.sendCommand('storage');capability=parseStorage(raw);}catch(e){if(token!==epoch.current)return;throw Error(ratesCapabilityError(e));}
    if(token!==epoch.current)return;
    setStorageRaw(raw);
-   // A readable schema-13 reply whose last_error is invalid_record or fresh_install_required is not a
+   // A readable schema-14 reply whose last_error is invalid_record or fresh_install_required is not a
    // reason to erase and reinstall. Only a well-formed older schema (StorageFreshInstallError, caught above)
    // uses that headline. The token itself stays in the unverified wording.
-   const actual=capability.schema===13&&capability.lastError!=='fresh_install_required'&&capability.lastError!=='invalid_record';
+   const actual=capability.schema===STORAGE_SCHEMA&&capability.lastError!=='fresh_install_required'&&capability.lastError!=='invalid_record';
    if(!actual)throw Error(ratesCapabilityError(new Error(`the controller reports storage last_error ${capability.lastError}`)));
    setValues(read.values);loadedRef.current=read.values;setStorage(capability);setSupported(actual);setReady(true);
   }catch(e){if(token===epoch.current){setError(errorText(e));setReady(false);}}

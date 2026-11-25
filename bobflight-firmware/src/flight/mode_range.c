@@ -15,22 +15,24 @@ static mode_config_t g_modes[MODE_COUNT];
 static uint32_t g_arm_revision;
 uint32_t mode_range_arm_revision(void) { return g_arm_revision; }
 
+/* N3: the one mode-range defaults table (fresh boot, reset and export diff).
+ * ARM on AUX1 high (1751..2100); ANGLE on AUX2 full range (900..2100); others off. */
+static const mode_config_t g_mode_defaults[MODE_COUNT]={
+    [MODE_ARM]={true,1,1751,2100},
+    [MODE_ANGLE]={true,2,900,2100},
+    [MODE_ACRO]={false,2,900,2100},
+    [MODE_HORIZON]={false,2,900,2100},
+};
+const mode_config_t *mode_range_default(mode_id_t mode)
+{
+    if ((int)mode < 0 || mode >= MODE_COUNT) return NULL;
+    return &g_mode_defaults[mode];
+}
+
 void mode_range_reset(void)
 {
     ++g_arm_revision;
-    memset(g_modes, 0, sizeof(g_modes));
-    for(unsigned i=0;i<MODE_COUNT;i++) g_modes[i]=(mode_config_t){false,2,900,2100};
-    /* Defaults: ARM on AUX1 high (1751..2100); ANGLE on AUX2 full range (900..2100) */
-    g_modes[MODE_ARM].enabled = true;
-    g_modes[MODE_ARM].aux_channel = 1;
-    g_modes[MODE_ARM].min_us = 1751;
-    g_modes[MODE_ARM].max_us = 2100;
-
-    g_modes[MODE_ANGLE].enabled = true;
-    g_modes[MODE_ANGLE].aux_channel = 2;
-    g_modes[MODE_ANGLE].min_us = 900;
-    g_modes[MODE_ANGLE].max_us = 2100;
-
+    memcpy(g_modes, g_mode_defaults, sizeof(g_modes));
 }
 
 void mode_range_init(void)

@@ -13,7 +13,7 @@ import { PidPage } from "../src/pages/PidPage";
 import { FiltersPage, LPF_RANGE_HINT } from "../src/pages/FiltersPage";
 import { createHost } from "../src/protocol/createHost";
 import type { BobFlightHost } from "../src/protocol/types";
-import { STORAGE_SCOPE_V13, type BobFlightCliClient, type MockSerial } from "@bobflight/protocol";
+import { STORAGE_SCOPE_V14, type BobFlightCliClient, type MockSerial } from "@bobflight/protocol";
 
 const { container } = installFakeDom();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -71,8 +71,8 @@ interface Rig {
 }
 
 function storageReply(dirty: boolean, armed: boolean): string {
-  return ["storage_api: 1", "backend: flash", "schema: 13", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty ? 1 : 0}`, "generation: 2",
-    "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, `armed: ${armed ? 1 : 0}`, "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "accel_cal_saved: no", "storage_end: 1"]
+  return ["storage_api: 1", "backend: flash", "schema: 14", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty ? 1 : 0}`, "generation: 2",
+    "last_error: none", `scope: ${STORAGE_SCOPE_V14}`, `armed: ${armed ? 1 : 0}`, "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", "accel_cal_saved: no", "stored_schema: 14", "storage_end: 1"]
     .map((l) => `${l}\r\n`).join("");
 }
 

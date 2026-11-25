@@ -8,7 +8,7 @@
  */
 import { EventEmitter } from "node:events";
 import type { PortInfo, SerialPortLike, TransportFactory } from "@bobflight/protocol";
-import { STORAGE_SCOPE_V13 } from "../../../protocol/src/storage";
+import { STORAGE_SCOPE_V14 } from "../../../protocol/src/storage";
 import { SETTINGS_KEYS, DEFAULT_SETTINGS } from "../../../protocol/src/settings";
 
 export interface FakeFcOptions { rttMs?: number; saveMs?: number }
@@ -35,10 +35,11 @@ export class FakeFc {
     this.holds.set(cmd, new Promise<void>(r => { release = r; }));
     return () => release();
   }
+  /** Schema 14 FW `storage` reply of a calibrated FC (accel_cal_saved: yes) holding a schema 14 record. */
   storageReply(): string {
-    return ["storage_api: 1", "backend: flash", "schema: 13", `state: ${this.dirty ? "dirty" : "saved"}`, `dirty: ${this.dirty}`,
-      `generation: ${this.generation}`, "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0",
-      "calibration_active: 0", "flight_enabled: 0", "storage_end: 1"].join("\r\n") + "\r\n";
+    return ["storage_api: 1", "backend: flash", "schema: 14", `state: ${this.dirty ? "dirty" : "saved"}`, `dirty: ${this.dirty}`,
+      `generation: ${this.generation}`, "last_error: none", `scope: ${STORAGE_SCOPE_V14}`, "armed: 0", "bench_active: 0",
+      "calibration_active: 0", "flight_enabled: 0", "accel_cal_saved: yes", "stored_schema: 14", "storage_end: 1"].join("\r\n") + "\r\n";
   }
   reply(cmd: string): string {
     if (cmd === "version") return "BobFlight 0.1.0-fakefc\r\n";

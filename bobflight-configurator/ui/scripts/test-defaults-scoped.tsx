@@ -9,7 +9,7 @@
  * built by the CI contract step), checked byte-for-byte against MockSerial's
  * frame on every run; the malformed and refusal scenarios the host sim cannot
  * produce use the exact FW strings. `storage` is answered in the FW storage
- * report shape (schema 13, `accel_cal_saved:` just before `storage_end: 1`)
+ * report shape (schema 14, `accel_cal_saved:` then `stored_schema:` before `storage_end: 1`; read by name)
  * with the FW's dirty rule: RAM differs from what was last saved.
  * Asserts what a user sees (visible text only) and what went out on the wire.
  */
@@ -35,7 +35,7 @@ import {
   DEFAULTS_GROUP_KEYS,
   DEFAULTS_RESULT_UNKNOWN,
   DEFAULTS_MOCK_ERROR_LINES,
-  STORAGE_SCOPE_V13,
+  STORAGE_SCOPE_V14,
   defaultsKeyLines,
   type BobFlightCliClient,
   type DefaultsGroup,
@@ -142,8 +142,8 @@ function loadRealFrames() {
   }
 }
 function storageReply(dirty: boolean, accelLine: string | null = "accel_cal_saved: no"): string {
-  return ["storage_api: 1", "backend: flash", "schema: 13", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty ? 1 : 0}`, "generation: 2",
-    "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", ...(accelLine === null ? [] : [accelLine]), "storage_end: 1"]
+  return ["storage_api: 1", "backend: flash", "schema: 14", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty ? 1 : 0}`, "generation: 2",
+    "last_error: none", `scope: ${STORAGE_SCOPE_V14}`, "armed: 0", "bench_active: 0", "calibration_active: 0", "flight_enabled: 0", ...(accelLine === null ? [] : [accelLine]), "stored_schema: 14", "storage_end: 1"]
     .map((l) => `${l}\r\n`).join("");
 }
 async function rig(): Promise<Rig> {
@@ -503,7 +503,7 @@ async function main() {
   });
 
   await test("merge #100 (b): Rates with a failed or garbled storage read -> 'Storage capability unverified', never 'Fresh install required'; Save disabled", async () => {
-    const garbled = ["storage_api: 1\r\nbackend: fl@sh\r\nstorage_end: 1\r\n", "storage_api: 1\r\nbackend: flash\r\nschema: 13\r\n", "garbage\r\n"];
+    const garbled = ["storage_api: 1\r\nbackend: fl@sh\r\nstorage_end: 1\r\n", "storage_api: 1\r\nbackend: flash\r\nschema: 14\r\n", "garbage\r\n"];
     for (const raw of garbled) {
       const r = await rig(); r.accel.storageRaw = raw; render(r, "rates");
       assert.ok(await waitFor(() => /Storage capability unverified|Fresh install required/.test(pageText()), 12000), `rates settled (${JSON.stringify(raw)}): ${pageText().slice(0, 400)}`);
@@ -520,7 +520,7 @@ async function main() {
     await r.done();
   });
 
-  await test("Rates schema 13 last_error invalid_record or fresh_install_required is Storage capability unverified with the token, not a fresh-install headline; Save disabled", async () => {
+  await test("Rates schema 14 last_error invalid_record or fresh_install_required is Storage capability unverified with the token, not a fresh-install headline; Save disabled", async () => {
     for (const token of ["invalid_record", "fresh_install_required"]) {
       const r = await rig();
       r.accel.storageRaw = storageReply(true, "accel_cal_saved: no").replace("last_error: none", `last_error: ${token}`);
@@ -532,12 +532,20 @@ async function main() {
       await r.done();
     }
     const older = await rig();
-    older.accel.storageRaw = storageReply(false, "accel_cal_saved: no").replace("schema: 13", "schema: 12");
+    older.accel.storageRaw = storageReply(false, "accel_cal_saved: no").replace("schema: 14", "schema: 12");
     render(older, "rates");
     assert.ok(await waitFor(() => /Fresh install required: the controller reports storage schema 12/.test(pageText()), 12000), pageText().slice(0, 400));
     assert.ok(!/Storage capability unverified/.test(pageText()), "schema 12 stays the fresh-install case");
     assert.ok(isDisabled(findButton("Save to controller")!));
     await older.done();
+    // N3: schema 13 firmware is a firmware update (its saved settings carry over), never a fresh install.
+    const v13 = await rig();
+    v13.accel.storageRaw = storageReply(false, "accel_cal_saved: no").replace("schema: 14", "schema: 13").replace("stored_schema: 14\r\n", "");
+    render(v13, "rates");
+    assert.ok(await waitFor(() => /Firmware update needed: the controller reports storage schema 13/.test(pageText()), 12000), pageText().slice(0, 400));
+    assert.ok(!/Fresh install required/.test(pageText()), "schema 13 is not a fresh install");
+    assert.ok(isDisabled(findButton("Save to controller")!));
+    await v13.done();
   });
 
   await test("StoragePanel: accel_cal_saved shown verbatim next to Save: yes, no (+ recalibrate note), missing -> unknown; real host storage reply; a save that drops it shows no", async () => {

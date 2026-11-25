@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 const assert=require('node:assert/strict');
 const {spawnSync}=require('node:child_process');const path=require('node:path');
-const {parseStorage,parseModes,parseConfigurationExport,parseSaveReply,canSaveStorage,CONFIG_EXPORT_MAX_BYTES}=require('../../bobflight-configurator/protocol/dist');
+const {parseStorage,parseModes,parseConfigurationExport,parseSaveReply,canSaveStorage,CONFIG_EXPORT_MAX_BYTES,StorageFirmwareUpdateError,StorageFreshInstallError}=require('../../bobflight-configurator/protocol/dist');
 const binary=process.argv[2]?path.resolve(process.argv[2]):path.resolve(__dirname,'../../bobflight-firmware/build-contract/bobflight_host');
 const commands=['storage','diff all','dump all','mode_range ACRO 1 5 1300 1600','mode_range HORIZON 1 6 1600 1900','control_mode horizon','control_source aux','power_config 12.25 27.5 100 6 3.6 3.2 1500','dshot 600','storage','save','storage','diff all','dump all','modes'];
 const run=spawnSync(binary,[],{input:commands.join('\n')+'\n',encoding:'utf8',maxBuffer:1024*1024});assert.equal(run.status,0,run.stderr);
@@ -12,9 +12,11 @@ assert.equal(backups.length,4);assert.match(backups[3].raw,/power_config 12.25 2
 for(const command of ['mode_range ACRO 1 5 1300 1600','mode_range HORIZON 1 6 1600 1900','control_mode horizon'])assert(backups[2].raw.includes(command+'\r\n'));
 for(const e of backups){assert.equal(CONFIG_EXPORT_MAX_BYTES,3072);assert(Buffer.byteLength(e.raw)<CONFIG_EXPORT_MAX_BYTES);assert(!e.raw.includes('\r\narm\r\n'));assert(!e.raw.includes('\r\nsave\r\n'));}
 assert(!parseSaveReply('saved\r\n').ok);assert(!parseSaveReply('saved: host_sim verified\r\n').ok);assert(parseSaveReply('saved: flash verified\r\n').ok);
-assert.equal(states[2].schema,13);assert.match(states[2].scope,/,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates$/);
-for(const invalid of ['storage_api: 1\r\n',run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0].replace('schema: 13','schema: 14')]){if(invalid!==undefined)assert.throws(()=>parseStorage(invalid));}
-assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 13','# schema: 14'),'dump'));
+assert.equal(states[2].schema,14);assert.equal(states[0].storedSchema,'none','fresh host: nothing loaded');assert.equal(states[2].storedSchema,'14','after a verified save');assert.match(states[2].scope,/,loop_rate_hz,gyro_notch1_hz,gyro_notch1_cutoff_hz,gyro_notch2_hz,gyro_notch2_cutoff_hz,rpm_filter_harmonics,rpm_filter_min_hz,rpm_filter_q_x100,motor_poles,motor_direction,align_board_roll,align_board_pitch,align_board_yaw,actual_rates$/);
+for(const invalid of ['storage_api: 1\r\n',run.stdout.match(/storage_api: 1\r?\n[\s\S]*?storage_end: 1\r?\n/)[0].replace('schema: 14','schema: 15')]){if(invalid!==undefined)assert.throws(()=>parseStorage(invalid));}
+assert.match(backups[3].raw,/^# bobflight_config: 1\r\n# schema: 14\r\n/);
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 14','# schema: 15'),'dump'));
+assert.doesNotThrow(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 14','# schema: 13'),'dump'),'N3: a schema 13 backup still imports');
 // Schema 10 motor_direction: dump carries it right after motor_poles, diff omits the default props-out; a schema 9 export cannot carry it.
 assert.match(backups[3].raw,/\r\nset motor_poles 14\r\nset align_board_roll 0\r\nset align_board_pitch 0\r\nset align_board_yaw 0\r\n[\s\S]*?set motor_direction props-out\r\n/);assert(!/set motor_direction/.test(backups[0].raw),'diff omits the default props-out');
 for(const bad of ['set motor_direction props-mixed','set motor_direction 1','set motor_direction PROPS-IN'])assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('set motor_direction props-out',bad),'dump'),bad);
@@ -43,7 +45,7 @@ assert(!backups[3].raw.includes('control_source aux'));
 console.log('PASS refused AUX command cannot corrupt saved manual source; Save remains available in main image while disarmed');
 
 // Mounting keys are current schema only; retain strict old/future-schema boundaries.
-assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 13','# schema: 10'),'dump'),'schema10 cannot carry mounting keys');
+assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 14','# schema: 10'),'dump'),'schema10 cannot carry mounting keys');
 assert(!/set align_board_/.test(backups[0].raw),'default mounting omitted from diff');
 for(const invalid of ['181','-181','0.5','NaN'])assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('set align_board_roll 0','set align_board_roll '+invalid),'dump'));
 const mount=spawnSync(binary,[],{input:'set align_board_roll 180\nset align_board_yaw 90\ndiff all\ndump all\nsave\nstorage\n',encoding:'utf8',maxBuffer:1024*1024});assert.equal(mount.status,0,mount.stderr);
@@ -51,11 +53,14 @@ for(const [i,m] of [...mount.stdout.matchAll(/# bobflight_config: 1\r?\n[\s\S]*?
  const exp=parseConfigurationExport(m[0],i?'dump':'diff');assert.match(exp.raw,/set align_board_roll 180\r?\n/);assert.match(exp.raw,/set align_board_yaw 90\r?\n/);
 }
 assert.match(mount.stdout,/saved: host_sim verified/);assert.match(mount.stdout,/state: saved/);
-console.log('PASS actual schema13 mounting exports and Save, bounded current domain, old/future schema rejection');
+console.log('PASS actual schema14 mounting exports and Save, bounded current domain, old/future schema rejection');
 
-for(let schema=1;schema<=14;schema++)if(schema!==13){assert.throws(()=>parseStorage(actual.replace('schema: 13',`schema: ${schema}`)));assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 13',`# schema: ${schema}`),'dump'));}
+for(let schema=1;schema<=15;schema++)if(schema!==14){assert.throws(()=>parseStorage(actual.replace('schema: 14',`schema: ${schema}`)),schema===13?StorageFirmwareUpdateError:schema<13?StorageFreshInstallError:/is not schema 14/);if(schema!==13)assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# schema: 14',`# schema: ${schema}`),'dump'));}
+// N3 stored_schema: required, by name, only 14|13|none; newer_settings is a schema 14 error state.
+assert.throws(()=>parseStorage(actual.replace(/stored_schema: [a-z0-9]+\r?\n/,'')),/missing stored_schema/);
+assert.throws(()=>parseStorage(actual.replace(/stored_schema: [a-z0-9]+/,'stored_schema: 12')),/unknown stored_schema/);
 for(const axis of ['roll','pitch','yaw'])for(const parameter of ['center','max','expo'])assert(backups[3].raw.includes(`set rate_${parameter}_${axis} `));
 for(const removed of ['rate_type','rate_expo'])assert.throws(()=>parseConfigurationExport(backups[3].raw.replace('# config_end: 1',`set ${removed} 0\r\n# config_end: 1`),'dump'));
-console.log('PASS Actual-only nine-key export, schema1..12/future rejection, removed legacy keys refused');
+console.log('PASS Actual-only nine-key export, schema 13/14 import, schema1..12/15 rejection, schema 13 FC = firmware update (not fresh install), stored_schema strict, removed legacy keys refused');
 
 const badRate=spawnSync(binary,[],{input:'get rate_center_roll\nset rate_center_roll 123junk\nget rate_center_roll\n',encoding:'utf8'});assert.equal(badRate.status,0);assert.match(badRate.stdout,/set failed/);const rateReads=[...badRate.stdout.matchAll(/^rate_center_roll=(\S+)/gm)].map(m=>Number(m[1]));assert.deepEqual(rateReads,[200,200],'malformed rate input must not change configuration');

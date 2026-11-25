@@ -27,19 +27,24 @@
 
 /* Schema 10 motor_direction: props-out (default) keeps the mixer yaw signs. */
 static motor_direction_t g_motor_direction=MOTOR_DIRECTION_PROPS_OUT;
-static bf_config_t g_cfg={
- .rate_max_roll=DEF_RATE_MAX,.rate_max_pitch=DEF_RATE_MAX,.rate_max_yaw=DEF_RATE_MAX,
- .pid_roll_p=DEF_KP,.pid_roll_i=DEF_KI,.pid_roll_d=DEF_KD,
- .pid_pitch_p=DEF_KP,.pid_pitch_i=DEF_KI,.pid_pitch_d=DEF_KD,
- .pid_yaw_p=DEF_KP,.pid_yaw_i=DEF_KI,.pid_yaw_d=DEF_KD_YAW,
- .min_throttle=DEF_MIN_THR,.airmode=DEF_AIRMODE,.gyro_lpf_hz=DEF_GYRO_LPF,.dterm_lpf_hz=DEF_DTERM_LPF,
- .gyro_notch1_hz=DEF_GYRO_NOTCH,.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,
- .gyro_notch2_hz=DEF_GYRO_NOTCH,.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,
- .rpm_filter_harmonics=DEF_RPM_HARMONICS,.rpm_filter_min_hz=DEF_RPM_MIN_HZ,.rpm_filter_q_x100=DEF_RPM_Q_X100,.motor_poles=DEF_MOTOR_POLES,
- .align_board_roll=0.f,.align_board_pitch=0.f,.align_board_yaw=0.f,
- .rate_center_roll=DEF_RATE_CENTER,.rate_center_pitch=DEF_RATE_CENTER,.rate_center_yaw=DEF_RATE_CENTER,
- .rate_expo_roll=DEF_RATE_EXPO_AXIS,.rate_expo_pitch=DEF_RATE_EXPO_AXIS,.rate_expo_yaw=DEF_RATE_EXPO_AXIS
-};
+/* N3: the ONE defaults source. Fresh boot (static init), config_defaults(),
+ * config_get_default_key(), D1 `defaults <group>` and the export diff all read
+ * this initializer; nothing else spells a default value. */
+#define CONFIG_DEFAULTS_INIT {\
+ .rate_max_roll=DEF_RATE_MAX,.rate_max_pitch=DEF_RATE_MAX,.rate_max_yaw=DEF_RATE_MAX,\
+ .pid_roll_p=DEF_KP,.pid_roll_i=DEF_KI,.pid_roll_d=DEF_KD,\
+ .pid_pitch_p=DEF_KP,.pid_pitch_i=DEF_KI,.pid_pitch_d=DEF_KD,\
+ .pid_yaw_p=DEF_KP,.pid_yaw_i=DEF_KI,.pid_yaw_d=DEF_KD_YAW,\
+ .min_throttle=DEF_MIN_THR,.airmode=DEF_AIRMODE,.gyro_lpf_hz=DEF_GYRO_LPF,.dterm_lpf_hz=DEF_DTERM_LPF,\
+ .gyro_notch1_hz=DEF_GYRO_NOTCH,.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,\
+ .gyro_notch2_hz=DEF_GYRO_NOTCH,.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF,\
+ .rpm_filter_harmonics=DEF_RPM_HARMONICS,.rpm_filter_min_hz=DEF_RPM_MIN_HZ,.rpm_filter_q_x100=DEF_RPM_Q_X100,.motor_poles=DEF_MOTOR_POLES,\
+ .align_board_roll=0.f,.align_board_pitch=0.f,.align_board_yaw=0.f,\
+ .rate_center_roll=DEF_RATE_CENTER,.rate_center_pitch=DEF_RATE_CENTER,.rate_center_yaw=DEF_RATE_CENTER,\
+ .rate_expo_roll=DEF_RATE_EXPO_AXIS,.rate_expo_pitch=DEF_RATE_EXPO_AXIS,.rate_expo_yaw=DEF_RATE_EXPO_AXIS\
+}
+static const bf_config_t g_defaults=CONFIG_DEFAULTS_INIT;
+static bf_config_t g_cfg=CONFIG_DEFAULTS_INIT;
 
 static const char *const g_config_keys[] = {
  "rate_max_roll","rate_max_pitch","rate_max_yaw",
@@ -58,41 +63,18 @@ size_t config_key_count(void){return sizeof(g_config_keys)/sizeof(g_config_keys[
 const char *config_key_name(size_t idx){if(idx<config_key_count())return g_config_keys[idx];return NULL;}
 
 void config_defaults(void){
- g_cfg.rate_max_roll=DEF_RATE_MAX;g_cfg.rate_max_pitch=DEF_RATE_MAX;g_cfg.rate_max_yaw=DEF_RATE_MAX;
- g_cfg.pid_roll_p=DEF_KP;g_cfg.pid_roll_i=DEF_KI;g_cfg.pid_roll_d=DEF_KD;
- g_cfg.pid_pitch_p=DEF_KP;g_cfg.pid_pitch_i=DEF_KI;g_cfg.pid_pitch_d=DEF_KD;
- g_cfg.pid_yaw_p=DEF_KP;g_cfg.pid_yaw_i=DEF_KI;g_cfg.pid_yaw_d=DEF_KD_YAW;
- g_cfg.min_throttle=DEF_MIN_THR;g_cfg.airmode=DEF_AIRMODE;g_cfg.gyro_lpf_hz=DEF_GYRO_LPF;g_cfg.dterm_lpf_hz=DEF_DTERM_LPF;
- g_cfg.gyro_notch1_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch1_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;
- g_cfg.gyro_notch2_hz=DEF_GYRO_NOTCH;g_cfg.gyro_notch2_cutoff_hz=DEF_GYRO_NOTCH_CUTOFF;
- g_cfg.rpm_filter_harmonics=DEF_RPM_HARMONICS;g_cfg.rpm_filter_min_hz=DEF_RPM_MIN_HZ;g_cfg.rpm_filter_q_x100=DEF_RPM_Q_X100;g_cfg.motor_poles=DEF_MOTOR_POLES;
- g_cfg.align_board_roll=g_cfg.align_board_pitch=g_cfg.align_board_yaw=0.f;
- g_cfg.rate_center_roll=DEF_RATE_CENTER;g_cfg.rate_center_pitch=DEF_RATE_CENTER;g_cfg.rate_center_yaw=DEF_RATE_CENTER;
- g_cfg.rate_expo_roll=DEF_RATE_EXPO_AXIS;g_cfg.rate_expo_pitch=DEF_RATE_EXPO_AXIS;g_cfg.rate_expo_yaw=DEF_RATE_EXPO_AXIS;
+ g_cfg=g_defaults;
  g_motor_direction=MOTOR_DIRECTION_PROPS_OUT;
 }
 
+static float *slot_in(bf_config_t *c,const char *key);
 bool config_get_default_key(const char *key,float *out){
  if(!key||!out)return false;
- if(!strcmp(key,"rate_max_roll")||!strcmp(key,"rate_max_pitch")||!strcmp(key,"rate_max_yaw")){*out=DEF_RATE_MAX;return true;}
- if(!strcmp(key,"pid_roll_p")||!strcmp(key,"pid_pitch_p")||!strcmp(key,"pid_yaw_p")){*out=DEF_KP;return true;}
- if(!strcmp(key,"pid_roll_i")||!strcmp(key,"pid_pitch_i")||!strcmp(key,"pid_yaw_i")){*out=DEF_KI;return true;}
- if(!strcmp(key,"pid_roll_d")||!strcmp(key,"pid_pitch_d")){*out=DEF_KD;return true;}
- if(!strcmp(key,"pid_yaw_d")){*out=DEF_KD_YAW;return true;}
- if(!strcmp(key,"min_throttle")){*out=DEF_MIN_THR;return true;}
- if(!strcmp(key,"airmode")){*out=(float)DEF_AIRMODE;return true;}
- if(!strcmp(key,"gyro_lpf_hz")){*out=DEF_GYRO_LPF;return true;}
- if(!strcmp(key,"dterm_lpf_hz")){*out=DEF_DTERM_LPF;return true;}
- if(!strcmp(key,"gyro_notch1_hz")||!strcmp(key,"gyro_notch2_hz")){*out=DEF_GYRO_NOTCH;return true;}
- if(!strcmp(key,"gyro_notch1_cutoff_hz")||!strcmp(key,"gyro_notch2_cutoff_hz")){*out=DEF_GYRO_NOTCH_CUTOFF;return true;}
- if(!strcmp(key,"rpm_filter_harmonics")){*out=DEF_RPM_HARMONICS;return true;}
- if(!strcmp(key,"rpm_filter_min_hz")){*out=DEF_RPM_MIN_HZ;return true;}
- if(!strcmp(key,"rpm_filter_q_x100")){*out=DEF_RPM_Q_X100;return true;}
- if(!strcmp(key,"motor_poles")){*out=DEF_MOTOR_POLES;return true;}
- if(!strcmp(key,"align_board_roll")||!strcmp(key,"align_board_pitch")||!strcmp(key,"align_board_yaw")){*out=0.f;return true;}
- if(!strcmp(key,"rate_center_roll")||!strcmp(key,"rate_center_pitch")||!strcmp(key,"rate_center_yaw")){*out=DEF_RATE_CENTER;return true;}
- if(!strcmp(key,"rate_expo_roll")||!strcmp(key,"rate_expo_pitch")||!strcmp(key,"rate_expo_yaw")){*out=DEF_RATE_EXPO_AXIS;return true;}
- return false;
+ if(!strcmp(key,"airmode")){*out=(float)g_defaults.airmode;return true;}
+ bf_config_t d=g_defaults;const float *slot=slot_in(&d,key);
+ if(!slot)return false;
+ *out=*slot;
+ return true;
 }
 
 bool config_get_default(const char *key,float *out){return config_get_default_key(key,out);}
@@ -163,42 +145,43 @@ const bf_config_t *config_get(void){return &g_cfg;}
 const bf_config_t *config_blob(void){return &g_cfg;}
 void config_load_blob(const bf_config_t *src){if(src)g_cfg=*src;}
 
-static float *slot_for(const char *key){
+static float *slot_in(bf_config_t *c,const char *key){
  if(!key)return NULL;
- if(!strcmp(key,"rate_max_roll"))return &g_cfg.rate_max_roll;
- if(!strcmp(key,"rate_max_pitch"))return &g_cfg.rate_max_pitch;
- if(!strcmp(key,"rate_max_yaw"))return &g_cfg.rate_max_yaw;
- if(!strcmp(key,"pid_roll_p"))return &g_cfg.pid_roll_p;
- if(!strcmp(key,"pid_roll_i"))return &g_cfg.pid_roll_i;
- if(!strcmp(key,"pid_roll_d"))return &g_cfg.pid_roll_d;
- if(!strcmp(key,"pid_pitch_p"))return &g_cfg.pid_pitch_p;
- if(!strcmp(key,"pid_pitch_i"))return &g_cfg.pid_pitch_i;
- if(!strcmp(key,"pid_pitch_d"))return &g_cfg.pid_pitch_d;
- if(!strcmp(key,"pid_yaw_p"))return &g_cfg.pid_yaw_p;
- if(!strcmp(key,"pid_yaw_i"))return &g_cfg.pid_yaw_i;
- if(!strcmp(key,"pid_yaw_d"))return &g_cfg.pid_yaw_d;
- if(!strcmp(key,"min_throttle"))return &g_cfg.min_throttle;
- if(!strcmp(key,"gyro_lpf_hz"))return &g_cfg.gyro_lpf_hz;
- if(!strcmp(key,"dterm_lpf_hz"))return &g_cfg.dterm_lpf_hz;
- if(!strcmp(key,"gyro_notch1_hz"))return &g_cfg.gyro_notch1_hz;
- if(!strcmp(key,"gyro_notch1_cutoff_hz"))return &g_cfg.gyro_notch1_cutoff_hz;
- if(!strcmp(key,"gyro_notch2_hz"))return &g_cfg.gyro_notch2_hz;
- if(!strcmp(key,"gyro_notch2_cutoff_hz"))return &g_cfg.gyro_notch2_cutoff_hz;
- if(!strcmp(key,"rpm_filter_harmonics"))return &g_cfg.rpm_filter_harmonics;
- if(!strcmp(key,"rpm_filter_min_hz"))return &g_cfg.rpm_filter_min_hz;
- if(!strcmp(key,"rpm_filter_q_x100"))return &g_cfg.rpm_filter_q_x100;
- if(!strcmp(key,"motor_poles"))return &g_cfg.motor_poles;
- if(!strcmp(key,"align_board_roll"))return &g_cfg.align_board_roll;
- if(!strcmp(key,"align_board_pitch"))return &g_cfg.align_board_pitch;
- if(!strcmp(key,"align_board_yaw"))return &g_cfg.align_board_yaw;
- if(!strcmp(key,"rate_center_roll"))return &g_cfg.rate_center_roll;
- if(!strcmp(key,"rate_center_pitch"))return &g_cfg.rate_center_pitch;
- if(!strcmp(key,"rate_center_yaw"))return &g_cfg.rate_center_yaw;
- if(!strcmp(key,"rate_expo_roll"))return &g_cfg.rate_expo_roll;
- if(!strcmp(key,"rate_expo_pitch"))return &g_cfg.rate_expo_pitch;
- if(!strcmp(key,"rate_expo_yaw"))return &g_cfg.rate_expo_yaw;
+ if(!strcmp(key,"rate_max_roll"))return &c->rate_max_roll;
+ if(!strcmp(key,"rate_max_pitch"))return &c->rate_max_pitch;
+ if(!strcmp(key,"rate_max_yaw"))return &c->rate_max_yaw;
+ if(!strcmp(key,"pid_roll_p"))return &c->pid_roll_p;
+ if(!strcmp(key,"pid_roll_i"))return &c->pid_roll_i;
+ if(!strcmp(key,"pid_roll_d"))return &c->pid_roll_d;
+ if(!strcmp(key,"pid_pitch_p"))return &c->pid_pitch_p;
+ if(!strcmp(key,"pid_pitch_i"))return &c->pid_pitch_i;
+ if(!strcmp(key,"pid_pitch_d"))return &c->pid_pitch_d;
+ if(!strcmp(key,"pid_yaw_p"))return &c->pid_yaw_p;
+ if(!strcmp(key,"pid_yaw_i"))return &c->pid_yaw_i;
+ if(!strcmp(key,"pid_yaw_d"))return &c->pid_yaw_d;
+ if(!strcmp(key,"min_throttle"))return &c->min_throttle;
+ if(!strcmp(key,"gyro_lpf_hz"))return &c->gyro_lpf_hz;
+ if(!strcmp(key,"dterm_lpf_hz"))return &c->dterm_lpf_hz;
+ if(!strcmp(key,"gyro_notch1_hz"))return &c->gyro_notch1_hz;
+ if(!strcmp(key,"gyro_notch1_cutoff_hz"))return &c->gyro_notch1_cutoff_hz;
+ if(!strcmp(key,"gyro_notch2_hz"))return &c->gyro_notch2_hz;
+ if(!strcmp(key,"gyro_notch2_cutoff_hz"))return &c->gyro_notch2_cutoff_hz;
+ if(!strcmp(key,"rpm_filter_harmonics"))return &c->rpm_filter_harmonics;
+ if(!strcmp(key,"rpm_filter_min_hz"))return &c->rpm_filter_min_hz;
+ if(!strcmp(key,"rpm_filter_q_x100"))return &c->rpm_filter_q_x100;
+ if(!strcmp(key,"motor_poles"))return &c->motor_poles;
+ if(!strcmp(key,"align_board_roll"))return &c->align_board_roll;
+ if(!strcmp(key,"align_board_pitch"))return &c->align_board_pitch;
+ if(!strcmp(key,"align_board_yaw"))return &c->align_board_yaw;
+ if(!strcmp(key,"rate_center_roll"))return &c->rate_center_roll;
+ if(!strcmp(key,"rate_center_pitch"))return &c->rate_center_pitch;
+ if(!strcmp(key,"rate_center_yaw"))return &c->rate_center_yaw;
+ if(!strcmp(key,"rate_expo_roll"))return &c->rate_expo_roll;
+ if(!strcmp(key,"rate_expo_pitch"))return &c->rate_expo_pitch;
+ if(!strcmp(key,"rate_expo_yaw"))return &c->rate_expo_yaw;
  return NULL;
 }
+static float *slot_for(const char *key){return slot_in(&g_cfg,key);}
 
 bool config_get_key(const char *key,float *out){
  if(!key||!out)return false;

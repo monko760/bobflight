@@ -3,7 +3,7 @@
  * Test-only FW model for the settings `storage` / `save` CLI (StoragePanel PR 2).
  *
  * Wire shapes follow the firmware's storage_cli.h:
- *   `storage` -> storage_api: 1 ... storage_end: 1 (schema 13, full scope)
+ *   `storage` -> storage_api: 1 ... accel_cal_saved, stored_schema, storage_end: 1 (schema 14, full scope)
  *   `save`    -> `saved: <backend> verified` or `save failed: <last_error>`
  * `power` follows cli.c cmd_power (a healthy 4S pack, no current sensor).
  * Every other line goes to the protocol MockSerial (receiver, power, sensors,
@@ -14,7 +14,7 @@ import { EventEmitter } from "node:events";
 import type { PortInfo } from "./types";
 import type { SerialPortLike, TransportFactory } from "./transport";
 import { MockSerial, type MockSerialOptions } from "./mock-serial";
-import { STORAGE_SCOPE_V13 } from "./storage";
+import { STORAGE_SCOPE_V14, type StoredSchema } from "./storage";
 import { mockSensorReply } from "./sensor-mock";
 
 export interface StorageSimOptions {
@@ -27,6 +27,14 @@ export interface StorageSimOptions {
   /** Delay before the `storage` reply, ms. */
   storageMs?: number;
   mock?: MockSerialOptions;
+  /**
+   * N3 `stored_schema:` the FC reports (default "14": a schema 14 record in flash).
+   * "13": schema 13 settings migrated on load, rewritten as 14 by the next verified Save.
+   * "none": nothing loaded (state becomes defaults). Unsupported backends always report none.
+   */
+  storedSchema?: StoredSchema;
+  /** FC found settings written by newer firmware: last_error newer_settings, state error, every Save refused. */
+  newerSettings?: boolean;
   /**
    * Simulated live IMU for page tests: `sensors` answers the MockSerial shape
    * with an advancing sample_seq, a 1 ms sample age, gyro_ok and attitude_ready.
@@ -43,6 +51,9 @@ export class MockStorageFirmware {
   state: "saved" | "dirty" | "defaults" | "error" | "unsupported";
   generation = 1;
   lastError = "none";
+  storedSchema: StoredSchema;
+  /** `accel_cal_saved:` the FC reports (the sim never holds a saved accelerometer calibration). */
+  accelCalSaved: "yes" | "no" = "no";
   armed: boolean;
   benchActive: boolean;
   calibrationActive: boolean;
@@ -64,7 +75,9 @@ export class MockStorageFirmware {
 
   constructor(o: StorageSimOptions = {}) {
     this.backend = o.backend ?? "flash";
-    this.state = this.backend === "unsupported" ? "unsupported" : "saved";
+    this.storedSchema = this.backend === "unsupported" ? "none" : o.storedSchema ?? "14";
+    this.state = this.backend === "unsupported" ? "unsupported" : this.storedSchema === "none" ? "defaults" : "saved";
+    if (o.newerSettings && this.backend !== "unsupported") { this.storedSchema = "14"; this.state = "error"; this.lastError = "newer_settings"; }
     this.armed = !!o.armed;
     this.benchActive = !!o.benchActive;
     this.calibrationActive = !!o.calibrationActive;
@@ -85,15 +98,16 @@ export class MockStorageFirmware {
   }
 
   get dirty(): boolean { return this.state === "dirty"; }
-  markDirty(): void { if (this.backend !== "unsupported") this.state = "dirty"; }
+  /** FW: nothing saved yet (defaults) or a refused newer record keeps its state; persist_dirty() is 1 for both. */
+  markDirty(): void { if (this.backend !== "unsupported" && this.state !== "defaults" && this.lastError !== "newer_settings") this.state = "dirty"; }
   count(line: string): number { return this.log.filter((l) => l === line).length; }
 
   storageReply(): string {
     return [
-      "storage_api: 1", `backend: ${this.backend}`, "schema: 13", `state: ${this.state}`, `dirty: ${this.dirty ? 1 : 0}`,
-      `generation: ${this.generation}`, `last_error: ${this.lastError}`, `scope: ${STORAGE_SCOPE_V13}`,
+      "storage_api: 1", `backend: ${this.backend}`, "schema: 14", `state: ${this.state}`, `dirty: ${this.dirty || this.state === "defaults" || this.lastError === "newer_settings" ? 1 : 0}`,
+      `generation: ${this.generation}`, `last_error: ${this.lastError}`, `scope: ${STORAGE_SCOPE_V14}`,
       `armed: ${this.armed ? 1 : 0}`, `bench_active: ${this.benchActive ? 1 : 0}`, `calibration_active: ${this.calibrationActive ? 1 : 0}`,
-      "flight_enabled: 0", "storage_end: 1",
+      "flight_enabled: 0", `accel_cal_saved: ${this.accelCalSaved}`, `stored_schema: ${this.storedSchema}`, "storage_end: 1",
     ].join("\r\n") + "\r\n";
   }
 
@@ -112,7 +126,9 @@ export class MockStorageFirmware {
   saveReply(): string {
     if (this.failNextSave !== null) { this.lastError = this.failNextSave; this.failNextSave = null; this.state = "error"; return `save failed: ${this.lastError}\r\n`; }
     if (this.backend === "unsupported") { this.lastError = "unsupported"; return "save failed: unsupported\r\n"; }
-    this.generation++; this.state = "saved"; this.lastError = "none";
+    // FW persist_save: a newer-layout record is never overwritten.
+    if (this.lastError === "newer_settings") return "save failed: newer_settings\r\n";
+    this.generation++; this.state = "saved"; this.lastError = "none"; this.storedSchema = "14";
     return `saved: ${this.backend} verified\r\n`;
   }
 }

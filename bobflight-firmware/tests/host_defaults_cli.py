@@ -60,7 +60,8 @@ for g,keys in GROUPS.items():
     lines=run(KEEP+TUNE+['save','reboot',PAD,'storage',f'defaults {g}','storage','save','reboot',PAD,'storage']+[f'get {k}' for k in ALL+OTHER],reinit=True)
     st=storages(lines);assert len(st)==3,st
     assert 'dirty: 0' in st[0] and 'dirty: 1' in st[1] and 'state: saved' in st[2],st  # no auto-save
-    assert all(s[-2]=='accel_cal_saved: no' for s in st),st  # host: no IMU, so never a calibration
+    assert all(s[-3]=='accel_cal_saved: no' for s in st),st  # host: no IMU, so never a calibration
+    assert all(s[-2]=='stored_schema: 14' for s in st),st  # N3 additive line, just before storage_end
     v=getmap(lines[lines.index(st[2][-1]):])
     assert v['motor_direction']=='props-in' and v['align_board_roll']=='180' and v['align_board_pitch']=='-90' and v['align_board_yaw']=='90' and v['motor_poles']=='12',v
     assert v['loop_rate_hz']=='1000',v  # Kakute default is 4000: the saved 1000 survives

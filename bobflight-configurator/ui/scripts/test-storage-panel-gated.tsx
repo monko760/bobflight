@@ -30,6 +30,7 @@ import {
 } from "../src/protocol";
 import { parseStatus, type CliCommand } from "@bobflight/protocol";
 import { MockStorageFirmware, StorageSimTransportFactory, type StorageSimOptions } from "../../protocol/src/storage-sim";
+import { STORAGE_CARRY_OVER_TEXT, STORAGE_DOWNGRADE_NOTE, STORAGE_NEWER_SETTINGS_TEXT } from "../../protocol/src/storage";
 
 const { container } = installFakeDom();
 // useSensorTelemetry reads document.visibilityState; React itself only probes window.document.
@@ -568,7 +569,7 @@ async function main() {
     assert.ok(await waitFor(() => !!storageError()));
     assert.equal(storageError(), "The controller’s storage reply could not be read, so storage status is unknown.");
     const detail = shown("storage-error-detail") ?? "";
-    assert.match(detail, /^Storage reply could not be read: scope does not match storage schema 13\. Controller reply: storage_api: 1/);
+    assert.match(detail, /^Storage reply could not be read: scope does not match storage schema 14\. Controller reply: storage_api: 1/);
     assert.ok(detail.includes("scope: pid_rates,receiver_uart"), "raw line visible");
     assert.ok(!/Fresh install/i.test(pageText()));
     assert.equal(r.fw.count("storage"), 1, "a parse failure is not retried");
@@ -825,32 +826,43 @@ async function main() {
     await r.done();
   });
 
-  await test("S22/F5 panel: a NEWER schema (14) is 'could not be read' with the raw reply, never 'Fresh install'; a well-formed schema 12 is 'Fresh install required'", async () => {
+  await test("S22/F5 panel: a NEWER schema (15) is 'could not be read' with the raw reply, never 'Fresh install'; schema 13 is 'Firmware update needed'; a well-formed schema 12 is 'Fresh install required'", async () => {
     {
       const r = await rig();
-      r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 14")]);
+      r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 15")]);
       r.render(<StoragePanel requiredScope="receiver_map" />);
       assert.ok(await waitFor(() => !!storageError()));
       assert.equal(storageError(), "The controller’s storage reply could not be read, so storage status is unknown.");
-      assert.ok((shown("storage-error-detail") ?? "").includes("schema: 14"));
+      assert.ok((shown("storage-error-detail") ?? "").includes("schema: 15"));
       assert.ok(!/Fresh install/i.test(pageText()));
       await r.done();
     }
     {
       const r = await rig();
-      r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 12")]);
+      r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 12")]);
       r.render(<StoragePanel requiredScope="receiver_map" />);
       assert.ok(await waitFor(() => !!storageError()));
       assert.match(storageError() ?? "", /^Fresh install required: the controller reports storage schema 12/);
+      await r.done();
+    }
+    {
+      // Real schema 13 firmware has no stored_schema line.
+      const r = await rig();
+      r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 13").replace(/stored_schema: [^\r]+\r\n/, "")]);
+      r.render(<StoragePanel requiredScope="receiver_map" />);
+      assert.ok(await waitFor(() => !!storageError()));
+      assert.equal(storageError(), "Firmware update needed: the controller reports storage schema 13; this Configurator needs storage schema 14. After the firmware update, saved schema 13 settings carry over and the next Save rewrites them as schema 14.");
+      assert.ok(!/Fresh install/i.test(pageText()), "schema 13 is not a fresh install");
+      assert.ok(isDisabled(button("Save to controller")));
       await r.done();
     }
   });
 
   // F5 Rates tab: any failed `storage` read leaves capability unverified with the reason.
   const ratesCases: Array<[string, (r: Rig) => void, RegExp]> = [
-    ["scope mismatch", (r) => r.fw.replyOnce.set("storage", [r.fw.storageReply().replace(/scope: [^\r]+/, "scope: pid_rates,receiver_uart")]), /^Storage capability unverified: Storage reply could not be read: scope does not match storage schema 13\. Saving is disabled\./],
+    ["scope mismatch", (r) => r.fw.replyOnce.set("storage", [r.fw.storageReply().replace(/scope: [^\r]+/, "scope: pid_rates,receiver_uart")]), /^Storage capability unverified: Storage reply could not be read: scope does not match storage schema 14\. Saving is disabled\./],
     ["garbled reply", (r) => r.fw.replyOnce.set("storage", ["storage_api: 1\r\nb@ckend fl#sh\r\nstorage_end: 1\r\n"]), /^Storage capability unverified: Storage reply could not be read: .+\. Saving is disabled\./],
-    ["newer schema 14", (r) => r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 14")]), /^Storage capability unverified: Storage reply could not be read: storage schema "14" is not schema 13\. Saving is disabled\./],
+    ["newer schema 15", (r) => r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 15")]), /^Storage capability unverified: Storage reply could not be read: storage schema "15" is not schema 14\. Saving is disabled\./],
     ["queue timeout", (r) => { let armed = true; r.fw.onLine = (l) => { if (armed && l.startsWith("get ")) { armed = false; void r.holdGate(GATE_QUEUE_TIMEOUT_MS + 400); } }; },
       /^Storage capability unverified: another command was using the connection, so storage status was not read \(nothing was sent\)\. Saving is disabled\./],
   ];
@@ -870,7 +882,7 @@ async function main() {
       await r.done();
     });
   }
-  await test("F5 Rates tab: schema 13 last_error invalid_record or fresh_install_required is unverified with the token, not a fresh-install headline; Save disabled", async () => {
+  await test("F5 Rates tab: schema 14 last_error invalid_record or fresh_install_required is unverified with the token, not a fresh-install headline; Save disabled", async () => {
     for (const token of ["invalid_record", "fresh_install_required"]) {
       const r = await rig();
       r.fw.state = "dirty";
@@ -885,18 +897,79 @@ async function main() {
   });
   await test("F5 Rates tab: a well-formed OLDER schema (12) read from the FC is the one case that says 'Fresh install required'", async () => {
     const r = await rig();
-    r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 13", "schema: 12")]);
+    r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 12")]);
     r.render(<RatesPage />);
     assert.ok(await waitFor(() => /Fresh install required/.test(pageText()), 4000), pageText().slice(0, 300));
-    assert.match(pageText(), /Fresh install required: the controller reports storage schema 12; this Configurator needs storage schema 13\. Actual rates need storage schema 13\./);
+    assert.match(pageText(), /Fresh install required: the controller reports storage schema 12; this Configurator needs storage schema 14\. Actual rates need storage schema 14\./);
     assert.ok(!/unverified/i.test(pageText()));
     await r.done();
   });
-  await test("F5 Rates tab: a good schema-13 reply loads (no unverified / Fresh install text)", async () => {
+  await test("F5 Rates tab: a good schema-14 reply loads (no unverified / Fresh install text)", async () => {
     const r = await rig();
     r.render(<RatesPage />);
     await sleep(800);
     assert.ok(!/unverified|Fresh install|could not be read/i.test(pageText()), pageText().slice(0, 400));
+    await r.done();
+  });
+  await test("N3 Rates tab: schema 13 firmware says 'Firmware update needed' (settings carry over), never 'Fresh install required'; Save disabled", async () => {
+    const r = await rig();
+    r.fw.replyOnce.set("storage", [r.fw.storageReply().replace("schema: 14", "schema: 13").replace(/stored_schema: [^\r]+\r\n/, "")]);
+    r.render(<RatesPage />);
+    const want = "Firmware update needed: the controller reports storage schema 13; this Configurator needs storage schema 14. After the firmware update, saved schema 13 settings carry over and the next Save rewrites them as schema 14.";
+    assert.ok(await waitFor(() => pageText().includes(want), 4000), pageText().slice(0, 400));
+    assert.ok(!/Fresh install/i.test(pageText()), pageText().slice(0, 400));
+    assert.ok(isDisabled(button("Save to controller")));
+    await r.done();
+  });
+
+  // ---- N3 schema 14: stored_schema 13 carry-over + downgrade note, newer_settings ----------------
+  await test("N3 StoragePanel: stored_schema 13 shows the carry-over line and the exact downgrade note; Save stays available and a Save clears both", async () => {
+    assert.equal(STORAGE_CARRY_OVER_TEXT, "Saved settings from schema 13 carry over; the next Save rewrites them as schema 14.");
+    assert.equal(STORAGE_DOWNGRADE_NOTE, "After this Save, older (schema 13) firmware would load the previous saved copy; after a second Save it would start from defaults. Back up with diff all first.");
+    const r = await rig({ storedSchema: "13" });
+    r.fw.markDirty();
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(loaded), storageStatus());
+    assert.match(r.fw.storageReply(), /\r\nstored_schema: 13\r\nstorage_end: 1\r\n$/, "mock reports stored_schema like the FW");
+    assert.equal(shown("storage-carry-over"), "Saved settings from schema 13 carry over; the next Save rewrites them as schema 14.");
+    assert.equal(shown("storage-downgrade-note"), "After this Save, older (schema 13) firmware would load the previous saved copy; after a second Save it would start from defaults. Back up with diff all first.");
+    assert.equal(byTestId("storage-downgrade-note")!.getAttribute("role"), "alert");
+    assert.ok(!isDisabled(button("Save to controller")), "stored_schema 13 does not block Save");
+    assert.equal(shown("storage-newer-settings"), null);
+    click("Save to controller");
+    assert.ok(await waitFor(() => /Saved to controller flash and verified/.test(shown("storage-message") ?? "") || storageError() !== null, 6000));
+    assert.equal(storageError(), null);
+    assert.equal(r.fw.storedSchema, "14", "the FW rewrote the record as schema 14");
+    assert.ok(await waitFor(() => shown("storage-downgrade-note") === null, 3000), "the note goes once stored_schema reads 14");
+    assert.equal(shown("storage-carry-over"), null);
+    await r.done();
+  });
+  await test("N3 StoragePanel: stored_schema 14 (and none) shows no carry-over line and no downgrade note", async () => {
+    for (const storedSchema of ["14", "none"] as const) {
+      const r = await rig({ storedSchema });
+      r.render(<StoragePanel requiredScope="receiver_map" />);
+      assert.ok(await waitFor(() => /^Controller flash · /.test(storageStatus())), `${storedSchema}: ${storageStatus()}`);
+      assert.ok(r.fw.storageReply().includes(`\r\nstored_schema: ${storedSchema}\r\n`));
+      assert.equal(shown("storage-downgrade-note"), null, `${storedSchema}: no downgrade note`);
+      assert.equal(shown("storage-carry-over"), null, `${storedSchema}: no carry-over line`);
+      assert.ok(!pageText().includes(STORAGE_DOWNGRADE_NOTE));
+      assert.ok(!/older \(schema 13\) firmware/.test(pageText()));
+      await r.done();
+    }
+  });
+  await test("N3 StoragePanel: last_error newer_settings shows the exact newer-firmware text, no generic notice, Save disabled; the FW refuses a save anyway", async () => {
+    assert.equal(STORAGE_NEWER_SETTINGS_TEXT, "Settings were written by newer firmware. Update firmware to change them; Save is refused so nothing is lost.");
+    const r = await rig({ newerSettings: true });
+    r.render(<StoragePanel requiredScope="receiver_map" />);
+    assert.ok(await waitFor(() => shown("storage-newer-settings") !== null, 4000), pageText().slice(0, 400));
+    assert.equal(shown("storage-newer-settings"), "Settings were written by newer firmware. Update firmware to change them; Save is refused so nothing is lost.");
+    assert.equal(byTestId("storage-newer-settings")!.getAttribute("role"), "alert");
+    assert.match(storageStatus(), /^Controller flash · error · unsaved changes · generation /);
+    assert.ok(!/Controller storage notice: newer_settings/.test(pageText()), "no generic notice for newer_settings");
+    assert.equal(shown("storage-downgrade-note"), null);
+    assert.ok(isDisabled(button("Save to controller")), "Save disabled");
+    assert.equal(r.fw.saveReply(), "save failed: newer_settings\r\n", "mock FW refuses like persist.c");
+    assert.equal(r.fw.storedSchema, "14");
     await r.done();
   });
 
