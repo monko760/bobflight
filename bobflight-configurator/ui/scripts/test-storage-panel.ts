@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { REFRESH_CONFIRM_MESSAGE, requestRefresh, shouldConfirmRefresh, storageDirty, browserConfirm } from "../src/components/storageRefresh";
-import { parseStorage, STORAGE_SCOPE_V13 } from "../../protocol/src/storage";
+import { parseStorage, STORAGE_SCOPE_V14 } from "../../protocol/src/storage";
 import { BenchController, type BenchState } from "../src/motors/benchController";
 import { storageBlocked } from "../src/motors/motorsStorage";
 import type { CliCommand, ConnectionStatus, ParsedStatus } from "../src/protocol/types";
@@ -21,9 +21,9 @@ function harness(answer: boolean) {
 }
 // Controller `storage` status reply (same shape the firmware emits).
 const storageReply = (dirty: 0 | 1) => [
-  "storage_api: 1", "backend: flash", "schema: 13", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty}`,
-  "generation: 3", "last_error: none", `scope: ${STORAGE_SCOPE_V13}`, "armed: 0", "bench_active: 0",
-  "calibration_active: 0", "flight_enabled: 0", "storage_end: 1",
+  "storage_api: 1", "backend: flash", "schema: 14", `state: ${dirty ? "dirty" : "saved"}`, `dirty: ${dirty}`,
+  "generation: 3", "last_error: none", `scope: ${STORAGE_SCOPE_V14}`, "armed: 0", "bench_active: 0",
+  "calibration_active: 0", "flight_enabled: 0", "accel_cal_saved: no", "stored_schema: 14", "storage_end: 1",
 ].join("\r\n") + "\r\n";
 // Same FakeHost pattern as test-motor-bench.ts: healthy disarmed bench firmware, honest empty eRPM.
 const ready: ParsedStatus = { raw: "", board: "test", arm: "disarmed", mmio: "allowed", dshot_bound: "4/4", motor_output: "DShot300 ready", failClosed: true, failClosedReasons: ["bench firmware: flight arming disabled"] };
@@ -137,7 +137,7 @@ async function main() {
     assert.match(panel[0], /blocked=\{storageBlocked\(state\)\}/);
     assert.doesNotMatch(panel[0], /busy/);
   });
-  await test("shipped UI copy: schema 13 and scoped defaults, not schema 3/4/6/10 as current", () => {
+  await test("shipped UI copy: schema 14 (schema 13 carry-over) and scoped defaults, not schema 3/4/6/10 as current", () => {
     const root = fileURLToPath(new URL("../src/", import.meta.url));
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -156,7 +156,8 @@ async function main() {
     assert.doesNotMatch(visible, /accept this migration/);
     assert.doesNotMatch(visible, /migrated_control_source_manual/);
     const storage = strip(source("../src/components/StoragePanel.tsx"));
-    assert.match(storage, /storage schema 13 only/);
+    assert.match(storage, /This Configurator reads storage schema 14; settings saved by schema 13 firmware carry over\./);
+    assert.doesNotMatch(storage, /storage schema 13 only/);
     assert.match(storage, /Saved scope below is the list this connected firmware reports/);
     assert.doesNotMatch(storage, /Schema 3 includes/);
     const pid = strip(source("../src/pages/PidPage.tsx"));

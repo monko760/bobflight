@@ -226,7 +226,9 @@ else{
   });
   await test('accel_cal_saved (D1, shown next to Save): real host reply "no" verbatim; "yes"; missing/repeated/unknown value -> unknown; parseStorage snapshot unchanged',()=>{
     const real=/storage_api: 1\r\n[\s\S]*?storage_end: 1\r\n/.exec(host(['set align_board_roll 90','save','storage']))[0];
-    assert.match(real,/\r\naccel_cal_saved: no\r\nstorage_end: 1\r\n$/,'real host: no saved accel calibration, line just before storage_end');
+    // By name, not by line position (N3 stored_schema follows accel_cal_saved).
+    const named=k=>real.split('\r\n').filter(l=>l.startsWith(k+': '));
+    assert.deepEqual(named('accel_cal_saved'),['accel_cal_saved: no'],'real host: no saved accel calibration');assert.deepEqual(named('stored_schema'),['stored_schema: 14'],'after save');assert.match(real,/\r\nstorage_end: 1\r\n$/);
     assert.deepEqual(P.readAccelCalSaved(real),{value:'no',line:'accel_cal_saved: no'});
     const yes=real.replace('accel_cal_saved: no','accel_cal_saved: yes');assert.deepEqual(P.readAccelCalSaved(yes),{value:'yes',line:'accel_cal_saved: yes'});
     const missing=real.replace('accel_cal_saved: no\r\n','');assert.deepEqual(P.readAccelCalSaved(missing),{value:'unknown',line:null,reason:'missing'});
@@ -249,10 +251,10 @@ else{
     assert.deepEqual(P.readAccelCalSaved(real.replace('accel_cal_saved: no','accel_cal_saved: yes\r\naccel_cal_saved: no')),{value:'unknown',line:null,reason:'repeated'},'repeated -> unknown (repeated)');
     assert.deepEqual(P.parseStorage(real),P.parseStorage(missing),'storage snapshot unchanged by the line');
   });
-  await test('real host FW: defaults reset only the group, never save; storage dirty is RAM-vs-flash (accel_cal_saved just before storage_end parses)',()=>{
+  await test('real host FW: defaults reset only the group, never save; storage dirty is RAM-vs-flash (accel_cal_saved and stored_schema found by name)',()=>{
     const out=host(['set pid_roll_p 0.004','set rate_max_yaw 700','set gyro_lpf_hz 250','save','storage','defaults pid','storage','get pid_roll_p','get rate_max_yaw','get gyro_lpf_hz','get motor_poles']);
     const st=[...out.matchAll(/storage_api: 1\r\n[\s\S]*?storage_end: 1\r\n/g)].map(m=>m[0]);assert.equal(st.length,2);
-    for(const x of st)assert.match(x,/\r\naccel_cal_saved: (yes|no)\r\nstorage_end: 1\r\n$/,'accel_cal_saved just before storage_end');
+    for(const x of st){const l=x.split('\r\n');assert.equal(l.filter(y=>/^accel_cal_saved: (yes|no)$/.test(y)).length,1,'one accel_cal_saved line');assert.equal(l.filter(y=>y==='stored_schema: 14').length,1,'stored_schema by name');}
     const [a,b]=st.map(P.parseStorage);assert.equal(a.dirty,false,'clean after save');assert.equal(b.dirty,true,'defaults pid differs from the saved pid -> dirty');
     assert.match(out,/\r\npid_roll_p=0\.002\r\n/);assert.match(out,/\r\nrate_max_yaw=700\r\n/);assert.match(out,/\r\ngyro_lpf_hz=250\r\n/);
     assert.ok(!/\r\nsaved:/.test(out.slice(out.indexOf('defaults_group: pid'))),'no save after defaults');

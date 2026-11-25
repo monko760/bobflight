@@ -13,7 +13,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {spawnSync}=require('node:child_process');
 const {parseMotorDirectionGetReply,parseMotorDirectionSetReply,parseMixerReport,motorDirectionView,MockMotorDirection,
-  MOTOR_DIRECTION_ARMED_LINE,MOTOR_DIRECTION_MOTOR_TEST_LINE,MOTOR_DIRECTION_INVALID_LINE,parseStorage,parseConfigurationExport,STORAGE_SCOPE_V13,CONFIG_EXPORT_MAX_BYTES}=require('../../bobflight-configurator/protocol/dist');
+  MOTOR_DIRECTION_ARMED_LINE,MOTOR_DIRECTION_MOTOR_TEST_LINE,MOTOR_DIRECTION_INVALID_LINE,parseStorage,parseConfigurationExport,STORAGE_SCOPE_V14,CONFIG_EXPORT_MAX_BYTES}=require('../../bobflight-configurator/protocol/dist');
 const binary=process.argv[2]?path.resolve(process.argv[2]):path.resolve(__dirname,'../../bobflight-firmware/build-contract/bobflight_host');
 const PAD=' '.repeat(64);
 function run(cmds,reinit=false){
@@ -33,7 +33,7 @@ const norm=s=>s.replace(/\r/g,'');
   const m=new RegExp(`#define ${name} "([^"]*)"`).exec(h);assert.ok(m,name);assert.equal(m[1],want,name);
  }
 }
-// 1. Defaults: props-out, report == mock, view, storage schema 13.
+// 1. Defaults: props-out, report == mock, view, storage schema 14.
 {
  const o=run(['get motor_direction','mixer','storage']);
  assert.deepEqual(gets(o),[new MockMotorDirection('props-out').handle('get motor_direction',false)]);
@@ -41,7 +41,7 @@ const norm=s=>s.replace(/\r/g,'');
  assert.equal(norm(reports(o)[0]),norm(new MockMotorDirection('props-out').report()),'FW props-out report == mock');
  const v=motorDirectionView(parseMotorDirectionGetReply(gets(o)[0]),parseMixerReport(reports(o)[0]));
  assert.deepEqual([v.held,v.selected,v.mixerDirection,v.yaw.join(' ')],['props-out','props-out','props-out','-1 +1 +1 -1']);
- const st=storage(o);assert.equal(st.schema,13);assert.equal(st.scope,STORAGE_SCOPE_V13);
+ const st=storage(o);assert.equal(st.schema,14);assert.equal(st.scope,STORAGE_SCOPE_V14);
 }
 // 2. set -> get -> mixer (the Configurator order); refusals verbatim, value unchanged; replies == mock.
 {
@@ -67,6 +67,6 @@ const norm=s=>s.replace(/\r/g,'');
  const o=run(['set motor_direction props-in','save','reboot',PAD,'get motor_direction','mixer','storage'],true);
  assert.equal(gets(o).at(-1),'motor_direction=props-in\r\n');
  assert.equal(norm(reports(o).at(-1)),norm(new MockMotorDirection('props-in').report()));
- const st=storage(o);assert.equal(st.dirty,false);assert.equal(st.schema,13);
+ const st=storage(o);assert.equal(st.dirty,false);assert.equal(st.schema,14);
 }
 console.log('PASS firmware motor_direction CLI -> Configurator parsers/view: default props-out, mixer report == mock (signs -1 +1 +1 -1 / +1 -1 -1 +1), set -> get -> mixer replies == mock, refusal lines == FW header and verbatim with the value unchanged, diff/dump parsed under 3072 B, defaults <group> keeps props-in, save + reboot keeps props-in. Host build.');

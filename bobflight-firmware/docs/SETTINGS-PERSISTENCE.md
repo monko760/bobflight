@@ -60,6 +60,18 @@ Load rules:
 - After two schema 14 Saves: schema 13 firmware reports `fresh_install_required` and runs on defaults.
   Nothing is erased; upgrading again restores the schema 14 settings.
 
+### Release note (schema 14)
+
+The repository keeps no CHANGELOG or release-notes file; this section and the PR body carry the N3
+release note. The Configurator shows the same words in the storage panel while `stored_schema: 13`.
+
+- Saved settings from schema 13 carry over; the next Save rewrites them as schema 14.
+- After this Save, older (schema 13) firmware would load the previous saved copy; after a second Save it would start from defaults. Back up with diff all first.
+- Settings were written by newer firmware. Update firmware to change them; Save is refused so nothing is lost.
+  (Shown when `last_error: newer_settings`.)
+- Matek F722-PX version suffix `store13` is now `store14`. Exports carry `# schema: 14`; imports accept
+  schema 13 and 14 backups.
+
 ### `storage` line `stored_schema`
 
 `stored_schema: 14|13|none` is the schema of the record the last load or verified save used: `13` means

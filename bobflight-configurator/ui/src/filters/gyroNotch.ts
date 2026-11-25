@@ -11,7 +11,7 @@
  */
 import {
   GYRO_NOTCH_INDEXES, GYRO_NOTCH_UNKNOWN, notchCenterKey, notchCutoffKey, notchPairProblem, notchWritePlan,
-  parseFiltersReport, parseStorage, notchRowView,
+  parseFiltersReport, parseStorage, notchRowView, STORAGE_SCHEMA,
   type FiltersReportResult, type GyroNotchIndex, type NotchGetResult, type NotchPair, type NotchRowView, type SettingsKey,
 } from "../protocol";
 import type { CliCommand } from "../protocol/types";
@@ -67,7 +67,7 @@ export async function readNotches(host: NotchHost): Promise<NotchSnapshot> {
     const declared = /^schema: (\d+)\r?$/m.exec(raw);
     // An explicitly incompatible format is unsupported, not an unknown schema
     // that would allow legacy settings through the feature-presence fallback.
-    if (declared && Number(declared[1]) !== 13) snap.schema = 0;
+    if (declared && Number(declared[1]) !== STORAGE_SCHEMA) snap.schema = 0;
     else { const st = parseStorage(raw); snap.schema = st.schema; snap.fcDirty = st.dirty; }
   } catch (e) { /* Transport/partial replies remain unknown; do not invent a version. */ if (isGateNotSent(e)) snap.notRead ??= e instanceof Error ? e.message : String(e); }
   return snap;

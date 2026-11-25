@@ -17,14 +17,14 @@ assert.throws(()=>math.readRateSettings(legacy));assert.throws(()=>math.readRate
 const {parseCliInput}=loadUiTs(path.join(root,'protocol/types.ts'));
 for(const cmd of ['get rate_center_roll','set rate_center_roll 0','set rate_expo_yaw .5'])assert.equal(parseCliInput(cmd),cmd);
 for(const cmd of ['set rate_type 1','get rate_type','set rate_expo .3','set rate_type 2','set rate_type .5','set rate_center_roll -1','set rate_expo_yaw 2','set rate_type 1x','set rate_type 1\narm'])assert.equal(parseCliInput(cmd),null);
-function storage(schema=13){return `storage_api: 1\nbackend: flash\nschema: ${schema}\nstate: saved\ndirty: 0\ngeneration: 2\nlast_error: none\nscope: ${proto.STORAGE_SCOPE_V13}\narmed: 0\nbench_active: 0\ncalibration_active: 0\nflight_enabled: 0\nstorage_end: 1\n`;}
+function storage(schema=14){return `storage_api: 1\nbackend: flash\nschema: ${schema}\nstate: saved\ndirty: 0\ngeneration: 2\nlast_error: none\nscope: ${proto.STORAGE_SCOPE_V14}\narmed: 0\nbench_active: 0\ncalibration_active: 0\nflight_enabled: 0\naccel_cal_saved: no\nstored_schema: 14\nstorage_end: 1\n`;}
 function nodes(t){return Array.isArray(t)?t.flatMap(nodes):t&&typeof t==='object'?[t,...nodes(t.props?.children)]:[];}
 function text(t){return Array.isArray(t)?t.map(text).join(''):t&&typeof t==='object'?text(t.props?.children):String(t??'');}
 async function scenario(kind){
  let state=[{...draft},true,false,false,true,proto.parseStorage(storage()),'',''],i=0,ref={current:0},writes=[],saves=0,connected=true,settings={...proto.DEFAULT_SETTINGS,...Object.fromEntries(Object.entries(draft).map(([k,v])=>[k,String(v)]))};
  if(kind==='old'){settings=legacy;}
  if(kind==='armed')state[5]={...state[5],armed:true};
- const host={getConnectionStatus:()=>connected?'connected':'disconnected',getAllSettings:async()=>{if(kind==='read-failure')throw Error('serial read failed');return settings;},sendCommand:async()=>storage(kind==='old'?11:13),setSetting:async(k,v)=>{writes.push([k,v]);if(kind==='write-failure'&&writes.length===2)throw Error('serial write failed');settings[k]=v;},saveSettings:async()=>{saves++;}};
+ const host={getConnectionStatus:()=>connected?'connected':'disconnected',getAllSettings:async()=>{if(kind==='read-failure')throw Error('serial read failed');return settings;},sendCommand:async()=>storage(kind==='old'?11:14),setSetting:async(k,v)=>{writes.push([k,v]);if(kind==='write-failure'&&writes.length===2)throw Error('serial write failed');settings[k]=v;},saveSettings:async()=>{saves++;}};
  const react={...require('react'),useState:init=>{const n=i++;if(!(n in state))state[n]=typeof init==='function'?init():init;return[state[n],v=>state[n]=typeof v==='function'?v(state[n]):v];},useRef:()=>ref,useCallback:f=>f,useEffect:()=>{}};
  const {RatesPage}=loadUiTs(path.join(root,'pages/RatesPage.tsx'),{react,'../protocol':proto,'../hooks/useHost':{useHost:()=>({host,connectionStatus:'connected',postFlashGate:kind==='gated'})}});
  function render(){i=0;return RatesPage();}function button(label){return nodes(render()).find(n=>n.type==='button'&&text(n)===label);}

@@ -8,7 +8,7 @@ Remove every propeller. Disconnect ESC/motor power for installation and sensor c
 
 This is a fresh configuration installation. With recovery confirmed, use the established STM32 DFU procedure for a deliberate full **internal** flash erase and flash the validated `matek_f722_px` image. Do not erase external NOR or change option bytes. The build scripts only build and validate; they do not flash hardware. If flashing or image validation fails, stop rather than selecting an older HEX by accident.
 
-Expected version suffix: `store13-cal2-mount1-actual1-dshot1-flashprobe1-bb4-baro1`. Confirm target `matek_f722_px`, disarmed state, `schema: 14` (`stored_schema: 13` until the first Save after upgrading from schema 13 firmware), and four bound motor outputs. `fresh_install_required` is a stop condition, not a reason to repeatedly Save.
+Expected version suffix: `store14-cal2-mount1-actual1-dshot1-flashprobe1-bb4-baro1`. Confirm target `matek_f722_px`, disarmed state, `schema: 14` (`stored_schema: 13` until the first Save after upgrading from schema 13 firmware), and four bound motor outputs. `fresh_install_required` is a stop condition, not a reason to repeatedly Save.
 
 ## Staged tests
 

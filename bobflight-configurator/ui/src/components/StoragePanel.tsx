@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import {useEffect,useRef,useState} from 'react';
 import {useHost} from '../hooks/useHost';
-import {canSaveStorage,type StorageSnapshot} from '../protocol';
+import {canSaveStorage,STORAGE_CARRY_OVER_TEXT,STORAGE_DOWNGRADE_NOTE,STORAGE_NEWER_SETTINGS_TEXT,type StorageSnapshot} from '../protocol';
 import {runStorageGated,readStorage,saveSequence,exportSequence,describeStorageError,StorageCancelledError,type StorageAction,type StorageProblem,type StorageResult} from './storageSequence';
 import {requestRefresh,storageDirty,browserConfirm} from './storageRefresh';
 import {AccelCalSavedNote} from './AccelCalSavedNote';
@@ -73,7 +73,7 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
  const canSave=supported&&canSaveStorage(state,connected,pending||blocked);
  return <section aria-label="Controller storage" className="panel">
   <h3>Controller storage & backups</h3>
-  <p>Apply edits first, then Save to controller. This Configurator reads storage schema 13 only. Saved scope below is the list this connected firmware reports. Gyro bias is measured again at startup. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
+  <p>Apply edits first, then Save to controller. This Configurator reads storage schema 14; settings saved by schema 13 firmware carry over. Saved scope below is the list this connected firmware reports. Gyro bias is measured again at startup. Calibration numbers in exports are diagnostic metadata, not replayable calibration commands.</p>
   <p data-testid="storage-status">{!connected?'Disconnected — no current storage status.':state?`${state.backend==='flash'?'Controller flash':state.backend==='host_sim'?'Host simulation — not physical storage':'Unsupported'} · ${state.state} · ${state.dirty?'unsaved changes':'no unsaved changes'} · generation ${state.generation}`:pending?'Reading storage status…':'Storage capability not yet verified.'}</p>
   <button disabled={!canSave} onClick={()=>void run('save')}>Save to controller</button>{' '}
   <button className="ghost" disabled={!connected||pending||blocked} onClick={()=>{requestRefresh({dirty:storageDirty(state),confirm:browserConfirm,refresh:()=>void run('refresh')});}}>Refresh storage</button>{' '}
@@ -81,7 +81,12 @@ export function StoragePanel({revision=0,blocked=false,requiredScope,onPending}:
   <button disabled={!connected||!state||pending||blocked} onClick={()=>void run('dump')}>Export full configuration</button>
   <p className="muted" data-testid="diff-same-output">Export changes sends <code>diff all</code>. On current firmware, <code>diff</code> and <code>diff all</code> print the same changed-settings report. There is no profile split.</p>
   {state&&<AccelCalSavedNote raw={storageRaw}/>}
-  {state&&state.lastError!=='none'&&<p role="alert">{`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
+  {state&&state.storedSchema==='13'&&<div data-testid="storage-schema13">
+   <p data-testid="storage-carry-over">{STORAGE_CARRY_OVER_TEXT}</p>
+   <p className="banner-warn" role="alert" data-testid="storage-downgrade-note">{STORAGE_DOWNGRADE_NOTE}</p>
+  </div>}
+  {state&&state.lastError==='newer_settings'&&<p role="alert" data-testid="storage-newer-settings">{STORAGE_NEWER_SETTINGS_TEXT}</p>}
+  {state&&state.lastError!=='none'&&state.lastError!=='newer_settings'&&<p role="alert">{`Controller storage notice: ${state.lastError}. Review the restored configuration before saving or testing.`}</p>}
   {state&&<p>Saved scope: {state.scope.replaceAll("_"," ").replaceAll(",",", ")}</p>}
   {blocked&&<p>Apply all edits on this page before saving, and finish any active operation.</p>}
   {!supported&&state&&<p role="alert">Update firmware to save this page’s settings. This firmware does not advertise that capability.</p>}

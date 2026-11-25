@@ -1,7 +1,8 @@
 /* Copyright 2026 Robert Leclercq — SPDX-License-Identifier: Apache-2.0 */
 /**
- * D1: the FW `storage` reply carries `accel_cal_saved: yes|no` just before
- * `storage_end: 1` (persist_accel_calibration_saved: the saved record holds an
+ * D1: the FW `storage` reply carries `accel_cal_saved: yes|no` before
+ * `storage_end: 1` (N3: `stored_schema:` follows it; read by name, never by
+ * position) (persist_accel_calibration_saved: the saved record holds an
  * accelerometer calibration). Saving after a board-alignment change drops it
  * (documented FW rule) and the save reply does not say so, so the UI shows
  * this line verbatim next to Save.
